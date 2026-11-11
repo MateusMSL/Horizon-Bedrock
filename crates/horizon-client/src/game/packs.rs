@@ -33,6 +33,10 @@ pub fn packs_dir() -> PathBuf {
 }
 mod folder;
 
+/// Where the addons are: `addons/` beside `resourcepacks/`.
+pub fn addons_dir() -> PathBuf {
+    std::env::current_dir().unwrap_or_default().join("addons")
+}
 /// `Util.getPlatform().openPath`: the system file manager on the folder.
 pub fn open_folder(dir: &Path) {
     if let Err(e) = folder::command(dir).and_then(|mut command| command.spawn()) {
@@ -62,13 +66,13 @@ pub fn startup_root(
     selected: &[String],
     server: &[Pack],
 ) -> std::io::Result<PathBuf> {
-    let all = packs::discover(vanilla, &packs_dir());
+    let all = packs::discover_all(vanilla, &packs_dir(), &addons_dir());
     let mut enabled = packs::enabled(&all, selected);
     enabled.extend_from_slice(server);
     packs::resource_root(base, &enabled, &cache_dir())
 }
 fn info(p: &Pack) -> PackInfo {
-    let built_in = !p.id.starts_with("file/");
+    let built_in = !(p.id.starts_with("file/") || packs::is_addon_id(&p.id));
     PackInfo {
         id: p.id.clone(),
         title: p.title.clone(),
@@ -163,6 +167,10 @@ pub(super) fn save_pack_options(
     }
     packs::set_polytone_choices(all);
 }
+/// Packs the Addons screen lists: the `addons/` folder's.
+pub(super) fn addon_infos() -> Vec<PackInfo> {
+    packs::addons(&addons_dir()).iter().map(info).collect()
+}
 impl Game<'_> {
     pub(super) fn vanilla_root(&self) -> PathBuf {
         if self.ui.vanilla_root.as_os_str().is_empty() {
@@ -198,6 +206,7 @@ impl Game<'_> {
         o.pack_browser = browsing;
         o.pack_infos = infos;
         o.pack_configs = configs;
+        o.addon_infos = addon_infos();
         o.pack_selection = self.settings.resource_packs.clone();
         o.pack_screen = None;
     }
@@ -265,7 +274,7 @@ impl Game<'_> {
     /// screen again, with the error.
     fn selection_reload_failed(&mut self, error: &str) {
         log::warn!("Horizon: resource reload failed: {error}");
-        let all = packs::discover(&self.vanilla_root(), &packs_dir());
+        let all = packs::discover_all(&self.vanilla_root(), &packs_dir(), &addons_dir());
         if packs::able_to_clear_any_pack(&all, &self.settings.resource_packs) {
             // clearResourcePacksOnError.
             log::info!("Caught error loading resourcepacks, removing all selected resourcepacks");
@@ -363,6 +372,7 @@ impl Game<'_> {
             pack,
             textures,
             cem,
+            bedrock,
             block_entity_shapes,
             sounds,
             ui_metadata,
@@ -452,6 +462,12 @@ impl Game<'_> {
             .cem
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = cem;
+        *self
+            .res
+            .mob_data()
+            .bedrock
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = bedrock;
         self.res
             .block_entity_render()
             .set_shapes(block_entity_shapes);
@@ -576,12 +592,21 @@ pub(super) fn stage_pack(
         panorama: Arc::new(panorama.unwrap_or_else(|p| std::panic::resume_unwind(p))),
     };
     progress.set(2);
+    // The grass, foliage and dry foliage colormaps are the new root's (`GrassColorReloadListener`):
+    // a pack's own tint, or vanilla's back once it is off.
+    let biomes = match horizon_client::biome::Biomes::load(&root) {
+        Ok(biomes) => Arc::new(biomes),
+        Err(e) => {
+            log::warn!("Horizon: the biome colormaps of the new resources are not read: {e}");
+            context.biomes.clone()
+        }
+    };
     let pack = PackResources::load(
         &root,
         assets.clone(),
         render,
         res.facts(),
-        context.biomes.clone(),
+        biomes,
         context.light.clone(),
     )?;
     let textures = prepare_renderer_textures(&pack);
@@ -589,6 +614,7 @@ pub(super) fn stage_pack(
         &root,
         res.mob_types(),
     ));
+    let bedrock = Arc::new(horizon_client::mobs::bedrock::BedrockMobs::load(&root));
     let block_entity_shapes = res.block_entity_render().shapes_for(&root);
     progress.set(3);
     Ok(StagedPack {
@@ -597,6 +623,7 @@ pub(super) fn stage_pack(
         pack,
         textures,
         cem,
+        bedrock,
         block_entity_shapes,
         sounds,
         ui_metadata,
@@ -613,6 +640,8 @@ pub(super) struct StagedPack {
     pub textures: PreparedTextures,
     /// The packs' custom entity models (OptiFine CEM).
     pub cem: Arc<horizon_client::mobs::cem::CemModels>,
+    /// The Bedrock packs' look for mobs.
+    pub bedrock: Arc<horizon_client::mobs::bedrock::BedrockMobs>,
     /// The block entities' models, the packs' custom entity models over vanilla's.
     pub block_entity_shapes: Arc<horizon_client::block_entity_render::BlockEntityShapes>,
     /// The root's sound events, GUI sprite metadata and current language.

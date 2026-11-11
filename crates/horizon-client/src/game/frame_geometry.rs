@@ -447,6 +447,17 @@ impl Game<'_> {
             } else {
                 horizon_client::cit::Hand::Main
             };
+            // The pack's attachable for this item, as it dresses the first-person view model
+            // (`bedrock.rs`), in place of the game's own model. The game's own use poses turn
+            // its models, so the pack gets the hand where it rests.
+            let rest = to_world
+                * horizon_client::first_person::item_pose(left, inverse_height, 0.0, ItemPose::Using);
+            let mut dressed = Vec::new();
+            if self.first_person_pack_item(&stack.item, hand == Hand::Off, a, rest, packed, &mut dressed) {
+                runs.push((out.len() as u32, item_id));
+                out.append(&mut dressed);
+                continue;
+            }
             let state = self.resolve_item_in_hand(&stack, context, Some(&owner), seed, cit_hand);
             // Combat feel Legacy: 1.8.9's pose for a flat item drawn with vanilla's display.
             if self.settings.extras.pvp.combat.legacy

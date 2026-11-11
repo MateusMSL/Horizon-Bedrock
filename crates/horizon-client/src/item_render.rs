@@ -840,6 +840,110 @@ impl ItemRenderer {
             cit,
         })
     }
+    /// What an item draws in the inventory and where each picture comes from, for
+    /// `bedrock-debug.json`'s `items`: the definition file, the model file, and for every
+    /// sprite the file read, its size, dimensions and a hash (the same hash as another run's or
+    /// another pack's file means the same picture).
+    pub fn describe(&self, item: &str) -> Vec<String> {
+        let id = if item.contains(':') {
+            item.to_owned()
+        } else {
+            format!("minecraft:{item}")
+        };
+        let (namespace, name) = id.split_once(':').unwrap_or(("minecraft", &id));
+        let root = &self.sprites.root;
+        let head = |path: PathBuf| -> String {
+            match fs::read_to_string(&path) {
+                Ok(text) => {
+                    let flat: String = text.split_whitespace().collect();
+                    flat.chars().take(320).collect()
+                }
+                Err(e) => format!("({e})"),
+            }
+        };
+        let mut out = vec![format!(
+            "item {id}: definition {} {}",
+            if self.models.definitions.contains_key(&id) {
+                "loaded"
+            } else {
+                "NOT loaded"
+            },
+            head(root.join(format!("assets/{namespace}/items/{name}.json")))
+        )];
+        let stack = StackView::new(&id, 1);
+        let ctx = Context {
+            display: DisplayContext::Gui,
+            owner: None,
+            level: None,
+            seed: 0,
+        };
+        let resolved = self.models.resolve(&stack, &ctx, &horizon_assets::item_model::NoEnv);
+        for layer in resolved.layers {
+            let model = match layer.content {
+                LayerContent::Model { model } => model,
+                LayerContent::Missing => {
+                    out.push("  layer: missing model".into());
+                    continue;
+                }
+                LayerContent::Special { base, .. } => {
+                    out.push(format!("  layer: special model on base {base}"));
+                    base
+                }
+            };
+            let (model_namespace, model_path) =
+                model.split_once(':').unwrap_or(("minecraft", &model));
+            let baked = self.bake(&model);
+            out.push(format!(
+                "  model {model}: {} quads; file {}",
+                baked.quads.len(),
+                head(root.join(format!(
+                    "assets/{model_namespace}/models/{model_path}.json"
+                )))
+            ));
+            let sprites: std::collections::BTreeSet<&str> = baked
+                .quads
+                .iter()
+                .map(|q| q.material.sprite.as_str())
+                .collect();
+            for sprite in sprites {
+                let path = self.sprites.png(sprite, "textures");
+                let line = match fs::read(&path) {
+                    Ok(bytes) => {
+                        use std::hash::{Hash, Hasher};
+                        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                        bytes.hash(&mut hasher);
+                        let size = crate::hud::decode(&path)
+                            .map(|(w, h, _)| format!("{w}x{h}"))
+                            .unwrap_or_else(|_| "undecodable".into());
+                        format!(
+                            "    sprite {sprite}: {} {} bytes {size} hash {:016x}",
+                            path.display(),
+                            bytes.len(),
+                            hasher.finish()
+                        )
+                    }
+                    Err(e) => format!("    sprite {sprite}: {} ({e})", path.display()),
+                };
+                out.push(line);
+            }
+        }
+        out
+    }
+    /// Logs [`Self::describe`] for the `items` of `bedrock-debug.json` whenever that list changes.
+    pub fn report_debug_items(&self) {
+        static LAST: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let wanted = crate::mobs::bedrock_debug::settings().items.clone();
+        let mut last = LAST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if *last == wanted {
+            return;
+        }
+        for item in &wanted {
+            for line in self.describe(item) {
+                log::info!("bedrock-debug: {line}");
+            }
+        }
+        *last = wanted;
+    }
     /// `ModelBakery` item baking, cached per model.
     pub fn bake(&self, model: &str) -> Arc<BakedItemModel> {
         if let Ok(cache) = self.baked.lock()

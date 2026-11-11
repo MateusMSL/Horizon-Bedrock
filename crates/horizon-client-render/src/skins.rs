@@ -761,7 +761,15 @@ pub fn offline_cape() -> Option<&'static [u8]> {
 /// launcher/src/skins.rs): its 64x64 RGBA as `process_legacy_skin` lays it
 /// out, and whether it is slim. Read once.
 pub fn offline_skin() -> Option<&'static (Vec<u8>, bool)> {
-    static SKIN: std::sync::OnceLock<Option<(Vec<u8>, bool)>> = std::sync::OnceLock::new();
+    offline_skins().as_ref().map(|(skin, _)| skin)
+}
+/// `offline_skin`'s alpha-true copy (`process_skin_raw`).
+pub fn offline_skin_raw() -> Option<&'static [u8]> {
+    offline_skins().as_ref().map(|(_, raw)| raw.as_slice())
+}
+type OfflineSkin = Option<((Vec<u8>, bool), Vec<u8>)>;
+fn offline_skins() -> &'static OfflineSkin {
+    static SKIN: std::sync::OnceLock<OfflineSkin> = std::sync::OnceLock::new();
     SKIN.get_or_init(|| {
         let path = std::env::var_os("HORIZON_OFFLINE_SKIN").filter(|p| !p.is_empty())?;
         let model = std::env::var("HORIZON_OFFLINE_SKIN_MODEL").unwrap_or_default();
@@ -769,13 +777,16 @@ pub fn offline_skin() -> Option<&'static (Vec<u8>, bool)> {
             .inspect_err(|e| eprintln!("Horizon: no offline skin ({}): {e}", path.display()))
             .ok()
     })
-    .as_ref()
 }
-fn read_offline_skin(path: &std::path::Path, model: &str) -> Result<(Vec<u8>, bool), String> {
+fn read_offline_skin(
+    path: &std::path::Path,
+    model: &str,
+) -> Result<((Vec<u8>, bool), Vec<u8>), String> {
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
     let (w, h, rgba) = crate::hud::decode_bytes(&bytes).map_err(|e| e.to_string())?;
     let skin = process_legacy_skin(w, h, &rgba).ok_or("not a 64x64 or 64x32 skin")?;
-    Ok((skin, model == "slim"))
+    let raw = process_skin_raw(w, h, &rgba).ok_or("not a 64x64 or 64x32 skin")?;
+    Ok(((skin, model == "slim"), raw))
 }
 
 /// The signed-in account's own profile properties (`Minecraft.profileFuture`:
@@ -847,6 +858,33 @@ pub fn lookup(
 /// get the 64x64 layout, and the opaque parts lose their alpha. `None` for
 /// any other size (the download fails).
 pub fn process_legacy_skin(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
+    lay_out_skin(width, height, rgba, true)
+}
+
+/// The same 64x64 layout with the skin's own alpha kept: what a Bedrock pack's
+/// model samples (the base layer's unused texels stay transparent, where the
+/// game's `setNoAlpha` makes them opaque black).
+pub fn process_skin_raw(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
+    lay_out_skin(width, height, rgba, false)
+}
+
+/// Where the Bedrock path finds the alpha-true copy of the skin at `location`:
+/// downloaded and launcher skins have one beside them, the game's own default
+/// skins are untouched and answer themselves.
+pub fn raw_skin_location(location: &str) -> String {
+    if let Some(digest) = location.strip_prefix("skins/") {
+        format!("skins-raw/{digest}")
+    } else if location == OFFLINE_SKIN {
+        OFFLINE_SKIN_RAW.to_owned()
+    } else {
+        location.to_owned()
+    }
+}
+/// The atlas name of the launcher's offline skin, and of its alpha-true copy.
+pub const OFFLINE_SKIN: &str = "horizon/offline_skin";
+pub const OFFLINE_SKIN_RAW: &str = "horizon/offline_skin_raw";
+
+fn lay_out_skin(width: u32, height: u32, rgba: &[u8], opaque_base: bool) -> Option<Vec<u8>> {
     if width != 64 || height != 32 && height != 64 {
         return None;
     }
@@ -887,7 +925,9 @@ pub fn process_legacy_skin(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u
             }
         }
     };
-    no_alpha(&mut img, 0, 0, 32, 16);
+    if opaque_base {
+        no_alpha(&mut img, 0, 0, 32, 16);
+    }
     if legacy {
         // doNotchTransparencyHack: a fully opaque hat layer is cleared.
         let opaque = (32..64).all(|x| (0..32).all(|y| img[at(x, y) + 3] >= 128));
@@ -899,8 +939,10 @@ pub fn process_legacy_skin(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u
             }
         }
     }
-    no_alpha(&mut img, 0, 16, 64, 32);
-    no_alpha(&mut img, 16, 48, 48, 64);
+    if opaque_base {
+        no_alpha(&mut img, 0, 16, 64, 32);
+        no_alpha(&mut img, 16, 48, 48, 64);
+    }
     Some(img)
 }
 
@@ -911,8 +953,8 @@ pub fn process_legacy_skin(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u
 pub struct Downloader {
     root: std::path::PathBuf,
     states: std::collections::HashMap<(Kind, String), Download>,
-    done: std::sync::mpsc::Receiver<((Kind, String), Option<Vec<u8>>)>,
-    send: std::sync::mpsc::Sender<((Kind, String), Option<Vec<u8>>)>,
+    done: std::sync::mpsc::Receiver<((Kind, String), Option<(Vec<u8>, Option<Vec<u8>>)>)>,
+    send: std::sync::mpsc::Sender<((Kind, String), Option<(Vec<u8>, Option<Vec<u8>>)>)>,
     ready: Vec<(String, Vec<u8>)>,
     /// Locations already in `ready`, so `again` does not double-queue.
     queued: std::collections::HashSet<String>,
@@ -947,11 +989,11 @@ pub struct Downloader {
 /// `in_flight` is given back and the texture is retried after the wait, where an answer that never
 /// came kept the key `Pending` for good and, with the bound, the place taken for the session.
 struct Answer {
-    send: std::sync::mpsc::Sender<((Kind, String), Option<Vec<u8>>)>,
+    send: std::sync::mpsc::Sender<((Kind, String), Option<(Vec<u8>, Option<Vec<u8>>)>)>,
     key: Option<(Kind, String)>,
 }
 impl Answer {
-    fn give(&mut self, image: Option<Vec<u8>>) {
+    fn give(&mut self, image: Option<(Vec<u8>, Option<Vec<u8>>)>) {
         if let Some(key) = self.key.take() {
             let _ = self.send.send((key, image));
         }
@@ -1099,9 +1141,14 @@ impl Downloader {
         while let Ok((key, image)) = self.done.try_recv() {
             self.in_flight = self.in_flight.saturating_sub(1);
             let state = match image {
-                Some(rgba) => {
+                Some((rgba, raw)) => {
                     match key.0 {
-                        Kind::Skin => self.queue(skin_location(&key.1), rgba),
+                        Kind::Skin => {
+                            if let Some(raw) = raw {
+                                self.queue(raw_skin_location(&skin_location(&key.1)), raw);
+                            }
+                            self.queue(skin_location(&key.1), rgba);
+                        }
                         Kind::Cape => self.queue(cape_location(&key.1), rgba),
                         Kind::Elytra => {}
                     }
@@ -1162,16 +1209,16 @@ impl Downloader {
         digest: &str,
         url: &str,
         fetch: impl FnOnce(&str) -> Option<Vec<u8>>,
-    ) -> Option<Vec<u8>> {
+    ) -> Option<(Vec<u8>, Option<Vec<u8>>)> {
         let file = root
             .join(if digest.len() > 2 { &digest[..2] } else { "xx" })
             .join(digest);
-        let decode = |bytes: &[u8]| -> Option<Vec<u8>> {
+        let decode = |bytes: &[u8]| -> Option<(Vec<u8>, Option<Vec<u8>>)> {
             let (w, h, rgba) = crate::hud::decode_bytes(bytes).ok()?;
             match kind {
-                Kind::Skin => process_legacy_skin(w, h, &rgba),
-                Kind::Cape => process_cape(w, h, &rgba),
-                Kind::Elytra => Some(rgba),
+                Kind::Skin => Some((process_legacy_skin(w, h, &rgba)?, process_skin_raw(w, h, &rgba))),
+                Kind::Cape => Some((process_cape(w, h, &rgba)?, None)),
+                Kind::Elytra => Some((rgba, None)),
             }
         };
         if let Some(image) = std::fs::read(&file).ok().and_then(|b| decode(&b)) {
@@ -1237,6 +1284,31 @@ impl Downloader {
             return false;
         };
         self.queue(location.to_owned(), image);
+        self.again_raw(location);
+        true
+    }
+    /// The alpha-true copy of the downloaded skin at `location` (`raw_skin_location`) goes up
+    /// again, from memory or the disk cache; `false` for any other location or no image.
+    pub fn again_raw(&mut self, location: &str) -> bool {
+        let Some(digest) = location.strip_prefix("skins/") else {
+            return false;
+        };
+        let raw = raw_skin_location(location);
+        if self.queued.contains(&raw) {
+            return true;
+        }
+        let image = self.images.get(&raw).cloned().or_else(|| {
+            let file = self
+                .root
+                .join(if digest.len() > 2 { &digest[..2] } else { "xx" })
+                .join(digest);
+            let (w, h, rgba) = crate::hud::decode_bytes(&std::fs::read(&file).ok()?).ok()?;
+            process_skin_raw(w, h, &rgba)
+        });
+        let Some(image) = image else {
+            return false;
+        };
+        self.queue(raw, image);
         true
     }
     /// Skins that finished since the last call: texture id and 64x64 RGBA.
@@ -1250,6 +1322,11 @@ impl Downloader {
     pub fn drawn(&mut self, location: &str) {
         if !self.drawn.contains(location) {
             self.drawn.insert(location.to_owned());
+            // The alpha-true copy a Bedrock model samples keeps its slot with it.
+            let raw = raw_skin_location(location);
+            if raw != location {
+                self.drawn.insert(raw);
+            }
         }
     }
     /// The skins and capes drawn since the last call.
@@ -1483,8 +1560,9 @@ mod tests {
         for (h, model, slim) in [(64, "slim", true), (32, "classic", false), (64, "", false)] {
             let (bytes, rgba) = png(64, h);
             std::fs::write(&file, bytes).unwrap();
-            let (skin, is_slim) = super::read_offline_skin(&file, model).unwrap();
+            let ((skin, is_slim), raw) = super::read_offline_skin(&file, model).unwrap();
             assert_eq!(skin, super::process_legacy_skin(64, h, &rgba).unwrap());
+            assert_eq!(raw, super::process_skin_raw(64, h, &rgba).unwrap());
             assert_eq!(skin.len(), 64 * 64 * 4);
             assert_eq!(is_slim, slim);
         }
@@ -1730,6 +1808,27 @@ mod tests {
         assert!(slots.contains("skins/b") && slots.contains("skins/c"));
     }
 
+    /// A Bedrock model samples the skin with its own alpha: the base layer's unused
+    /// texels stay transparent there, and opaque in the game's own copy.
+    #[test]
+    fn the_raw_skin_keeps_its_alpha() {
+        let skin = vec![0u8; 64 * 64 * 4];
+        let opaque = super::process_legacy_skin(64, 64, &skin).unwrap();
+        let raw = super::process_skin_raw(64, 64, &skin).unwrap();
+        let at = |x: usize, y: usize| (y * 64 + x) * 4 + 3;
+        assert_eq!(opaque[at(24, 0)], 255);
+        assert_eq!(raw[at(24, 0)], 0);
+        assert_eq!(raw[at(40, 8)], 0);
+        assert_eq!(
+            super::raw_skin_location("skins/abc"),
+            "skins-raw/abc".to_owned()
+        );
+        assert_eq!(
+            super::raw_skin_location("entity/player/wide/steve"),
+            "entity/player/wide/steve".to_owned()
+        );
+    }
+
     /// A skin evicted from the atlas re-uploads (`again`), once per ask.
     #[test]
     fn evicted_skins_upload_again() {
@@ -1940,13 +2039,13 @@ mod tests {
                 |_| fetched.clone(),
             )
         };
-        assert_eq!(load(Some(&body)), Some(vec![7, 8, 9, 255]));
+        assert_eq!(load(Some(&body)), Some((vec![7, 8, 9, 255], None)));
         assert_eq!(std::fs::read(&file).unwrap(), body);
         // From then on the cache answers; no fetch is needed.
-        assert_eq!(load(None), Some(vec![7, 8, 9, 255]));
+        assert_eq!(load(None), Some((vec![7, 8, 9, 255], None)));
         // A broken file is fetched again and replaced, not kept.
         std::fs::write(&file, b"<html>not a png</html>").unwrap();
-        assert_eq!(load(Some(&body)), Some(vec![7, 8, 9, 255]));
+        assert_eq!(load(Some(&body)), Some((vec![7, 8, 9, 255], None)));
         assert_eq!(std::fs::read(&file).unwrap(), body);
         // A body that does not decode is not cached at all.
         std::fs::remove_dir_all(&root).unwrap();

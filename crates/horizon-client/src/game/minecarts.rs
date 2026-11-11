@@ -214,7 +214,8 @@ fn push_along(push: Vec3, movement: Vec3) -> Vec3 {
     }
 }
 /// AbstractMinecart passenger attachment Y (EntityAttachments).
-const PASSENGER_Y: f64 = 0.1875;
+/// Raised 0.47 so the rider's shoulders clear the rim, as in Bedrock.
+const PASSENGER_Y: f64 = 0.1875 + 0.47;
 /// The minecart's passenger attachment minus Player.DEFAULT_VEHICLE_ATTACHMENT.
 pub(super) const SEAT: f64 = PASSENGER_Y - 0.6;
 /// The placeholder container key under which an open cart's items live.
@@ -2034,7 +2035,10 @@ impl Game<'_> {
         let mut c = self.carts[i].clone();
         let alive = self.tick_cart(&mut c, intent, i, &mut CartIndex::default());
         if let Some(p) = self.player.as_mut() {
-            self.previous_position = p.position;
+            // The seat the cart had a tick ago, as the cart itself is drawn from: the player's own
+            // position here has already fallen a tick of gravity, and drawn from there the rider
+            // jumped up and down.
+            self.previous_position = Vec3::new(c.previous.x, c.previous.y + SEAT, c.previous.z);
             p.position = Vec3::new(c.position.x, c.position.y + SEAT, c.position.z);
             p.velocity = Vec3::ZERO;
             p.fall_distance = 0.0;
@@ -2845,7 +2849,27 @@ impl Game<'_> {
                 c.position.z.floor() as i32,
             );
             let packed = (u32::from(l >> 4) * 16) | ((u32::from(l & 15) * 16) << 8);
-            if let Some(state) = shown.unwrap_or_else(|| self.display_state(c)) {
+            // A pack's minecart: its own cart with its chest, hopper, TNT or command block in it
+            // (Bedrock's carts of those kinds), or its plain cart under the game's display block
+            // (a furnace or spawner cart, a custom block).
+            let pack_block = c.custom_display.is_none()
+                && matches!(
+                    c.kind,
+                    CartKind::Chest | CartKind::Hopper | CartKind::Tnt | CartKind::CommandBlock
+                )
+                && self.pack_draws(c.kind.id());
+            let pack_cart = if pack_block {
+                Some(c.kind.id())
+            } else {
+                self.pack_draws("minecraft:minecart")
+                    .then_some("minecraft:minecart")
+            };
+            let shown_block = if pack_block {
+                None
+            } else {
+                shown.unwrap_or_else(|| self.display_state(c))
+            };
+            if let Some(state) = shown_block {
                 let display = base
                     * glam::Mat4::from_scale(glam::Vec3::splat(0.75))
                     * glam::Mat4::from_translation(glam::Vec3::new(
@@ -2885,8 +2909,25 @@ impl Game<'_> {
                 }
             }
             let m = base * glam::Mat4::from_scale(glam::Vec3::new(-1.0, -1.0, 1.0));
-            let poses = Poses::new(model);
-            horizon_client::mobs::render::draw(model, m, &poses, uv, 0xFFFF_FFFF, packed, 0, out);
+            // The pack's cart, when it has one (`pack_proxy.rs`).
+            let pack = pack_cart.is_some_and(|entity| {
+                self.pack_cart(
+                    entity,
+                    c.id,
+                    glam::DVec3::new(x, y, z),
+                    (yaw, pitch),
+                    m,
+                    packed,
+                    |pm| pm.hurt_time = c.hurt_time,
+                    camera,
+                    alpha,
+                    out,
+                )
+            });
+            if !pack {
+                let poses = Poses::new(model);
+                horizon_client::mobs::render::draw(model, m, &poses, uv, 0xFFFF_FFFF, packed, 0, out);
+            }
             self.finish_entity_occlusion(culling, c, out, entity_start);
         }
     }

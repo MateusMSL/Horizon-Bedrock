@@ -35,3 +35,8 @@
 
 # Release-only compiled original exporter bundle.
 /exporters/
+/resourcepacks
+/addons
+.idea/
+*.iml
+aplicar-bedrock.ps1

@@ -124,6 +124,8 @@
   "horizon.studio.path.locked": "Reprodução do caminho da câmera do estúdio ativada",
   "horizon.studio.path.unlocked": "Reprodução do caminho da câmera do estúdio parada",
   "horizon.studio.path.usage": "Uso: /studio path <lock|unlock> (adicione pelo menos um quadro-chave primeiro)",
+  "horizon.pages.addons": "Addons",
+  "horizon.pages.addons.tooltip": "Add-ons do Bedrock, da pasta addons. Valem por cima dos pacotes de recursos.",
   "horizon.pages.mods": "Modificações",
   "horizon.pages.shader_packs": "Pacotes de sombreadores",
   "horizon.pages.shader_options": "Opções de sombreamento",

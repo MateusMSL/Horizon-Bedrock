@@ -1,0 +1,3539 @@
+diff --git a/.gitignore b/.gitignore
+index 469760ca63..37bf581166 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -35,3 +35,5 @@
+ 
+ # Release-only compiled original exporter bundle.
+ /exporters/
++/resourcepacks
++/addons
+diff --git a/Cargo.toml b/Cargo.toml
+index b1e33077e8..27116f9db3 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -47,6 +47,7 @@ members = [
+     "crates/horizon-shaders",
+     "crates/horizon-optifine",
+     "crates/horizon-polytone",
++    "crates/horizon-bedrock",
+     "crates/horizon-shader-api",
+     "crates/horizon-release-sign",
+     "crates/horizon-mod-deps",
+diff --git a/crates/horizon-assets/src/item_model.rs b/crates/horizon-assets/src/item_model.rs
+index 79a2fb6b53..b5cf4b7220 100644
+--- a/crates/horizon-assets/src/item_model.rs
++++ b/crates/horizon-assets/src/item_model.rs
+@@ -766,11 +766,22 @@ impl SelectProperty {
+                 DisplayContext::by_name(&s).ok_or_else(|| err("invalid display context"))?;
+                 Value::String(s)
+             }
+-            Self::Component(_) => v.clone(),
++            Self::Component(component) => canonical_component(component, v),
+         })
+     }
+ }
+ 
++/// A component value in the one form the codec reads both ways: `potion_contents` is a bare
++/// potion id or an object, and a `component` select compares the two as equal.
++fn canonical_component(component: &str, v: &Value) -> Value {
++    match v {
++        Value::String(potion) if component == "minecraft:potion_contents" => {
++            serde_json::json!({ "potion": potion })
++        }
++        _ => v.clone(),
++    }
++}
++
+ #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+ pub enum CompassTarget {
+     None,
+@@ -1490,7 +1501,9 @@ impl Resolve<'_> {
+             SelectProperty::ContextDimension => {
+                 self.ctx.level.map(|l| Value::String(l.dimension.clone()))
+             }
+-            SelectProperty::Component(component) => self.component(component).cloned(),
++            SelectProperty::Component(component) => self
++                .component(component)
++                .map(|v| canonical_component(component, v)),
+         }
+     }
+     fn numeric(&self, property: &NumericProperty) -> f32 {
+diff --git a/crates/horizon-assets/src/item_model/tests.rs b/crates/horizon-assets/src/item_model/tests.rs
+index e20685a56a..4535e3f6e4 100644
+--- a/crates/horizon-assets/src/item_model/tests.rs
++++ b/crates/horizon-assets/src/item_model/tests.rs
+@@ -157,4 +157,47 @@ fn a_patched_stack_reads_its_patch_over_its_items_defaults() {
+         assert_eq!(view.get(key), merged.get(key), "{key}");
+     }
+     assert_eq!(view.to_map(), *merged);
++fn a_potion_contents_select_matches_the_bare_and_the_object_form() {
++    let definition = ClientItem::from_json(
++        r#"{"model":{
++        "type":"minecraft:select", "property":"minecraft:component",
++        "component":"minecraft:potion_contents",
++        "cases":[{"when":["minecraft:swiftness","minecraft:long_swiftness"],
++                  "model":{"type":"minecraft:model","model":"minecraft:item/fast"}}],
++        "fallback":{"type":"minecraft:model","model":"minecraft:item/plain"}
++    }}"#,
++    )
++    .unwrap();
++    let mut models = ItemModels::default();
++    models.definitions.insert("minecraft:potion".into(), definition);
++    models.prototypes.insert(
++        "minecraft:potion".into(),
++        BTreeMap::from([(
++            "minecraft:item_model".into(),
++            Value::String("minecraft:potion".into()),
++        )]),
++    );
++    let context = Context {
++        display: DisplayContext::Gui,
++        owner: None,
++        level: None,
++        seed: 0,
++    };
++    let chosen = |contents: Value| {
++        let mut stack = StackView::new("minecraft:potion", 1);
++        stack
++            .patch
++            .insert("minecraft:potion_contents".into(), Some(contents));
++        let resolved = models.resolve(&stack, &context, &NoEnv);
++        let LayerContent::Model { model } = &resolved.layers[0].content else {
++            panic!("expected model leaf")
++        };
++        model.clone()
++    };
++    assert_eq!(chosen(serde_json::json!("minecraft:long_swiftness")), "minecraft:item/fast");
++    assert_eq!(
++        chosen(serde_json::json!({"potion": "minecraft:swiftness"})),
++        "minecraft:item/fast"
++    );
++    assert_eq!(chosen(serde_json::json!("minecraft:poison")), "minecraft:item/plain");
+ }
+diff --git a/crates/horizon-client-lib/Cargo.toml b/crates/horizon-client-lib/Cargo.toml
+index de5a322925..1ee464acb2 100644
+--- a/crates/horizon-client-lib/Cargo.toml
++++ b/crates/horizon-client-lib/Cargo.toml
+@@ -26,6 +26,8 @@ horizon-hooks = { path = "../horizon-hooks" }
+ horizon-mcp = { path = "../horizon-mcp" }
+ # The server thread ahead of the workers (MinecraftServer.spin's Thread.setPriority).
+ horizon-optifine = { path = "../horizon-optifine" }
++# Bedrock resource packs: the look of mobs, sounds and particles (docs/bedrock.md).
++horizon-bedrock = { path = "../horizon-bedrock" }
+ horizon-threads = { path = "../horizon-threads" }
+ horizon-hdr = { path = "../horizon-hdr" }
+ horizon-world = { path = "../horizon-world" }
+diff --git a/crates/horizon-client-render/Cargo.toml b/crates/horizon-client-render/Cargo.toml
+index 4010370971..7e1aaac5ac 100644
+--- a/crates/horizon-client-render/Cargo.toml
++++ b/crates/horizon-client-render/Cargo.toml
+@@ -13,6 +13,9 @@ horizon-cosmetics = { path = "../horizon-cosmetics" }
+ # The GUI atlas's pixels, kept compressed once uploaded (hud.rs `pack_pixels`).
+ lz4_flex = { version = "0.14", default-features = false, features = ["std", "safe-encode", "safe-decode", "checked-decode"] }
+ horizon-assets = { path = "../horizon-assets" }
++# Bedrock resource packs in `resourcepacks/`, converted to Java packs when discovered.
++horizon-bedrock = { path = "../horizon-bedrock" }
++horizon-bench = { path = "../horizon-bench" }
+ horizon-client-core = { path = "../horizon-client-core" }
+ horizon-client-input = { path = "../horizon-client-input" }
+ horizon-command = { path = "../horizon-command" }
+diff --git a/crates/horizon-client-render/src/entity.wgsl b/crates/horizon-client-render/src/entity.wgsl
+index 68770d7dff..b3aefe27c4 100644
+--- a/crates/horizon-client-render/src/entity.wgsl
++++ b/crates/horizon-client-render/src/entity.wgsl
+@@ -299,6 +299,10 @@ fn entity_written_color(in: Out, color: vec4<f32>) -> vec4<f32> {
+     return entity_color(in, front);
+ }
+ fn entity_color(in: Out, front: bool) -> vec4<f32> {
++    return entity_color_cut(in, front, 0.1);
++}
++// `entity_color` dropping texels whose alpha is below `cut` (entity.fsh's 0.1).
++fn entity_color_cut(in: Out, front: bool, cut: f32) -> vec4<f32> {
+     var uv = in.uv;
+     if in.overlay == 6u { uv.y = in.wrap.x + fract(in.uv.y) * in.wrap.y; }
+     if in.overlay == 11u || in.overlay == 12u {
+@@ -327,7 +331,7 @@ fn entity_color(in: Out, front: bool) -> vec4<f32> {
+         // clouds.fsh: alpha fades out towards the cloud fog end.
+         return vec4(color.rgb, color.a * (1.0 - linear_fog(in.fog_distance.x, 0.0, globals.fog_ends.y)));
+     }
+-    if color.a < 0.1 || (in.cull != 0u && !front) { discard; }
++    if color.a < cut || (in.cull != 0u && !front) { discard; }
+     // entity.fsh calculateFinalColor: the overlay (hurt red, TNT white) over the
+     // lit texture, then the lightmap, then the glint and fog.
+     color = vec4(mix(in.overlay_color.rgb, color.rgb, in.overlay_color.a), color.a);
+@@ -349,6 +353,19 @@ fn entity_color(in: Out, front: bool) -> vec4<f32> {
+     return vec4(mix(color.rgb, globals.fog_color.rgb, f * globals.fog_color.a), color.a);
+ }
+ 
++// A bedrock material that adds its colour times its alpha (`blendSrc SourceAlpha`, `blendDst
++// One`): the lit colour with the fog taken out of it, since light added to a foggy distance
++// fades with it rather than turning fog-coloured. The blend multiplies by the alpha.
++@fragment fn fs_entity_glow(in: Out, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
++    // Light added times its alpha has no cutout: a halo fades to its faintest texel, where
++    // entity.fsh's 0.1 cut left a hard rim around it.
++    let color = entity_color_cut(in, front, 1.0 / 512.0);
++    let f = max(linear_fog(in.fog_distance.x, globals.fog.x, globals.fog.y),
++                linear_fog(in.fog_distance.y, globals.fog.z, globals.fog.w));
++    let k = clamp(f * globals.fog_color.a, 0.0, 1.0);
++    return vec4(max(color.rgb - globals.fog_color.rgb * k, vec3(0.0)), color.a);
++}
++
+ // rendertype_outline.fsh: the vertex colour (the team colour; outline vertices carry no
+ // normal, so no cardinal light) wherever the texture is not fully clear.
+ // rendertype_entity_shadow.fsh: the shadow texture times the vertex colour,
+diff --git a/crates/horizon-client-render/src/gfx.rs b/crates/horizon-client-render/src/gfx.rs
+index bb9ebde464..ac45536cbc 100644
+--- a/crates/horizon-client-render/src/gfx.rs
++++ b/crates/horizon-client-render/src/gfx.rs
+@@ -68,8 +68,8 @@ mod weather;
+ mod world_text;
+ use entity_batch::EntityBatch;
+ pub use entity_batch::{
+-    ADDITIVE_PARTICLE_OVERLAY, DISSOLVE_OVERLAY, DRAGON_RAYS_OVERLAY, ENERGY_SWIRL_OVERLAY,
+-    FLUID_OVERLAY, OIT_ENTITY, SHADOW_OVERLAY, TERRAIN_MODEL_CUTOUT_MIPPED_OVERLAY,
++    ADDITIVE, ADDITIVE_PARTICLE_OVERLAY, DISSOLVE_OVERLAY, DRAGON_RAYS_OVERLAY, ENERGY_SWIRL_OVERLAY,
++    FLUID_OVERLAY, NO_DEPTH_TEST, NO_DEPTH_WRITE, OIT_ENTITY, SHADOW_OVERLAY, TERRAIN_MODEL_CUTOUT_MIPPED_OVERLAY,
+     TERRAIN_MODEL_CUTOUT_OVERLAY, TERRAIN_MODEL_SOLID_OVERLAY, TEXT_POLYGON_OFFSET_OVERLAY,
+     TRANSLUCENT_GLINT_ITEM_OVERLAY, TRANSLUCENT_ITEM_OVERLAY, TRANSLUCENT_PARTICLE_OVERLAY,
+     WATER_MASK_OVERLAY, WORLD_TEXT_OVERLAY, WORLD_TEXT_POLYGON_OFFSET_OVERLAY, is_native_terrain,
+@@ -1205,6 +1205,9 @@ pub struct Renderer {
+     crumbling_pipeline: wgpu::RenderPipeline,
+     shadow_blob_pipeline: wgpu::RenderPipeline,
+     translucent_item_pipeline: wgpu::RenderPipeline,
++    no_depth_write_pipeline: wgpu::RenderPipeline,
++    no_depth_test_pipeline: wgpu::RenderPipeline,
++    glow_pipeline: wgpu::RenderPipeline,
+     /// `RenderPipelines.WATER_MASK`: depth writes only, no colour.
+     water_mask_pipeline: wgpu::RenderPipeline,
+     cloud_pipeline: wgpu::RenderPipeline,
+@@ -4191,6 +4194,60 @@ impl Renderer {
+             alpha_blend,
+             false,
+         );
++        // A bedrock material with `DisableDepthWrite`: blended and depth tested like the
++        // entities, hiding nothing behind it.
++        let no_depth_write_pipeline = entity_pipeline(
++            "Entities without depth writes",
++            None,
++            false,
++            wgpu::CompareFunction::GreaterEqual,
++            wgpu::DepthBiasState {
++                constant: 128,
++                slope_scale: 0.0,
++                clamp: 0.0,
++            },
++            alpha_blend,
++            false,
++        );
++        // A bedrock material that adds its colour times its alpha (`blendSrc SourceAlpha`,
++        // `blendDst One`: a glow): depth tested, no depth write, light only ever added.
++        let glow_blend = wgpu::BlendComponent {
++            src_factor: wgpu::BlendFactor::SrcAlpha,
++            dst_factor: wgpu::BlendFactor::One,
++            operation: wgpu::BlendOperation::Add,
++        };
++        let glow_pipeline = entity_pipeline_with(
++            "Entity glows",
++            None,
++            false,
++            wgpu::CompareFunction::GreaterEqual,
++            wgpu::DepthBiasState {
++                constant: 128,
++                slope_scale: 0.0,
++                clamp: 0.0,
++            },
++            wgpu::BlendState {
++                color: glow_blend,
++                alpha: wgpu::BlendComponent {
++                    src_factor: wgpu::BlendFactor::Zero,
++                    dst_factor: wgpu::BlendFactor::One,
++                    operation: wgpu::BlendOperation::Add,
++                },
++            },
++            false,
++            "fs_entity_glow",
++            wgpu::ColorWrites::ALL,
++        );
++        // A bedrock material with `DisableDepthTest`: over whatever is nearer.
++        let no_depth_test_pipeline = entity_pipeline(
++            "Entities without depth tests",
++            None,
++            false,
++            wgpu::CompareFunction::Always,
++            Default::default(),
++            alpha_blend,
++            false,
++        );
+         let cloud_pipeline = entity_pipeline(
+             "Clouds",
+             Some(wgpu::Face::Back),
+@@ -5118,6 +5175,9 @@ impl Renderer {
+             crumbling_pipeline,
+             shadow_blob_pipeline,
+             translucent_item_pipeline,
++            no_depth_write_pipeline,
++            no_depth_test_pipeline,
++            glow_pipeline,
+             water_mask_pipeline,
+             cloud_pipeline,
+             hdr_cloud_mark_pipeline,
+@@ -9545,6 +9605,9 @@ impl Renderer {
+             native_solid_quads,
+             native_cutout_quads,
+             native_cutout_mipped_quads,
++            no_depth_write_quads,
++            no_depth_test_quads,
++            glow_quads,
+         ] = self.entity_batch.update(
+             entities,
+             frame.additive,
+@@ -9576,7 +9639,10 @@ impl Renderer {
+             + world_text_offset_quads
+             + native_solid_quads
+             + native_cutout_quads
+-            + native_cutout_mipped_quads;
++            + native_cutout_mipped_quads
++            + no_depth_write_quads
++            + no_depth_test_quads
++            + glow_quads;
+         laps.lap("r_draw_lists");
+         // Where the tail of materials the classic and the improved passes
+         // both draw ends: the shadows, particles and items count back from it.
+@@ -11166,6 +11232,50 @@ impl Renderer {
+                 );
+                 pass.set_bind_group(0, &self.group, &[]);
+             }
++            // A bedrock add-on's materials without a depth write, then without a depth test:
++            // laid out right after the swirls. Its glows (added light) follow them, in either
++            // transparency path: light adds in any order.
++            if glow_quads > 0 {
++                let first = (entity_quads
++                    + text_quads
++                    + crumbling_quads
++                    + translucent_crumbling_quads
++                    + water_mask_quads
++                    + swirl_quads
++                    + no_depth_write_quads
++                    + no_depth_test_quads)
++                    * 4;
++                pass.set_bind_group(0, &self.entity_group, &[]);
++                pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
++                pass.set_pipeline(&self.glow_pipeline);
++                pass.draw_indexed(0..glow_quads * 6, first as i32, 0..1);
++                pass.set_bind_group(0, &self.group, &[]);
++            }
++            if no_depth_write_quads + no_depth_test_quads > 0 && !oit_on {
++                let first = (entity_quads
++                    + text_quads
++                    + crumbling_quads
++                    + translucent_crumbling_quads
++                    + water_mask_quads
++                    + swirl_quads)
++                    * 4;
++                pass.set_bind_group(0, &self.entity_group, &[]);
++                pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
++                for (pipeline, quads, from) in [
++                    (&self.no_depth_write_pipeline, no_depth_write_quads, first),
++                    (
++                        &self.no_depth_test_pipeline,
++                        no_depth_test_quads,
++                        first + no_depth_write_quads * 4,
++                    ),
++                ] {
++                    if quads > 0 {
++                        pass.set_pipeline(pipeline);
++                        pass.draw_indexed(0..quads * 6, from as i32, 0..1);
++                    }
++                }
++                pass.set_bind_group(0, &self.group, &[]);
++            }
+             if additive_quads > 0 && !oit_on {
+                 pass.set_bind_group(0, &self.entity_group, &[]);
+                 pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
+@@ -13843,7 +13953,7 @@ mod tests {
+         let mut batch = super::EntityBatch::default();
+         let counts = batch.update(&entities, &quad(3, 5), &quad(0, 6), &quad(0, 8), false);
+         let vertices = &batch.combined;
+-        assert_eq!(counts, [4, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]);
++        assert_eq!(counts, [4, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+         assert_eq!(
+             vertices
+                 .as_chunks::<4>()
+diff --git a/crates/horizon-client-render/src/gfx/entity_batch.rs b/crates/horizon-client-render/src/gfx/entity_batch.rs
+index 99d7d3483a..f419d1d071 100644
+--- a/crates/horizon-client-render/src/gfx/entity_batch.rs
++++ b/crates/horizon-client-render/src/gfx/entity_batch.rs
+@@ -16,7 +16,12 @@ use super::Vertex;
+ /// ignored and they stay in the first one, in their order.
+ /// Sorted still-fluid geometry follows, then the two native world-canvas text materials,
+ /// NORMAL and POLYGON_OFFSET. Material storage order is independent of their draw stages.
+-const MATERIALS: usize = 16;
++const MATERIALS: usize = 19;
++/// Order the first materials' runs are laid out in. The bedrock materials that turn the depth
++/// buffer off (16, 17), then the one that adds light (18), sit after the swirls and before the
++/// shadows, whose offsets count back from the end of the world quads; the improved transparency
++/// material stays last of the group.
++const LAYOUT_HEAD: [usize; 13] = [0, 1, 2, 3, 4, 5, 16, 17, 18, 6, 7, 8, 9];
+ pub const TERRAIN_MODEL_SOLID_OVERLAY: u32 = 42;
+ pub const TERRAIN_MODEL_CUTOUT_OVERLAY: u32 = 43;
+ pub const TERRAIN_MODEL_CUTOUT_MIPPED_OVERLAY: u32 = 44;
+@@ -41,6 +46,16 @@ pub const FLUID_OVERLAY: u32 = 41;
+ /// (`RenderTypes.entityTranslucent`, `entityTranslucentEmissive`, `eyes`,
+ /// `breezeWind`). Only the improved transparency path reads it.
+ pub const OIT_ENTITY: u32 = 1 << 24;
++/// A bit of `Vertex::layer` above `OIT_ENTITY`: the quad's material is `DisableDepthWrite`
++/// (a bedrock add-on's): blended, depth tested, hiding nothing behind it.
++pub const NO_DEPTH_WRITE: u32 = 1 << 25;
++/// A bit of `Vertex::layer` above `NO_DEPTH_WRITE`: the quad's material is `DisableDepthTest`
++/// (a bedrock add-on's): it draws over what is nearer, without writing depth either.
++pub const NO_DEPTH_TEST: u32 = 1 << 26;
++/// A bit of `Vertex::layer` above `NO_DEPTH_TEST`: the quad's material adds its colour times its
++/// alpha to what is behind (`blendSrc SourceAlpha`, `blendDst One`, a bedrock add-on's glow):
++/// depth tested, writing no depth, in either transparency path.
++pub const ADDITIVE: u32 = 1 << 27;
+ /// `RenderPipelines.DRAGON_RAYS`: untextured colour, additive with depth writes.
+ pub const DRAGON_RAYS_OVERLAY: u32 = 37;
+ /// `RenderPipelines.ENTITY_CUTOUT_DISSOLVE` (the dying dragon): a pixel is dropped where the
+@@ -82,6 +97,9 @@ pub const WORLD_TEXT_POLYGON_OFFSET_OVERLAY: u32 = 40;
+ /// The material of a quad by its overlay (`MATERIALS` order): the overlay is the layer's low 16
+ /// bits, as entity.wgsl reads it; HDR output's tier rides in the high ones.
+ fn material(layer: u32, oit: bool) -> usize {
++    if layer & ADDITIVE != 0 {
++        return 18;
++    }
+     match layer & 0xffff {
+         TERRAIN_MODEL_SOLID_OVERLAY => return 13,
+         TERRAIN_MODEL_CUTOUT_OVERLAY => return 14,
+@@ -94,6 +112,12 @@ fn material(layer: u32, oit: bool) -> usize {
+     if oit && layer & OIT_ENTITY != 0 {
+         return 9;
+     }
++    if layer & NO_DEPTH_TEST != 0 {
++        return 17;
++    }
++    if layer & NO_DEPTH_WRITE != 0 {
++        return 16;
++    }
+     match layer & 0xffff {
+         WORLD_TEXT_OVERLAY => 11,
+         WORLD_TEXT_POLYGON_OFFSET_OVERLAY => 12,
+@@ -156,8 +180,8 @@ impl EntityBatch {
+         self.combined.clear();
+         self.combined
+             .reserve(entity_vertices + additive.len() + hand.len() + see_through.len());
+-        for runs in &self.runs[..10] {
+-            for &(first, count) in runs {
++        for kind in LAYOUT_HEAD {
++            for &(first, count) in &self.runs[kind] {
+                 self.combined
+                     .extend_from_slice(&entities[first * 4..(first + count) * 4]);
+             }
+@@ -201,7 +225,7 @@ impl EntityBatch {
+                 });
+         }
+         // Native solid/cutout models are depth writing and keep their submission order.
+-        for runs in &self.runs[13..] {
++        for runs in &self.runs[13..16] {
+             for &(first, count) in runs {
+                 self.combined
+                     .extend_from_slice(&entities[first * 4..(first + count) * 4]);
+@@ -256,7 +280,7 @@ mod tests {
+             &quad(0, 12.0),
+             true,
+         );
+-        assert_eq!(counts, [1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 2, 1, 1]);
++        assert_eq!(counts, [1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 2, 1, 1, 0, 0, 0]);
+         let xs: Vec<_> = batch.combined.iter().step_by(4).map(|v| v.pos[0]).collect();
+         assert_eq!(
+             xs,
+@@ -305,7 +329,7 @@ mod tests {
+         let mut batch = EntityBatch::default();
+         assert_eq!(
+             batch.update(&entities, &additive, &quad(0, 9.0), &quad(0, 10.0), true),
+-            [1, 1, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 1, 0, 0, 0]
++            [1, 1, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 1, 0, 0, 0, 0, 0, 0]
+         );
+         let positions: Vec<_> = batch.combined.iter().step_by(4).map(|v| v.pos[0]).collect();
+         assert_eq!(
+@@ -412,16 +436,53 @@ mod tests {
+         let mut batch = EntityBatch::default();
+         // Off: the tag changes nothing, the quads keep their place.
+         let counts = batch.update(&entities, &[], &[], &[], false);
+-        assert_eq!(counts, [4, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
++        assert_eq!(counts, [4, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+         let xs: Vec<f32> = batch.combined.iter().step_by(4).map(|v| v.pos[0]).collect();
+         assert_eq!(xs, [0.0, 1.0, 2.0, 4.0, 3.0]);
+         // On: the tagged quads come last, in order.
+         let counts = batch.update(&entities, &[], &[], &[], true);
+-        assert_eq!(counts, [2, 0, 0, 0, 0, 0, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0]);
++        assert_eq!(counts, [2, 0, 0, 0, 0, 0, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+         let xs: Vec<f32> = batch.combined.iter().step_by(4).map(|v| v.pos[0]).collect();
+         assert_eq!(xs, [0.0, 2.0, 3.0, 1.0, 4.0]);
+     }
+ 
++    #[test]
++    fn bedrock_materials_sit_between_the_swirls_and_the_shadows() {
++        let quad = |layer: u32, x: f32| {
++            (0..4).map(move |_| Vertex {
++                pos: [x, 0.0, 0.0],
++                layer,
++                ..geometry(1, false)[0]
++            })
++        };
++        let entities: Vec<Vertex> = [
++            (SHADOW_OVERLAY, 0.0),
++            (NO_DEPTH_WRITE, 1.0),
++            (0, 2.0),
++            (NO_DEPTH_TEST | NO_DEPTH_WRITE, 3.0),
++            (NO_DEPTH_WRITE | OIT_ENTITY, 4.0),
++            (ADDITIVE | OIT_ENTITY | NO_DEPTH_WRITE, 5.0),
++        ]
++        .into_iter()
++        .flat_map(|(layer, x)| quad(layer, x))
++        .collect();
++        let mut batch = EntityBatch::default();
++        let xs = |batch: &EntityBatch| -> Vec<f32> {
++            batch.combined.iter().step_by(4).map(|v| v.pos[0]).collect()
++        };
++        for oit in [false, true] {
++            let counts = batch.update(&entities, &[], &[], &[], oit);
++            assert_eq!(counts[18], 1, "glow, oit {oit}");
++            assert_eq!(counts[17], 1, "no depth test, oit {oit}");
++        }
++        let counts = batch.update(&entities, &[], &[], &[], false);
++        assert_eq!((counts[16], counts[9]), (2, 0));
++        assert_eq!(xs(&batch), [2.0, 1.0, 4.0, 3.0, 5.0, 0.0]);
++        let counts = batch.update(&entities, &[], &[], &[], true);
++        assert_eq!((counts[16], counts[9]), (1, 1));
++        assert_eq!(xs(&batch), [2.0, 1.0, 3.0, 5.0, 0.0, 4.0]);
++    }
++
+     #[test]
+     fn tagged_additive_quads_join_the_last_material_only_when_on() {
+         let quad = |layer: u32, x: f32| {
+diff --git a/crates/horizon-client-render/src/hud.rs b/crates/horizon-client-render/src/hud.rs
+index 4dfbe22cca..3c3995604e 100644
+--- a/crates/horizon-client-render/src/hud.rs
++++ b/crates/horizon-client-render/src/hud.rs
+@@ -1351,7 +1351,11 @@ impl HudAtlas {
+                     maps.iter().any(Option::is_some).then(|| Box::new(maps))
+                 })
+                 .flatten();
+-            (gw <= 1024 && (gh <= 512 || name.starts_with("font/"))).then_some((
++            (gw <= 1024
++                && (gh <= 512
++                    || name.starts_with("font/")
++                    || (gh <= 1024 && name.starts_with("entity/bedrock/"))))
++            .then_some((
+                 (name, w, h, pixels),
+                 flags,
+                 gui_size,
+diff --git a/crates/horizon-client-render/src/options_ui.rs b/crates/horizon-client-render/src/options_ui.rs
+index 5ff0d1781c..343c6d1e84 100644
+--- a/crates/horizon-client-render/src/options_ui.rs
++++ b/crates/horizon-client-render/src/options_ui.rs
+@@ -1334,6 +1334,8 @@ pub enum Page {
+     Language,
+     Font,
+     Packs,
++    /// The Packs screen over the `addons/` folder (`push` stores it as `Packs`).
++    Addons,
+     Mods,
+     /// Browse mods: the registry's content mods, searched (`mod_browser`).
+     ModBrowser,
+@@ -1535,6 +1537,8 @@ pub enum Event {
+     /// Create World's Data Packs screen closed with a new selection.
+     DataPacks(Vec<String>),
+     OpenPackFolder,
++    /// The Addons screen's Open Pack Folder: create `addons/` if needed and open it.
++    OpenAddonFolder,
+     /// Data Packs' Open Pack Folder: create the folder if needed and open it.
+     OpenDataPackFolder(std::path::PathBuf),
+     OpenModFolder,
+@@ -1665,6 +1669,10 @@ pub struct OptionsUi {
+     /// Packs: the packs found and the selection the screen opens with.
+     pub pack_infos: Vec<crate::pack_screen::PackInfo>,
+     pub pack_selection: Vec<String>,
++    /// The packs of `addons/`, for the Packs page when it is the Addons screen.
++    pub addon_infos: Vec<crate::pack_screen::PackInfo>,
++    /// The Packs page is the Addons screen (`Page::Addons`).
++    addons_page: bool,
+     /// The open pack screen, made at its first frame.
+     pub pack_screen: Option<crate::pack_screen::PackScreen>,
+     /// The Packs page is Create World's Data Packs screen on this folder.
+@@ -1768,6 +1776,8 @@ impl Default for OptionsUi {
+             pack_browser: false,
+             pack_infos: Vec::new(),
+             pack_selection: Vec::new(),
++            addon_infos: Vec::new(),
++            addons_page: false,
+             pack_screen: None,
+             data_pack_dir: None,
+             data_pack_resources: Default::default(),
+@@ -2101,7 +2111,23 @@ impl OptionsUi {
+     /// Whether the resource pack screen is open (not Create World's data packs on the same
+     /// page).
+     pub fn resource_packs_open(&self) -> bool {
+-        self.page() == Page::Packs && self.data_pack_dir.is_none()
++        self.page() == Page::Packs && self.data_pack_dir.is_none() && !self.addons_page
++    }
++    /// Whether the Addons screen is open.
++    pub fn addons_open(&self) -> bool {
++        self.page() == Page::Packs && self.addons_page
++    }
++    /// The folder of `addons/` changed while the Addons screen is open: the screen is made
++    /// again over `infos`, keeping the selection made on it so far.
++    pub fn update_addon_infos(&mut self, infos: Vec<crate::pack_screen::PackInfo>) {
++        if let Some(p) = self.pack_screen.take()
++            && p.changed
++        {
++            self.pack_selection =
++                crate::packs::merge_selection(&self.pack_selection, p.commit(), true);
++            self.pack_reselected = true;
++        }
++        self.addon_infos = infos;
+     }
+     /// The packs in `resourcepacks/` changed while the pack screen is open
+     /// (`PackSelectionScreen`'s directory watcher): the screen is made again over
+@@ -2110,7 +2136,8 @@ impl OptionsUi {
+         if let Some(p) = self.pack_screen.take()
+             && p.changed
+         {
+-            self.pack_selection = p.commit();
++            self.pack_selection =
++                crate::packs::merge_selection(&self.pack_selection, p.commit(), false);
+             self.pack_reselected = true;
+         }
+         self.pack_infos = infos;
+@@ -2211,6 +2238,7 @@ impl OptionsUi {
+     pub fn open_at(&mut self, in_world: bool, page: Page) {
+         self.stack.clear();
+         self.data_pack_dir = None;
++        self.addons_page = false;
+         self.focus = None;
+         self.focus_from_keyboard = false;
+         self.can_change_value = false;
+@@ -2219,6 +2247,15 @@ impl OptionsUi {
+         self.selected_key = None;
+     }
+     fn push(&mut self, page: Page) {
++        let page = if page == Page::Addons {
++            self.addons_page = true;
++            Page::Packs
++        } else {
++            if page == Page::Packs {
++                self.addons_page = false;
++            }
++            page
++        };
+         self.stack.push(page);
+         self.scroll = 0.0;
+         self.scrollbar_drag_y = None;
+@@ -2296,6 +2333,7 @@ impl OptionsUi {
+             Page::Language => "options.language.title",
+             Page::Font => "options.font.title",
+             Page::Packs => "resourcePack.title",
++            Page::Addons => "horizon.pages.addons",
+             Page::Mods => "horizon.pages.mods",
+             Page::ModBrowser => "horizon.mods.browse.title",
+             Page::ModProject => "horizon.mods.browse.project",
+@@ -2956,6 +2994,10 @@ impl OptionsUi {
+                         "options.resourcepack",
+                         (!self.split_guest).then_some(Page::Packs),
+                     ),
++                    (
++                        "horizon.pages.addons",
++                        (!self.split_guest).then_some(Page::Addons),
++                    ),
+                     ("options.accessibility", Some(Page::Accessibility)),
+                     // Vanilla's Telemetry Data and Credits slots: Horizon's
+                     // settings and its mods, as a mod adds its button here.
+@@ -3959,6 +4001,7 @@ impl OptionsUi {
+             match action {
+                 crate::pack_screen::Action::OpenFolder => events.push(match &self.data_pack_dir {
+                     Some(dir) => Event::OpenDataPackFolder(dir.clone()),
++                    None if self.addons_page => Event::OpenAddonFolder,
+                     None => Event::OpenPackFolder,
+                 }),
+                 crate::pack_screen::Action::Done => events.extend(self.back(s)),
+@@ -4443,19 +4486,33 @@ impl OptionsUi {
+                 self.pack_focus = Instant::now();
+                 let title = if self.data_pack_dir.is_some() {
+                     "dataPack.title"
++                } else if self.addons_page {
++                    "horizon.pages.addons"
+                 } else {
+                     "resourcePack.title"
+                 };
++                // Resource packs and addons share the `resourcePacks` list: each screen
++                // shows its own kind.
++                let own = |id: &String| {
++                    self.data_pack_dir.is_some()
++                        || crate::packs::is_addon_id(id) == self.addons_page
++                };
++                let selection: Vec<String> =
++                    self.pack_selection.iter().filter(|id| own(id)).cloned().collect();
+                 let mut screen = crate::pack_screen::PackScreen::new(
+                     &m,
+                     crate::text::Text::translate(title, &[]),
+                     w,
+                     h,
+                     self.in_world,
+-                    self.pack_infos.clone(),
+-                    &self.pack_selection,
++                    if self.addons_page {
++                        self.addon_infos.clone()
++                    } else {
++                        self.pack_infos.clone()
++                    },
++                    &selection,
+                 );
+-                screen.browsing_allowed = self.pack_browser;
++                screen.browsing_allowed = self.pack_browser && !self.addons_page;
+                 screen.changed = std::mem::take(&mut self.pack_reselected);
+                 self.pack_screen = Some(screen);
+             }
+@@ -4556,6 +4613,7 @@ impl OptionsUi {
+             Page::Packs => {
+                 // PackSelectionScreen.onClose: PackSelectionModel.commit.
+                 let data = self.data_pack_dir.take();
++                let addons = std::mem::take(&mut self.addons_page);
+                 if let Some(p) = self.pack_screen.take()
+                     && p.changed
+                 {
+@@ -4566,6 +4624,7 @@ impl OptionsUi {
+                         // `PackSelectionModel.commit` already drops `server/…`
+                         // ids; keep the same filter if the screen is rebuilt.
+                         let ids = crate::packs::player_pack_ids(ids);
++                        let ids = crate::packs::merge_selection(&s.resource_packs, ids, addons);
+                         s.resource_packs = ids.clone();
+                         self.pack_selection = ids.clone();
+                         events.push(Event::Packs(ids));
+diff --git a/crates/horizon-client-render/src/options_ui_pages.rs b/crates/horizon-client-render/src/options_ui_pages.rs
+index f572ec03ee..63da2fb67b 100644
+--- a/crates/horizon-client-render/src/options_ui_pages.rs
++++ b/crates/horizon-client-render/src/options_ui_pages.rs
+@@ -85,6 +85,7 @@ pub(super) fn horizon_page_tooltip(page: Page) -> Option<&'static str> {
+         Page::Agent => "horizon.pages.agent.tooltip",
+         Page::SplitProfiles => "horizon.pages.split_profiles.tooltip",
+         Page::ShaderPacks => "horizon.pages.shader_packs.tooltip",
++        Page::Addons => "horizon.pages.addons.tooltip",
+         Page::Mods => "horizon.pages.mods.tooltip",
+         Page::SplitSetup => "horizon.pages.split_setup.tooltip",
+         Page::Music => "horizon.pages.music.tooltip",
+diff --git a/crates/horizon-client-render/src/pack_screen.rs b/crates/horizon-client-render/src/pack_screen.rs
+index 8ea9ef0e45..1466febaf3 100644
+--- a/crates/horizon-client-render/src/pack_screen.rs
++++ b/crates/horizon-client-render/src/pack_screen.rs
+@@ -327,6 +327,201 @@ pub enum Action {
+     BrowsePick(usize),
+ }
+ 
++/// The width of the settings button a Bedrock pack's row carries.
++const ADDON_BUTTON: i32 = 70;
++/// The settings screen: row width, row pitch, top and bottom margins.
++const ROW_W: i32 = 310;
++const ROW_STEP: i32 = 24;
++const VIEW_TOP: i32 = 32;
++const VIEW_BOTTOM: i32 = 36;
++
++/// A Bedrock pack with options: its subpacks and the settings its manifest offers (Bedrock's
++/// gear).
++#[derive(Clone, Debug)]
++struct Addon {
++    /// The `resourcepacks` folder and the pack's file name in it.
++    dir: std::path::PathBuf,
++    file: String,
++    subpacks: Vec<crate::packs::bedrock::Subpack>,
++    /// The folder of the subpack chosen; none is the base pack alone.
++    chosen: Option<String>,
++    defs: Vec<horizon_bedrock::settings::Def>,
++    /// The value of each setting (the default until the player chose).
++    values: HashMap<String, horizon_bedrock::settings::Choice>,
++}
++impl Addon {
++    /// The subpack row's label: the subpack's name, or the base's.
++    fn label(&self) -> Text {
++        let name = self
++            .chosen
++            .as_ref()
++            .and_then(|c| self.subpacks.iter().find(|s| &s.folder == c))
++            .map_or_else(
++                || tr("horizon.pack.subpack.base"),
++                |s| Text::literal(s.name.clone()),
++            );
++        Text::translate("horizon.pack.subpack", &[name])
++    }
++    /// The next choice after the current one: base, each subpack in turn, base again.
++    fn next(&self) -> Option<String> {
++        let at = self
++            .chosen
++            .as_ref()
++            .and_then(|c| self.subpacks.iter().position(|s| &s.folder == c));
++        match at {
++            None if self.chosen.is_none() => self.subpacks.first().map(|s| s.folder.clone()),
++            Some(i) => self.subpacks.get(i + 1).map(|s| s.folder.clone()),
++            None => None,
++        }
++    }
++    fn value(&self, i: usize) -> horizon_bedrock::settings::Choice {
++        let d = &self.defs[i];
++        self.values
++            .get(&d.name)
++            .cloned()
++            .unwrap_or_else(|| d.default.clone())
++    }
++    /// The rows of the settings screen.
++    fn rows(&self) -> Vec<SettingRow> {
++        use horizon_bedrock::settings::Kind;
++        let mut rows = Vec::new();
++        if !self.subpacks.is_empty() {
++            rows.push(SettingRow::Mode);
++        }
++        for (i, d) in self.defs.iter().enumerate() {
++            rows.push(SettingRow::Setting(i));
++            if d.kind == Kind::Multiselect {
++                rows.extend((0..d.options.len()).map(|o| SettingRow::Option(i, o)));
++            }
++        }
++        rows
++    }
++    /// The text of a row.
++    fn row_label(&self, row: SettingRow) -> Text {
++        use horizon_bedrock::settings::{Choice, Kind, title_of};
++        let on_off = |v: bool| tr(if v { "options.on" } else { "options.off" });
++        let pair = |title: &str, value: Text| {
++            Text::translate(
++                "options.generic_value",
++                &[Text::literal(title.to_owned()), value],
++            )
++        };
++        match row {
++            SettingRow::Mode => self.label(),
++            SettingRow::Setting(i) => {
++                let d = &self.defs[i];
++                let title = d.title();
++                match (d.kind, self.value(i)) {
++                    (Kind::Toggle, Choice::Flag(v)) => pair(title, on_off(v)),
++                    (Kind::Dropdown, Choice::One(o)) => {
++                        let label = d
++                            .options
++                            .iter()
++                            .find(|x| x.0 == o)
++                            .map_or(o.as_str(), |x| title_of(&x.1));
++                        pair(title, Text::literal(label.to_owned()))
++                    }
++                    (Kind::Slider, Choice::Number(n)) => pair(title, Text::literal(format!("{n}"))),
++                    _ => Text::literal(title.to_owned()),
++                }
++            }
++            SettingRow::Option(i, o) => {
++                let d = &self.defs[i];
++                let (name, label) = &d.options[o];
++                let on = matches!(self.value(i), Choice::Many(v) if v.contains(name));
++                pair(&format!("  {}", title_of(label)), on_off(on))
++            }
++        }
++    }
++    /// A row pressed: the Mode row steps the subpack, a setting its value.
++    fn press(&mut self, row: SettingRow) {
++        use horizon_bedrock::settings::Kind;
++        let saved = match row {
++            SettingRow::Mode => {
++                let next = self.next();
++                crate::packs::bedrock::choose_subpack(&self.dir, &self.file, next.as_deref())
++                    .map(|()| self.chosen = next)
++            }
++            SettingRow::Setting(i) | SettingRow::Option(i, _) => {
++                let d = self.defs[i].clone();
++                let now = self.value(i);
++                let next = match row {
++                    SettingRow::Option(_, o) => d.flip(&now, &d.options[o].0),
++                    _ if d.kind == Kind::Multiselect => return,
++                    _ => d.press(&now),
++                };
++                crate::packs::bedrock::choose_setting(&self.dir, &self.file, &d.name, &next).map(
++                    |()| {
++                        self.values.insert(d.name, next);
++                    },
++                )
++            }
++        };
++        let _ = saved;
++    }
++}
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++enum SettingRow {
++    Mode,
++    Setting(usize),
++    Option(usize, usize),
++}
++
++/// The open settings screen of a Bedrock pack.
++#[derive(Clone, Debug)]
++struct SettingsView {
++    id: String,
++    scroll: f64,
++}
++
++/// The Bedrock packs among `packs` that offer options, with their saved choices.
++fn addons_of(packs: &[PackInfo]) -> HashMap<String, Addon> {
++    let game = std::env::current_dir().unwrap_or_default();
++    packs
++        .iter()
++        .filter_map(|p| {
++            // Bedrock packs are in `addons/`; `resourcepacks/` keeps the choices it had.
++            let (folder, file) = match p.id.strip_prefix("addon/") {
++                Some(file) => ("addons", file),
++                None => ("resourcepacks", p.id.strip_prefix("file/")?),
++            };
++            let dir = game.join(folder);
++            let path = dir.join(file);
++            if !(crate::packs::bedrock::is_bedrock_file(file)
++                || path.join("manifest.json").is_file())
++            {
++                return None;
++            }
++            let subpacks = crate::packs::bedrock::subpacks(&path);
++            let defs = crate::packs::bedrock::settings(&path);
++            if subpacks.is_empty() && defs.is_empty() {
++                return None;
++            }
++            let values = defs
++                .iter()
++                .filter_map(|d| {
++                    Some((
++                        d.name.clone(),
++                        crate::packs::bedrock::chosen_setting(&dir, file, &d.name)?,
++                    ))
++                })
++                .collect();
++            Some((
++                p.id.clone(),
++                Addon {
++                    chosen: crate::packs::bedrock::chosen_subpack(&dir, file),
++                    dir: dir.clone(),
++                    file: file.to_owned(),
++                    subpacks,
++                    defs,
++                    values,
++                },
++            ))
++        })
++        .collect()
++}
++
+ /// The pack screen and its state.
+ #[derive(Clone, Debug)]
+ pub struct PackScreen {
+@@ -366,6 +561,10 @@ pub struct PackScreen {
+     /// The browser's own search box, separate from the one that filters the
+     /// player's installed packs.
+     browser_search: TextField,
++    /// The Bedrock packs with options, by pack id.
++    addons: HashMap<String, Addon>,
++    /// The settings screen of one of them, when open.
++    settings: Option<SettingsView>,
+     /// The browser's search box has the keyboard.
+     browser_focus: bool,
+     /// Which atlas slot holds which icon, kept from one frame to the next
+@@ -483,11 +682,14 @@ impl PackScreen {
+             .iter()
+             .filter_map(|p| Some((icon_texture(&p.id), p.icon.clone()?)))
+             .collect();
++        let addons = addons_of(&packs);
+         let mut s = Self {
+             title,
+             width,
+             height,
+             in_world,
++            addons,
++            settings: None,
+             packs,
+             icons,
+             model,
+@@ -518,6 +720,70 @@ impl PackScreen {
+         s.set_focus(Focus::Search);
+         s
+     }
++    /// The subpack button of the pack row `i` of `side`: x, y, width, height.
++    fn addon_button(&self, side: usize, i: usize) -> Option<(i32, i32, i32, i32)> {
++        let l = &self.lists[side];
++        let Row::Pack(id) = &l.entries.get(i)?.row else {
++            return None;
++        };
++        self.addons.get(id)?;
++        let narrow = if l.scrollable() { 6 } else { 0 };
++        let (cx, cy) = (l.row_left() + 2, l.entries[i].y + 2);
++        Some((cx + 34 + 157 - narrow - ADDON_BUTTON, cy, ADDON_BUTTON, 12))
++    }
++    /// The gear of a Bedrock pack was pressed: its settings screen opens.
++    fn addon_click(&mut self, id: &str) {
++        if self.addons.contains_key(id) {
++            self.settings = Some(SettingsView {
++                id: id.to_owned(),
++                scroll: 0.0,
++            });
++            self.set_focus(Focus::None);
++        }
++    }
++    /// The settings screen's rows as buttons (x, y, row) in the visible band, and the Done
++    /// button's position.
++    fn settings_layout(&self, v: &SettingsView) -> (Vec<(i32, i32, SettingRow)>, (i32, i32)) {
++        let x = self.width / 2 - ROW_W / 2;
++        let rows = self
++            .addons
++            .get(&v.id)
++            .map(Addon::rows)
++            .unwrap_or_default()
++            .into_iter()
++            .enumerate()
++            .map(|(i, r)| (x, VIEW_TOP + 4 + i as i32 * ROW_STEP - v.scroll as i32, r))
++            .filter(|(_, y, _)| *y + 20 > VIEW_TOP && *y < self.height - VIEW_BOTTOM)
++            .collect();
++        (rows, (self.width / 2 - 100, self.height - 28))
++    }
++    fn settings_max_scroll(&self, v: &SettingsView) -> f64 {
++        let n = self.addons.get(&v.id).map_or(0, |a| a.rows().len()) as i32;
++        f64::from((n * ROW_STEP + 8 - (self.height - VIEW_TOP - VIEW_BOTTOM)).max(0))
++    }
++    fn settings_click(&mut self, x: f64, y: f64) -> Action {
++        let Some(v) = self.settings.clone() else {
++            return Action::None;
++        };
++        let (rows, (dx, dy)) = self.settings_layout(&v);
++        if x >= dx as f64 && y >= dy as f64 && x < (dx + 200) as f64 && y < (dy + 20) as f64 {
++            self.settings = None;
++            return Action::None;
++        }
++        if y < VIEW_TOP as f64 || y >= (self.height - VIEW_BOTTOM) as f64 {
++            return Action::None;
++        }
++        for (bx, by, row) in rows {
++            if x >= bx as f64 && y >= by as f64 && x < (bx + ROW_W) as f64 && y < (by + 20) as f64 {
++                if let Some(a) = self.addons.get_mut(&v.id) {
++                    a.press(row);
++                }
++                self.changed = true;
++                break;
++            }
++        }
++        Action::None
++    }
+     fn info(&self, id: &str) -> Option<&PackInfo> {
+         self.packs.iter().find(|p| p.id == id)
+     }
+@@ -668,6 +934,9 @@ impl PackScreen {
+         if let Some(action) = self.browser_click(m, x, y) {
+             return action;
+         }
++        if self.settings.is_some() {
++            return self.settings_click(x, y);
++        }
+         if self.search.contains(x, y) {
+             self.search.click(m, x, false);
+             self.set_focus(Focus::Search);
+@@ -700,6 +969,17 @@ impl PackScreen {
+             let mut took = false;
+             if let Some(i) = hit {
+                 took = true;
++                if let (Some((bx, by, bw, bh)), Row::Pack(id)) =
++                    (self.addon_button(side, i), l.entries[i].row.clone())
++                    && x >= bx as f64
++                    && y >= by as f64
++                    && x < (bx + bw) as f64
++                    && y < (by + bh) as f64
++                {
++                    self.addon_click(&id);
++                    self.set_focus(Focus::List(side));
++                    return Action::None;
++                }
+                 match l.entries[i].row.clone() {
+                     Row::Header => {
+                         let l = &mut self.lists[side];
+@@ -864,10 +1144,14 @@ impl PackScreen {
+     }
+     /// Whether the confirmation screen is shown.
+     pub fn confirming(&self) -> bool {
+-        self.confirm.is_some()
++        self.confirm.is_some() || self.settings.is_some()
+     }
+-    /// Escape on the confirmation screen answers no.
++    /// Escape on the confirmation screen answers no; on a settings screen it closes it.
+     pub fn cancel_confirm(&mut self, m: &Measure) -> bool {
++        if self.settings.take().is_some() {
++            self.reposition(m);
++            return true;
++        }
+         if self.confirm.take().is_some() {
+             self.reposition(m);
+             return true;
+@@ -888,6 +1172,13 @@ impl PackScreen {
+         }
+     }
+     pub fn scroll(&mut self, x: f64, y: f64, amount: f64) {
++        if let Some(v) = self.settings.clone() {
++            let max = self.settings_max_scroll(&v);
++            if let Some(v) = &mut self.settings {
++                v.scroll = (v.scroll - amount * 18.0).clamp(0.0, max);
++            }
++            return;
++        }
+         if self.confirm.is_some() || self.search.contains(x, y) {
+             return;
+         }
+@@ -1029,8 +1320,15 @@ impl PackScreen {
+                 "packs/confirm",
+                 crate::widgets::join_for_narration(&[&c.title.plain(), &c.message.plain()]),
+             ),
++            None if self.settings.is_some() => {
++                crate::widgets::ScreenInfo::new("packs/settings", self.title.plain())
++            }
+             None => crate::widgets::ScreenInfo::new("packs", self.title.plain()),
+         });
++        if let Some(v) = &self.settings {
++            self.draw_settings(&mut out, m, v, mouse, now_ms);
++            return out;
++        }
+         if let Some(c) = &self.confirm {
+             let ((tx, ty), (lines, mx, my), buttons) = self.confirm_layout(m, c);
+             d::string_widget(&mut out, m, &c.title, tx, ty, 0);
+@@ -1054,7 +1352,7 @@ impl PackScreen {
+         );
+         self.search.draw(&mut out, m, blink_ms, None);
+         for side in 0..2 {
+-            self.draw_list(&mut out, m, side, mouse);
++            self.draw_list(&mut out, m, side, mouse, now_ms);
+         }
+         self.draw_footer(
+             &mut out,
+@@ -1478,6 +1776,74 @@ impl PackScreen {
+         // The search box is 15 tall: centre the taller button on it.
+         (sx + 204, sy - (ADD_SIZE - 15) / 2)
+     }
++
++    /// The settings screen of a Bedrock pack: its title, the rows in a scrolling band, Done.
++    fn draw_settings(
++        &self,
++        out: &mut Vec<Draw>,
++        m: &Measure,
++        v: &SettingsView,
++        mouse: (i32, i32),
++        now_ms: i64,
++    ) {
++        let Some(addon) = self.addons.get(&v.id) else {
++            return;
++        };
++        let title = self
++            .info(&v.id)
++            .map_or_else(|| Text::literal(v.id.clone()), |p| p.title.clone());
++        let tw = m.width(&title);
++        d::string_widget(out, m, &title, self.width / 2 - tw / 2, 12, 0);
++        d::fill(
++            out,
++            0,
++            VIEW_TOP,
++            self.width,
++            self.height - VIEW_BOTTOM,
++            -1072689136,
++        );
++        out.push(Draw::Scissor {
++            x0: 0,
++            y0: VIEW_TOP,
++            x1: self.width,
++            y1: self.height - VIEW_BOTTOM,
++        });
++        let (rows, (dx, dy)) = self.settings_layout(v);
++        for (x, y, row) in rows {
++            let hover = d::inside(mouse, x, y, ROW_W, 20)
++                && mouse.1 >= VIEW_TOP
++                && mouse.1 < self.height - VIEW_BOTTOM;
++            let header = matches!(row, SettingRow::Setting(i)
++                if addon.defs[i].kind == horizon_bedrock::settings::Kind::Multiselect);
++            d::button(
++                out,
++                m,
++                &addon.row_label(row),
++                x,
++                y,
++                ROW_W,
++                20,
++                !header,
++                hover && !header,
++                now_ms,
++            );
++        }
++        out.push(Draw::NoScissor);
++        let hover = d::inside(mouse, dx, dy, 200, 20);
++        crate::widgets::widget_cursor(hover, true);
++        d::button(
++            out,
++            m,
++            &tr("gui.done"),
++            dx,
++            dy,
++            200,
++            20,
++            true,
++            hover,
++            now_ms,
++        );
++    }
+     /// The footer's two buttons, "Open Pack Folder" and "Done", over their
+     /// labels; a label wider than its button scrolls with the clock.
+     fn draw_footer(
+@@ -1521,7 +1887,14 @@ impl PackScreen {
+             }
+         }
+     }
+-    fn draw_list(&self, out: &mut Vec<Draw>, m: &Measure, side: usize, mouse: (i32, i32)) {
++    fn draw_list(
++        &self,
++        out: &mut Vec<Draw>,
++        m: &Measure,
++        side: usize,
++        mouse: (i32, i32),
++        now_ms: i64,
++    ) {
+         let l = &self.lists[side];
+         let hovered = if l.is_over(mouse.0 as f64, mouse.1 as f64) {
+             l.entry_at(mouse.0, mouse.1)
+@@ -1687,7 +2060,28 @@ impl PackScreen {
+                         }
+                         max -= OPTIONS_SIZE + 2;
+                     }
+-                    d::string_widget(out, m, &name, cx + 34, cy + 1, max);
++                    let gear = self.addon_button(side, i).zip(self.addons.get(id));
++                    let name_max = if gear.is_some() {
++                        max - ADDON_BUTTON - 2
++                    } else {
++                        max
++                    };
++                    d::string_widget(out, m, &name, cx + 34, cy + 1, name_max);
++                    if let Some(((bx, by, bw, bh), _)) = gear {
++                        let hover = d::inside(mouse, bx, by, bw, bh);
++                        d::button(
++                            out,
++                            m,
++                            &tr("horizon.pack.settings"),
++                            bx,
++                            by,
++                            bw,
++                            bh,
++                            true,
++                            hover,
++                            now_ms,
++                        );
++                    }
+                     let lines = d::label_lines(m, &desc, max, 2, &desc_style);
+                     d::label(out, &lines, cx + 34, cy + 12, max, false);
+                 }
+@@ -1749,6 +2143,28 @@ mod icon_tests {
+             .unwrap();
+         out
+     }
++    #[test]
++    fn a_bedrock_pack_steps_through_its_subpacks_and_back_to_the_base() {
++        let sub = |f: &str| crate::packs::bedrock::Subpack {
++            folder: f.into(),
++            name: f.into(),
++        };
++        let mut a = Addon {
++            dir: std::path::PathBuf::new(),
++            file: String::new(),
++            subpacks: vec![sub("1_e"), sub("0_e")],
++            chosen: None,
++            defs: Vec::new(),
++            values: HashMap::new(),
++        };
++        let mut seen = Vec::new();
++        for _ in 0..3 {
++            a.chosen = a.next();
++            seen.push(a.chosen.clone());
++        }
++        assert_eq!(seen, [Some("1_e".into()), Some("0_e".into()), None]);
++    }
++
+     fn pack(id: &str, icon: Option<Arc<[u8]>>) -> PackInfo {
+         PackInfo {
+             id: id.into(),
+diff --git a/crates/horizon-client-render/src/packs.rs b/crates/horizon-client-render/src/packs.rs
+index bc740ea401..9d75a08da9 100644
+--- a/crates/horizon-client-render/src/packs.rs
++++ b/crates/horizon-client-render/src/packs.rs
+@@ -3,6 +3,7 @@
+ //! and High Contrast packs, `pack.mcmeta` metadata and format compatibility,
+ //! and an overlay resource root that layers the enabled packs over the
+ //! vanilla resources (later packs win), so every loader sees one tree.
++pub mod bedrock;
+ mod cache;
+ use crate::text::Style;
+ use crate::{text::Text, zip::Zip};
+@@ -648,9 +649,56 @@ pub fn discover(resources: &Path, packs_dir: &Path) -> Vec<Pack> {
+     out.extend(folder(packs_dir, RESOURCE_FORMAT));
+     out
+ }
++/// The id prefix of the packs in `addons/`: they sit in the same `resourcePacks` list as the
++/// `file/` ones, above them, and the Addons screen lists only these.
++pub const ADDON_PREFIX: &str = "addon/";
++
++/// Whether `id` names a pack of the `addons/` folder.
++pub fn is_addon_id(id: &str) -> bool {
++    id.starts_with(ADDON_PREFIX)
++}
++
++/// The packs of the `addons/` folder (Bedrock add-ons first, Java packs too), as `addon/<name>`.
++pub fn addons(dir: &Path) -> Vec<Pack> {
++    let mut out = folder_with(dir, RESOURCE_FORMAT, true);
++    for p in &mut out {
++        if let Some(name) = p.id.strip_prefix("file/") {
++            p.id = format!("{ADDON_PREFIX}{name}");
++        }
++    }
++    out
++}
++
++/// [`discover`] and the `addons/` folder's packs.
++pub fn discover_all(resources: &Path, packs_dir: &Path, addons_dir: &Path) -> Vec<Pack> {
++    let mut out = discover(resources, packs_dir);
++    out.extend(addons(addons_dir));
++    out
++}
++
++/// A `resourcePacks` list after one of the two screens committed `chosen`: the screen's own
++/// kind is replaced and the other kind stays; addons go above the resource packs.
++pub fn merge_selection(current: &[String], chosen: Vec<String>, addons_screen: bool) -> Vec<String> {
++    let kept = current
++        .iter()
++        .filter(|id| is_addon_id(id) != addons_screen)
++        .cloned();
++    let (below, above): (Vec<String>, Vec<String>) = if addons_screen {
++        (kept.collect(), chosen)
++    } else {
++        (chosen, kept.collect())
++    };
++    below.into_iter().chain(above).collect()
++}
++
+ /// The packs (folders and zips) in `dir`, by name, as `FolderRepositorySource`
+ /// finds them; their compatibility is against `format`.
+ pub fn folder(dir: &Path, format: (i64, i64)) -> Vec<Pack> {
++    folder_with(dir, format, false)
++}
++/// [`folder`], with Bedrock's packs (`.mcpack`, `.mcaddon`, a folder or zip with a
++/// `manifest.json`) listed too when `bedrock`: only the `addons/` folder takes them.
++pub fn folder_with(dir: &Path, format: (i64, i64), bedrock: bool) -> Vec<Pack> {
+     let mut user: Vec<Pack> = fs::read_dir(dir)
+         .into_iter()
+         .flatten()
+@@ -659,18 +707,44 @@ pub fn folder(dir: &Path, format: (i64, i64)) -> Vec<Pack> {
+             let path = e.path();
+             let name = e.file_name().to_string_lossy().into_owned();
+             let source = if path.is_dir() {
+-                Source::Dir(path)
++                Source::Dir(path.clone())
+             } else if name.ends_with(".zip") {
+-                Source::Zip(path)
++                Source::Zip(path.clone())
++            } else if bedrock::is_bedrock_file(&name) {
++                // `.mcpack` and `.mcaddon` are Bedrock's: converted below.
++                return bedrock.then(|| bedrock_pack(dir, &path, name, format))?;
+             } else {
+                 return None;
+             };
+-            pack_for(format!("file/{name}"), Text::literal(name), source, format)
++            pack_for(
++                format!("file/{name}"),
++                Text::literal(name.clone()),
++                source,
++                format,
++            )
++            .or_else(|| bedrock.then(|| bedrock_pack(dir, &path, name, format))?)
+         })
+         .collect();
+     user.sort_by(|a, b| a.id.cmp(&b.id));
+     user
+ }
++/// A Bedrock resource pack (a folder or zip with a `manifest.json` and no `pack.mcmeta`, a
++/// `.mcpack` or a `.mcaddon`) as the Java pack [`bedrock::convert`] makes of it, kept in
++/// `.horizon-cache/bedrock/` beside `dir` and made again only when the file changes.
++fn bedrock_pack(dir: &Path, path: &Path, name: String, format: (i64, i64)) -> Option<Pack> {
++    let cache = dir
++        .parent()
++        .unwrap_or(Path::new("."))
++        .join(".horizon-cache/bedrock");
++    let subpack = bedrock::chosen_subpack(dir, &name);
++    let converted = bedrock::convert(path, &cache, format, subpack.as_deref())?;
++    pack_for(
++        format!("file/{name}"),
++        Text::literal(name),
++        Source::Dir(converted),
++        format,
++    )
++}
+ /// A file a pack provides: its path (folder packs) and its name inside the pack.
+ type Provided = (Option<PathBuf>, String);
+ /// Files a pack provides under `assets/`, keyed by their resource name; active
+@@ -995,6 +1069,7 @@ fn build_overlay_uncached(
+     // player only accepts, and a gigabyte of zeros deflates to a megabyte, so without it a pack
+     // at the download limit wrote hundreds of gigabytes here. Vanilla never unpacks a pack.
+     let budget = std::sync::atomic::AtomicU64::new(unpack_budget(packs));
++    write_bedrock_order(&files, out)?;
+     // Inflating and writing a big pack's files one by one was most of a cold build; its
+     // folders all exist by now.
+     let extracted: io::Result<()> = crate::par::par_map(&extract, |(owner, inner, target)| {
+@@ -1041,6 +1116,44 @@ fn unpack_budget(packs: &[Pack]) -> u64 {
+         .saturating_mul(16)
+         .clamp(64 << 20, 8 << 30)
+ }
++/// `assets/horizon_bedrock/order.txt`: the converted Bedrock packs' folders, the lowest pack of
++/// the stack first, which is how [`horizon_bedrock::bundle::Bundle`] lets a pack above another
++/// win an identifier both define (the files themselves never collide: each pack has a folder).
++fn write_bedrock_order(files: &BTreeMap<String, (usize, Provided)>, out: &Path) -> io::Result<()> {
++    const DATA: [&str; 9] = [
++        "entity",
++        "attachables",
++        "animations",
++        "animation_controllers",
++        "render_controllers",
++        "models",
++        "particles",
++        "materials",
++        "sounds",
++    ];
++    let prefix = "assets/horizon_bedrock/";
++    let mut folders: BTreeMap<&str, usize> = BTreeMap::new();
++    for (name, (owner, _)) in files.range(prefix.to_owned()..) {
++        let Some(rest) = name.strip_prefix(prefix) else {
++            break;
++        };
++        if let Some((folder, _)) = rest.split_once('/')
++            && !DATA.contains(&folder)
++        {
++            let slot = folders.entry(folder).or_insert(*owner);
++            *slot = (*slot).max(*owner);
++        }
++    }
++    if folders.is_empty() {
++        return Ok(());
++    }
++    let mut order: Vec<(&str, usize)> = folders.into_iter().collect();
++    order.sort_by_key(|(folder, owner)| (*owner, *folder));
++    let text: String = order.iter().map(|(f, _)| format!("{f}\n")).collect();
++    let dir = out.join("assets/horizon_bedrock");
++    fs::create_dir_all(&dir)?;
++    fs::write(dir.join("order.txt"), text)
++}
+ /// Files vanilla loads from every pack in turn (`getResourceStack`) rather
+ /// than from the top pack only.
+ #[derive(Clone, Copy, Debug, PartialEq)]
+@@ -1396,6 +1509,61 @@ impl SelectionModel {
+ 
+ #[cfg(test)]
+ mod tests {
++    #[test]
++    fn each_screen_replaces_its_own_kind_and_addons_stay_above() {
++        let list = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
++        let current = list(&["file/a.zip", "addon/x", "file/b.zip", "addon/y"]);
++        assert_eq!(
++            super::merge_selection(&current, list(&["file/c.zip"]), false),
++            list(&["file/c.zip", "addon/x", "addon/y"])
++        );
++        assert_eq!(
++            super::merge_selection(&current, list(&["addon/z"]), true),
++            list(&["file/a.zip", "file/b.zip", "addon/z"])
++        );
++    }
++
++    #[test]
++    fn resourcepacks_ignore_bedrock_files() {
++        let dir = std::env::temp_dir().join(format!("horizon-nobedrock-{}", std::process::id()));
++        fs::create_dir_all(&dir).unwrap();
++        for name in ["a.mcpack", "b.mcaddon"] {
++            fs::write(dir.join(name), b"x").unwrap();
++        }
++        let none = super::folder(&dir, RESOURCE_FORMAT);
++        let _ = fs::remove_dir_all(&dir);
++        assert!(none.is_empty());
++    }
++
++    #[test]
++    fn addon_folders_list_as_addon_ids() {
++        let dir = std::env::temp_dir().join(format!("horizon-addons-{}", std::process::id()));
++        let pack = dir.join("Look");
++        fs::create_dir_all(&pack).unwrap();
++        fs::write(pack.join("pack.mcmeta"), br#"{"pack":{"pack_format":1,"description":"x"}}"#)
++            .unwrap();
++        let found = super::addons(&dir);
++        let _ = fs::remove_dir_all(&dir);
++        assert_eq!(found.len(), 1);
++        assert_eq!(found[0].id, "addon/Look");
++        assert!(super::is_addon_id(&found[0].id));
++    }
++    #[test]
++    fn converted_bedrock_packs_are_listed_lowest_first() {
++        let out = std::env::temp_dir().join(format!("horizon-bedrock-order-{}", std::process::id()));
++        let _ = fs::remove_dir_all(&out);
++        let provided: Provided = (None, String::new());
++        let mut files = BTreeMap::new();
++        files.insert("assets/horizon_bedrock/top/materials/entity.material".to_owned(), (2, provided.clone()));
++        files.insert("assets/horizon_bedrock/low/materials/entity.material".to_owned(), (0, provided.clone()));
++        files.insert("assets/horizon_bedrock/low/entity/a.json".to_owned(), (0, provided.clone()));
++        files.insert("assets/horizon_bedrock/entity/legacy.json".to_owned(), (1, provided));
++        write_bedrock_order(&files, &out).unwrap();
++        let text = fs::read_to_string(out.join("assets/horizon_bedrock/order.txt")).unwrap();
++        assert_eq!(text, "low\ntop\n");
++        let _ = fs::remove_dir_all(&out);
++    }
++
+     use super::*;
+ 
+     /// `DownloadedPackSource.DOWNLOADED_PACK_SELECTION`: the pack is selected,
+diff --git a/crates/horizon-client-render/src/skins.rs b/crates/horizon-client-render/src/skins.rs
+index 9af9b7e7fd..959258ceb8 100644
+--- a/crates/horizon-client-render/src/skins.rs
++++ b/crates/horizon-client-render/src/skins.rs
+@@ -761,7 +761,15 @@ pub fn offline_cape() -> Option<&'static [u8]> {
+ /// launcher/src/skins.rs): its 64x64 RGBA as `process_legacy_skin` lays it
+ /// out, and whether it is slim. Read once.
+ pub fn offline_skin() -> Option<&'static (Vec<u8>, bool)> {
+-    static SKIN: std::sync::OnceLock<Option<(Vec<u8>, bool)>> = std::sync::OnceLock::new();
++    offline_skins().as_ref().map(|(skin, _)| skin)
++}
++/// `offline_skin`'s alpha-true copy (`process_skin_raw`).
++pub fn offline_skin_raw() -> Option<&'static [u8]> {
++    offline_skins().as_ref().map(|(_, raw)| raw.as_slice())
++}
++type OfflineSkin = Option<((Vec<u8>, bool), Vec<u8>)>;
++fn offline_skins() -> &'static OfflineSkin {
++    static SKIN: std::sync::OnceLock<OfflineSkin> = std::sync::OnceLock::new();
+     SKIN.get_or_init(|| {
+         let path = std::env::var_os("HORIZON_OFFLINE_SKIN").filter(|p| !p.is_empty())?;
+         let model = std::env::var("HORIZON_OFFLINE_SKIN_MODEL").unwrap_or_default();
+@@ -769,13 +777,16 @@ pub fn offline_skin() -> Option<&'static (Vec<u8>, bool)> {
+             .inspect_err(|e| eprintln!("Horizon: no offline skin ({}): {e}", path.display()))
+             .ok()
+     })
+-    .as_ref()
+ }
+-fn read_offline_skin(path: &std::path::Path, model: &str) -> Result<(Vec<u8>, bool), String> {
++fn read_offline_skin(
++    path: &std::path::Path,
++    model: &str,
++) -> Result<((Vec<u8>, bool), Vec<u8>), String> {
+     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+     let (w, h, rgba) = crate::hud::decode_bytes(&bytes).map_err(|e| e.to_string())?;
+     let skin = process_legacy_skin(w, h, &rgba).ok_or("not a 64x64 or 64x32 skin")?;
+-    Ok((skin, model == "slim"))
++    let raw = process_skin_raw(w, h, &rgba).ok_or("not a 64x64 or 64x32 skin")?;
++    Ok(((skin, model == "slim"), raw))
+ }
+ 
+ /// The signed-in account's own profile properties (`Minecraft.profileFuture`:
+@@ -847,6 +858,33 @@ pub fn lookup(
+ /// get the 64x64 layout, and the opaque parts lose their alpha. `None` for
+ /// any other size (the download fails).
+ pub fn process_legacy_skin(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
++    lay_out_skin(width, height, rgba, true)
++}
++
++/// The same 64x64 layout with the skin's own alpha kept: what a Bedrock pack's
++/// model samples (the base layer's unused texels stay transparent, where the
++/// game's `setNoAlpha` makes them opaque black).
++pub fn process_skin_raw(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
++    lay_out_skin(width, height, rgba, false)
++}
++
++/// Where the Bedrock path finds the alpha-true copy of the skin at `location`:
++/// downloaded and launcher skins have one beside them, the game's own default
++/// skins are untouched and answer themselves.
++pub fn raw_skin_location(location: &str) -> String {
++    if let Some(digest) = location.strip_prefix("skins/") {
++        format!("skins-raw/{digest}")
++    } else if location == OFFLINE_SKIN {
++        OFFLINE_SKIN_RAW.to_owned()
++    } else {
++        location.to_owned()
++    }
++}
++/// The atlas name of the launcher's offline skin, and of its alpha-true copy.
++pub const OFFLINE_SKIN: &str = "horizon/offline_skin";
++pub const OFFLINE_SKIN_RAW: &str = "horizon/offline_skin_raw";
++
++fn lay_out_skin(width: u32, height: u32, rgba: &[u8], opaque_base: bool) -> Option<Vec<u8>> {
+     if width != 64 || height != 32 && height != 64 {
+         return None;
+     }
+@@ -887,7 +925,9 @@ pub fn process_legacy_skin(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u
+             }
+         }
+     };
+-    no_alpha(&mut img, 0, 0, 32, 16);
++    if opaque_base {
++        no_alpha(&mut img, 0, 0, 32, 16);
++    }
+     if legacy {
+         // doNotchTransparencyHack: a fully opaque hat layer is cleared.
+         let opaque = (32..64).all(|x| (0..32).all(|y| img[at(x, y) + 3] >= 128));
+@@ -899,8 +939,10 @@ pub fn process_legacy_skin(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u
+             }
+         }
+     }
+-    no_alpha(&mut img, 0, 16, 64, 32);
+-    no_alpha(&mut img, 16, 48, 48, 64);
++    if opaque_base {
++        no_alpha(&mut img, 0, 16, 64, 32);
++        no_alpha(&mut img, 16, 48, 48, 64);
++    }
+     Some(img)
+ }
+ 
+@@ -911,8 +953,8 @@ pub fn process_legacy_skin(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u
+ pub struct Downloader {
+     root: std::path::PathBuf,
+     states: std::collections::HashMap<(Kind, String), Download>,
+-    done: std::sync::mpsc::Receiver<((Kind, String), Option<Vec<u8>>)>,
+-    send: std::sync::mpsc::Sender<((Kind, String), Option<Vec<u8>>)>,
++    done: std::sync::mpsc::Receiver<((Kind, String), Option<(Vec<u8>, Option<Vec<u8>>)>)>,
++    send: std::sync::mpsc::Sender<((Kind, String), Option<(Vec<u8>, Option<Vec<u8>>)>)>,
+     ready: Vec<(String, Vec<u8>)>,
+     /// Locations already in `ready`, so `again` does not double-queue.
+     queued: std::collections::HashSet<String>,
+@@ -947,11 +989,11 @@ pub struct Downloader {
+ /// `in_flight` is given back and the texture is retried after the wait, where an answer that never
+ /// came kept the key `Pending` for good and, with the bound, the place taken for the session.
+ struct Answer {
+-    send: std::sync::mpsc::Sender<((Kind, String), Option<Vec<u8>>)>,
++    send: std::sync::mpsc::Sender<((Kind, String), Option<(Vec<u8>, Option<Vec<u8>>)>)>,
+     key: Option<(Kind, String)>,
+ }
+ impl Answer {
+-    fn give(&mut self, image: Option<Vec<u8>>) {
++    fn give(&mut self, image: Option<(Vec<u8>, Option<Vec<u8>>)>) {
+         if let Some(key) = self.key.take() {
+             let _ = self.send.send((key, image));
+         }
+@@ -1099,9 +1141,14 @@ impl Downloader {
+         while let Ok((key, image)) = self.done.try_recv() {
+             self.in_flight = self.in_flight.saturating_sub(1);
+             let state = match image {
+-                Some(rgba) => {
++                Some((rgba, raw)) => {
+                     match key.0 {
+-                        Kind::Skin => self.queue(skin_location(&key.1), rgba),
++                        Kind::Skin => {
++                            if let Some(raw) = raw {
++                                self.queue(raw_skin_location(&skin_location(&key.1)), raw);
++                            }
++                            self.queue(skin_location(&key.1), rgba);
++                        }
+                         Kind::Cape => self.queue(cape_location(&key.1), rgba),
+                         Kind::Elytra => {}
+                     }
+@@ -1162,16 +1209,16 @@ impl Downloader {
+         digest: &str,
+         url: &str,
+         fetch: impl FnOnce(&str) -> Option<Vec<u8>>,
+-    ) -> Option<Vec<u8>> {
++    ) -> Option<(Vec<u8>, Option<Vec<u8>>)> {
+         let file = root
+             .join(if digest.len() > 2 { &digest[..2] } else { "xx" })
+             .join(digest);
+-        let decode = |bytes: &[u8]| -> Option<Vec<u8>> {
++        let decode = |bytes: &[u8]| -> Option<(Vec<u8>, Option<Vec<u8>>)> {
+             let (w, h, rgba) = crate::hud::decode_bytes(bytes).ok()?;
+             match kind {
+-                Kind::Skin => process_legacy_skin(w, h, &rgba),
+-                Kind::Cape => process_cape(w, h, &rgba),
+-                Kind::Elytra => Some(rgba),
++                Kind::Skin => Some((process_legacy_skin(w, h, &rgba)?, process_skin_raw(w, h, &rgba))),
++                Kind::Cape => Some((process_cape(w, h, &rgba)?, None)),
++                Kind::Elytra => Some((rgba, None)),
+             }
+         };
+         if let Some(image) = std::fs::read(&file).ok().and_then(|b| decode(&b)) {
+@@ -1237,6 +1284,31 @@ impl Downloader {
+             return false;
+         };
+         self.queue(location.to_owned(), image);
++        self.again_raw(location);
++        true
++    }
++    /// The alpha-true copy of the downloaded skin at `location` (`raw_skin_location`) goes up
++    /// again, from memory or the disk cache; `false` for any other location or no image.
++    pub fn again_raw(&mut self, location: &str) -> bool {
++        let Some(digest) = location.strip_prefix("skins/") else {
++            return false;
++        };
++        let raw = raw_skin_location(location);
++        if self.queued.contains(&raw) {
++            return true;
++        }
++        let image = self.images.get(&raw).cloned().or_else(|| {
++            let file = self
++                .root
++                .join(if digest.len() > 2 { &digest[..2] } else { "xx" })
++                .join(digest);
++            let (w, h, rgba) = crate::hud::decode_bytes(&std::fs::read(&file).ok()?).ok()?;
++            process_skin_raw(w, h, &rgba)
++        });
++        let Some(image) = image else {
++            return false;
++        };
++        self.queue(raw, image);
+         true
+     }
+     /// Skins that finished since the last call: texture id and 64x64 RGBA.
+@@ -1250,6 +1322,11 @@ impl Downloader {
+     pub fn drawn(&mut self, location: &str) {
+         if !self.drawn.contains(location) {
+             self.drawn.insert(location.to_owned());
++            // The alpha-true copy a Bedrock model samples keeps its slot with it.
++            let raw = raw_skin_location(location);
++            if raw != location {
++                self.drawn.insert(raw);
++            }
+         }
+     }
+     /// The skins and capes drawn since the last call.
+@@ -1483,8 +1560,9 @@ mod tests {
+         for (h, model, slim) in [(64, "slim", true), (32, "classic", false), (64, "", false)] {
+             let (bytes, rgba) = png(64, h);
+             std::fs::write(&file, bytes).unwrap();
+-            let (skin, is_slim) = super::read_offline_skin(&file, model).unwrap();
++            let ((skin, is_slim), raw) = super::read_offline_skin(&file, model).unwrap();
+             assert_eq!(skin, super::process_legacy_skin(64, h, &rgba).unwrap());
++            assert_eq!(raw, super::process_skin_raw(64, h, &rgba).unwrap());
+             assert_eq!(skin.len(), 64 * 64 * 4);
+             assert_eq!(is_slim, slim);
+         }
+@@ -1730,6 +1808,27 @@ mod tests {
+         assert!(slots.contains("skins/b") && slots.contains("skins/c"));
+     }
+ 
++    /// A Bedrock model samples the skin with its own alpha: the base layer's unused
++    /// texels stay transparent there, and opaque in the game's own copy.
++    #[test]
++    fn the_raw_skin_keeps_its_alpha() {
++        let skin = vec![0u8; 64 * 64 * 4];
++        let opaque = super::process_legacy_skin(64, 64, &skin).unwrap();
++        let raw = super::process_skin_raw(64, 64, &skin).unwrap();
++        let at = |x: usize, y: usize| (y * 64 + x) * 4 + 3;
++        assert_eq!(opaque[at(24, 0)], 255);
++        assert_eq!(raw[at(24, 0)], 0);
++        assert_eq!(raw[at(40, 8)], 0);
++        assert_eq!(
++            super::raw_skin_location("skins/abc"),
++            "skins-raw/abc".to_owned()
++        );
++        assert_eq!(
++            super::raw_skin_location("entity/player/wide/steve"),
++            "entity/player/wide/steve".to_owned()
++        );
++    }
++
+     /// A skin evicted from the atlas re-uploads (`again`), once per ask.
+     #[test]
+     fn evicted_skins_upload_again() {
+@@ -1940,13 +2039,13 @@ mod tests {
+                 |_| fetched.clone(),
+             )
+         };
+-        assert_eq!(load(Some(&body)), Some(vec![7, 8, 9, 255]));
++        assert_eq!(load(Some(&body)), Some((vec![7, 8, 9, 255], None)));
+         assert_eq!(std::fs::read(&file).unwrap(), body);
+         // From then on the cache answers; no fetch is needed.
+-        assert_eq!(load(None), Some(vec![7, 8, 9, 255]));
++        assert_eq!(load(None), Some((vec![7, 8, 9, 255], None)));
+         // A broken file is fetched again and replaced, not kept.
+         std::fs::write(&file, b"<html>not a png</html>").unwrap();
+-        assert_eq!(load(Some(&body)), Some(vec![7, 8, 9, 255]));
++        assert_eq!(load(Some(&body)), Some((vec![7, 8, 9, 255], None)));
+         assert_eq!(std::fs::read(&file).unwrap(), body);
+         // A body that does not decode is not cached at all.
+         std::fs::remove_dir_all(&root).unwrap();
+diff --git a/crates/horizon-client/Cargo.toml b/crates/horizon-client/Cargo.toml
+index ce8b41bbff..303eb4d0fb 100644
+--- a/crates/horizon-client/Cargo.toml
++++ b/crates/horizon-client/Cargo.toml
+@@ -24,6 +24,8 @@ horizon-core = { path = "../horizon-core" }
+ horizon-hooks = { path = "../horizon-hooks" }
+ # OptiFine-format pack files: custom entity models, random entity textures.
+ horizon-optifine = { path = "../horizon-optifine" }
++# Bedrock resource packs: the look of mobs, sounds and particles (docs/bedrock.md).
++horizon-bedrock = { path = "../horizon-bedrock" }
+ # The server thread ahead of the workers (MinecraftServer.spin's Thread.setPriority).
+ horizon-threads = { path = "../horizon-threads" }
+ horizon-hdr = { path = "../horizon-hdr" }
+diff --git a/crates/horizon-client/assets/horizon/lang/en_us.json b/crates/horizon-client/assets/horizon/lang/en_us.json
+index adfdc99adb..0e5f5a130a 100644
+--- a/crates/horizon-client/assets/horizon/lang/en_us.json
++++ b/crates/horizon-client/assets/horizon/lang/en_us.json
+@@ -2,6 +2,9 @@
+   "horizon.extras.header.world": "World",
+   "horizon.extras.pregen": "Chunk pregeneration",
+   "horizon.extras.pregen.tooltip": "Enables /pregen in your single-player and LAN worlds. With cheats enabled, use /pregen start to generate an area before exploring it. Does not enable the command on servers you join.",
++  "horizon.pack.subpack": "Mode: %s",
++  "horizon.pack.settings": "Settings",
++  "horizon.pack.subpack.base": "Default",
+   "horizon.options.controller": "Controller",
+   "horizon.options.three_d_skin_layers": "3D Skin Layers",
+   "horizon.options.vibration": "Vibration",
+@@ -136,6 +139,8 @@
+   "horizon.studio.path.locked": "Studio camera path playback enabled",
+   "horizon.studio.path.unlocked": "Studio camera path playback stopped",
+   "horizon.studio.path.usage": "Usage: /studio path <lock|unlock> (add at least one keyframe first)",
++  "horizon.pages.addons": "Addons",
++  "horizon.pages.addons.tooltip": "Bedrock add-ons, from the addons folder. They apply on top of the resource packs.",
+   "horizon.pages.mods": "Mods",
+   "horizon.pages.shader_packs": "Shader Packs",
+   "horizon.pages.shader_options": "Shader Options",
+diff --git a/crates/horizon-client/assets/horizon/lang/pt_br.json b/crates/horizon-client/assets/horizon/lang/pt_br.json
+index 1457c37bfc..6273b25b9f 100644
+--- a/crates/horizon-client/assets/horizon/lang/pt_br.json
++++ b/crates/horizon-client/assets/horizon/lang/pt_br.json
+@@ -124,6 +124,8 @@
+   "horizon.studio.path.locked": "Reprodução do caminho da câmera do estúdio ativada",
+   "horizon.studio.path.unlocked": "Reprodução do caminho da câmera do estúdio parada",
+   "horizon.studio.path.usage": "Uso: /studio path <lock|unlock> (adicione pelo menos um quadro-chave primeiro)",
++  "horizon.pages.addons": "Addons",
++  "horizon.pages.addons.tooltip": "Add-ons do Bedrock, da pasta addons. Valem por cima dos pacotes de recursos.",
+   "horizon.pages.mods": "Modificações",
+   "horizon.pages.shader_packs": "Pacotes de sombreadores",
+   "horizon.pages.shader_options": "Opções de sombreamento",
+diff --git a/crates/horizon-client/assets/horizon/lang/ru_ru.json b/crates/horizon-client/assets/horizon/lang/ru_ru.json
+index 9fdd54c831..4fdde53996 100644
+--- a/crates/horizon-client/assets/horizon/lang/ru_ru.json
++++ b/crates/horizon-client/assets/horizon/lang/ru_ru.json
+@@ -124,6 +124,8 @@
+   "horizon.studio.path.locked": "Воспроизведение пути камеры Studio включено",
+   "horizon.studio.path.unlocked": "Воспроизведение пути камеры Studio остановлено",
+   "horizon.studio.path.usage": "Использование: /studio path <lock|unlock> (сначала добавьте хотя бы один ключевой кадр)",
++  "horizon.pages.addons": "Аддоны",
++  "horizon.pages.addons.tooltip": "Аддоны Bedrock из папки addons. Применяются поверх наборов ресурсов.",
+   "horizon.pages.mods": "Моды",
+   "horizon.pages.shader_packs": "Шейдерпаки",
+   "horizon.pages.controller": "Настройки контроллера",
+diff --git a/crates/horizon-client/src/game.rs b/crates/horizon-client/src/game.rs
+index 9d6b3f7938..9ffef7bddc 100644
+--- a/crates/horizon-client/src/game.rs
++++ b/crates/horizon-client/src/game.rs
+@@ -56,11 +56,13 @@ mod agent;
+ mod agent_settings;
+ mod allays;
+ mod armor_stands;
++mod pack_proxy;
+ mod atlas_slots;
+ mod attachment_sync;
+ mod autosave;
+ mod banners;
+ mod beacon;
++mod bedrock;
+ mod beds;
+ mod beehives;
+ mod block_breaking;
+@@ -2742,6 +2744,9 @@ struct Game<'a> {
+     /// a seat is taken (`Entity.moveTo`, no camera sweep) from the ones that
+     /// follow it (`positionRider`, interpolated as usual).
+     posed_rider: Option<u32>,
++    /// Where the ridden mount last seated the player: the next tick's start, whatever the player's
++    /// own physics did to its position meanwhile.
++    rider_seat: Vec3,
+     /// The vehicle the player's file names, waiting for it to be in the world
+     /// (`ServerPlayer.loadAndSpawnParentVehicle`).
+     pending_vehicle: Option<[i32; 4]>,
+@@ -6580,7 +6585,18 @@ impl Game<'_> {
+             })
+         };
+         laps.lap("eg_prep");
++        let bedrock = self
++            .res
++            .mob_data()
++            .bedrock
++            .read()
++            .unwrap_or_else(std::sync::PoisonError::into_inner)
++            .clone();
+         for m in &self.mobs {
++            // A Bedrock pack that burns the mob itself leaves the game's flames out.
++            if bedrock.replaces_flames(&m.kind.id) {
++                continue;
++            }
+             // Blaze.isOnFire: a charged blaze burns.
+             let blazing = m.species() == horizon_client::mobs::Species::Blaze && m.extra.flag;
+             if (m.is_on_fire() || blazing) && !m.removed {
+@@ -7206,6 +7222,7 @@ impl Game<'_> {
+         laps.lap("eg_objects");
+         // Particles (ParticleEngine.extract): camera-facing quads.
+         self.mark_stage(out.len(), "PARTICLES");
++        self.bedrock_effects(camera, &mut out);
+         let world = &self.world;
+         let particle_mode = self.settings.horizon.particle_culling;
+         if particle_mode == horizon_client::graphics::ParticleCullingMode::Off {
+@@ -11902,6 +11919,7 @@ impl<'a> Game<'a> {
+             started_riding: Vec::new(),
+             rotation_forced: false,
+             posed_rider: None,
++            rider_seat: Vec3::ZERO,
+             pending_vehicle: None,
+             ender_items: vec![None; 27],
+             ender_open: None,
+@@ -12237,6 +12255,9 @@ fn load_world_rest(
+         } else {
+             horizon_client::mobs::cem::CemModels::default()
+         }));
++        mob_data.bedrock = std::sync::RwLock::new(Arc::new(
++            horizon_client::mobs::bedrock::BedrockMobs::load(root),
++        ));
+         horizon_client::mobs::trial_spawner::load_registry(root);
+         Ok((mob_types, mob_data))
+     };
+diff --git a/crates/horizon-client/src/game/armor_stands.rs b/crates/horizon-client/src/game/armor_stands.rs
+index fdb4782fe3..18f7c9c053 100644
+--- a/crates/horizon-client/src/game/armor_stands.rs
++++ b/crates/horizon-client/src/game/armor_stands.rs
+@@ -1486,6 +1486,12 @@ impl Game<'_> {
+             let probe = a.light_probe(alpha, |x, y, z| self.world.light(x, y, z));
+             let light = self.world.light(probe[0], probe[1], probe[2]);
+             let packed = a.render_light(light);
++            // A pack with its own armor stand draws it with its model: the stand's pose laid
++            // over the pack's, its gear through the pack's attachables. An invisible stand keeps
++            // the game's layers (its items and armour without a body).
++            if !a.invisible && self.pack_stand(a, camera, alpha, wobble, packed, out) {
++                continue;
++            }
+             let skinned = if skinning {
+                 let mut models = self.skin_models.borrow_mut();
+                 let mut frame = self.skin_frame.borrow_mut();
+@@ -1502,6 +1508,59 @@ impl Game<'_> {
+             }
+         }
+     }
++    /// Stand `a` drawn by the pack that has a model for `minecraft:armor_stand`, through a mob
++    /// that stands in for it (`pack_proxy`): false when no pack has one.
++    fn pack_stand(
++        &self,
++        a: &ArmorStand,
++        camera: glam::DVec3,
++        alpha: f64,
++        wobble: f32,
++        packed: u32,
++        out: &mut Vec<Vertex>,
++    ) -> bool {
++        let at = super::entity_culling::at(a.render_position(alpha));
++        let proxy = super::pack_proxy::Proxy {
++            entity: "minecraft:armor_stand",
++            id: a.id,
++            at,
++            // `setupRotations`' wobble after a hit turns the whole stand.
++            yaw: a.render_yaw(alpha as f32) - wobble,
++            head_yaw: a.render_yaw(alpha as f32) - wobble,
++            pitch: 0.0,
++            base: None,
++            packed,
++        };
++        self.pack_proxy(
++            &proxy,
++            camera,
++            alpha,
++            |m| {
++                m.on_ground = a.on_ground;
++                m.extra.age = if a.small { -1 } else { 0 };
++                let item = |i: usize| a.equipment[i].as_ref().map(|s| s.item.clone());
++                m.extra.main_hand = item(0);
++                m.extra.off_hand = item(1);
++                m.extra.feet = item(2);
++                m.extra.legs = item(3);
++                m.extra.chest = item(4);
++                m.extra.head = item(5);
++                m.extra.armor = [5, 4, 3, 2].map(|i| a.equipment[i].clone());
++                m.custom_name = a.custom_name.as_ref().map(|t| t.plain());
++                let stand = horizon_client::mobs::StandPose {
++                    pose: a.pose,
++                    // Bedrock stands always have arms, and the pack's stand is drawn as Bedrock
++                    // draws it.
++                    arms: true,
++                    base_plate: !a.no_base_plate,
++                };
++                if m.extra.stand_pose.as_deref() != Some(&stand) {
++                    m.extra.stand_pose = Some(Box::new(stand));
++                }
++            },
++            out,
++        )
++    }
+     /// `ArmorStandRenderer.submit` for stand `a` under `base` (its
+     /// `setupRotations`): the body, the hand and head items, the armour and
+     /// the wings, at packed light `packed`. With `skin`, the stand's own models
+diff --git a/crates/horizon-client/src/game/creatures/mob_geometry.rs b/crates/horizon-client/src/game/creatures/mob_geometry.rs
+index 09fcef982c..f4cff2e7ab 100644
+--- a/crates/horizon-client/src/game/creatures/mob_geometry.rs
++++ b/crates/horizon-client/src/game/creatures/mob_geometry.rs
+@@ -193,7 +193,16 @@ impl Game<'_> {
+                 );
+             }
+             // Other players on a server: PlayerRenderer's HumanoidArmorLayer.
+-            let armor = if is_player {
++            // The pack that dresses a player draws the armour itself.
++            let pack_dresses = is_player
++                && self
++                    .res
++                    .mob_data()
++                    .bedrock
++                    .read()
++                    .unwrap_or_else(std::sync::PoisonError::into_inner)
++                    .has_entity(&mob.kind.id);
++            let armor = if is_player && !pack_dresses {
+                 self.worn_armor_layers(mob)
+             } else {
+                 Vec::new()
+@@ -394,6 +403,13 @@ impl Game<'_> {
+             if let Some(block) = a.block_light_override() {
+                 packed = (packed & 0xFF) | (u32::from(block) * 16) << 8;
+             }
++            // A pack's projectile, drawn by its model (`pack_proxy.rs`).
++            if let Some(burning) = self.pack_projectile(a, at, c, camera, alpha, packed, out) {
++                if burning {
++                    flame_geometry(atlas, c, 0.5, 0.5, self.yaw, light, out);
++                }
++                continue;
++            }
+             if a.is_arrow() {
+                 let Some(model) = self.arrow_model.as_ref() else {
+                     continue;
+diff --git a/crates/horizon-client/src/game/dragon.rs b/crates/horizon-client/src/game/dragon.rs
+index b1f07636d0..f6597704a8 100644
+--- a/crates/horizon-client/src/game/dragon.rs
++++ b/crates/horizon-client/src/game/dragon.rs
+@@ -3443,6 +3443,55 @@ impl Game<'_> {
+         } else {
+             (0xFFFF_FFFF, u32::from(d.hurt_time > 0))
+         };
++        // A pack's dragon: its own model, posed by its animations from the dragon's flight
++        // history, in place of the game's body and eyes (the death rays and the crystal's beam
++        // stay the game's). Turned as a mob is: the pack's `setup` and `rotation` animations
++        // add `180 - body` and `body` to its root, a half turn whatever the yaw (Bedrock turns
++        // the dragon itself, its model facing the other way), so a body yaw of `yRot` turns
++        // it as the game's model is turned (`-yRot`).
++        let pack = {
++            let proxy = super::pack_proxy::Proxy {
++                entity: "minecraft:ender_dragon",
++                id: d.id,
++                at: pos,
++                yaw: yr,
++                head_yaw: yr,
++                pitch: 0.0,
++                base: None,
++                packed: light,
++            };
++            let history = std::array::from_fn(|i| {
++                let (y, yaw) = h(i);
++                [y as f32, yaw]
++            });
++            self.pack_proxy(
++                &proxy,
++                camera,
++                alpha,
++                |m| {
++                    m.health = d.health.max(0.0);
++                    m.hurt_time = d.hurt_time;
++                    m.death_time = d.death_time;
++                    m.extra.history = Some(Box::new(history));
++                },
++                out,
++            )
++        };
++        if pack {
++            if death > 0.0 {
++                let rays = additive.len();
++                self.dragon_rays(rays_base, death / 200.0, additive);
++                for v in &mut additive[rays..] {
++                    v.layer |= u32::from(horizon_client::mesher::VERY_BRIGHT) << 16;
++                }
++            }
++            if let Some(c) = d.nearest_crystal.and_then(|i| self.crystals.get(i)) {
++                let bob = f64::from(horizon_client::end_crystal::y(c.time as f32 + a));
++                let to = glam::DVec3::new(c.position.x, c.position.y + bob, c.position.z);
++                self.crystal_beam(pos, to - pos, self.ticks as f32 + a, camera, out);
++            }
++            return;
++        }
+         let first = out.len();
+         horizon_client::mobs::render::draw(model, base, &poses, skin, color, light, overlay, out);
+         if let Some(mask) = mask {
+diff --git a/crates/horizon-client/src/game/frame_geometry.rs b/crates/horizon-client/src/game/frame_geometry.rs
+index 0cdbf934ed..fb007a0f46 100644
+--- a/crates/horizon-client/src/game/frame_geometry.rs
++++ b/crates/horizon-client/src/game/frame_geometry.rs
+@@ -447,6 +447,17 @@ impl Game<'_> {
+             } else {
+                 horizon_client::cit::Hand::Main
+             };
++            // The pack's attachable for this item, as it dresses the first-person view model
++            // (`bedrock.rs`), in place of the game's own model. The game's own use poses turn
++            // its models, so the pack gets the hand where it rests.
++            let rest = to_world
++                * horizon_client::first_person::item_pose(left, inverse_height, 0.0, ItemPose::Using);
++            let mut dressed = Vec::new();
++            if self.first_person_pack_item(&stack.item, hand == Hand::Off, a, rest, packed, &mut dressed) {
++                runs.push((out.len() as u32, item_id));
++                out.append(&mut dressed);
++                continue;
++            }
+             let state = self.resolve_item_in_hand(&stack, context, Some(&owner), seed, cit_hand);
+             // Combat feel Legacy: 1.8.9's pose for a flat item drawn with vanilla's display.
+             if self.settings.extras.pvp.combat.legacy
+diff --git a/crates/horizon-client/src/game/minecarts.rs b/crates/horizon-client/src/game/minecarts.rs
+index 6aa7534bb8..8c04c5e664 100644
+--- a/crates/horizon-client/src/game/minecarts.rs
++++ b/crates/horizon-client/src/game/minecarts.rs
+@@ -214,7 +214,8 @@ fn push_along(push: Vec3, movement: Vec3) -> Vec3 {
+     }
+ }
+ /// AbstractMinecart passenger attachment Y (EntityAttachments).
+-const PASSENGER_Y: f64 = 0.1875;
++/// Raised 0.47 so the rider's shoulders clear the rim, as in Bedrock.
++const PASSENGER_Y: f64 = 0.1875 + 0.47;
+ /// The minecart's passenger attachment minus Player.DEFAULT_VEHICLE_ATTACHMENT.
+ pub(super) const SEAT: f64 = PASSENGER_Y - 0.6;
+ /// The placeholder container key under which an open cart's items live.
+@@ -2034,7 +2035,10 @@ impl Game<'_> {
+         let mut c = self.carts[i].clone();
+         let alive = self.tick_cart(&mut c, intent, i, &mut CartIndex::default());
+         if let Some(p) = self.player.as_mut() {
+-            self.previous_position = p.position;
++            // The seat the cart had a tick ago, as the cart itself is drawn from: the player's own
++            // position here has already fallen a tick of gravity, and drawn from there the rider
++            // jumped up and down.
++            self.previous_position = Vec3::new(c.previous.x, c.previous.y + SEAT, c.previous.z);
+             p.position = Vec3::new(c.position.x, c.position.y + SEAT, c.position.z);
+             p.velocity = Vec3::ZERO;
+             p.fall_distance = 0.0;
+@@ -2845,7 +2849,27 @@ impl Game<'_> {
+                 c.position.z.floor() as i32,
+             );
+             let packed = (u32::from(l >> 4) * 16) | ((u32::from(l & 15) * 16) << 8);
+-            if let Some(state) = shown.unwrap_or_else(|| self.display_state(c)) {
++            // A pack's minecart: its own cart with its chest, hopper, TNT or command block in it
++            // (Bedrock's carts of those kinds), or its plain cart under the game's display block
++            // (a furnace or spawner cart, a custom block).
++            let pack_block = c.custom_display.is_none()
++                && matches!(
++                    c.kind,
++                    CartKind::Chest | CartKind::Hopper | CartKind::Tnt | CartKind::CommandBlock
++                )
++                && self.pack_draws(c.kind.id());
++            let pack_cart = if pack_block {
++                Some(c.kind.id())
++            } else {
++                self.pack_draws("minecraft:minecart")
++                    .then_some("minecraft:minecart")
++            };
++            let shown_block = if pack_block {
++                None
++            } else {
++                shown.unwrap_or_else(|| self.display_state(c))
++            };
++            if let Some(state) = shown_block {
+                 let display = base
+                     * glam::Mat4::from_scale(glam::Vec3::splat(0.75))
+                     * glam::Mat4::from_translation(glam::Vec3::new(
+@@ -2885,8 +2909,25 @@ impl Game<'_> {
+                 }
+             }
+             let m = base * glam::Mat4::from_scale(glam::Vec3::new(-1.0, -1.0, 1.0));
+-            let poses = Poses::new(model);
+-            horizon_client::mobs::render::draw(model, m, &poses, uv, 0xFFFF_FFFF, packed, 0, out);
++            // The pack's cart, when it has one (`pack_proxy.rs`).
++            let pack = pack_cart.is_some_and(|entity| {
++                self.pack_cart(
++                    entity,
++                    c.id,
++                    glam::DVec3::new(x, y, z),
++                    (yaw, pitch),
++                    m,
++                    packed,
++                    |pm| pm.hurt_time = c.hurt_time,
++                    camera,
++                    alpha,
++                    out,
++                )
++            });
++            if !pack {
++                let poses = Poses::new(model);
++                horizon_client::mobs::render::draw(model, m, &poses, uv, 0xFFFF_FFFF, packed, 0, out);
++            }
+             self.finish_entity_occlusion(culling, c, out, entity_start);
+         }
+     }
+diff --git a/crates/horizon-client/src/game/mob_blocks.rs b/crates/horizon-client/src/game/mob_blocks.rs
+index d08db9c439..fec695ba0a 100644
+--- a/crates/horizon-client/src/game/mob_blocks.rs
++++ b/crates/horizon-client/src/game/mob_blocks.rs
+@@ -335,6 +335,18 @@ impl Game<'_> {
+         if !on_head || horizon_client::mobs::trader::is_invisible(mob) {
+             return;
+         }
++        // A pack's snow golem carries its own pumpkin in its model.
++        if species == Species::SnowGolem
++            && self
++                .res
++                .mob_data()
++                .bedrock
++                .read()
++                .unwrap_or_else(std::sync::PoisonError::into_inner)
++                .has_entity(&mob.kind.id)
++        {
++            return;
++        }
+         let registry = &self.pack.assets.registry;
+         let block = match species {
+             Species::SnowGolem => "minecraft:carved_pumpkin",
+@@ -400,6 +412,9 @@ impl Game<'_> {
+         // ItemInHandLayer submits with OverlayTexture.NO_OVERLAY: no hurt tint.
+         for (item, off_hand) in [(&mob.extra.main_hand, false), (&mob.extra.off_hand, true)] {
+             let Some(item) = item else { continue };
++            if render::held_item_replaced(mob, self.res.mob_data(), off_hand) {
++                continue;
++            }
+             let left = off_hand != mob.main_arm_left();
+             // PlayerItemInHandLayer.submitArmWithItem (avatars only): a spyglass
+             // in use, with no swing in progress, is held to the eye (`heldOnHead`).
+diff --git a/crates/horizon-client/src/game/mounts.rs b/crates/horizon-client/src/game/mounts.rs
+index a97fd6db6d..0424c164c7 100644
+--- a/crates/horizon-client/src/game/mounts.rs
++++ b/crates/horizon-client/src/game/mounts.rs
+@@ -699,7 +699,8 @@ impl Game<'_> {
+         let first = self.posed_rider != self.riding;
+         self.posed_rider = self.riding;
+         if let Some(p) = self.player.as_mut() {
+-            self.previous_position = if first { at } else { p.position };
++            self.previous_position = if first { at } else { self.rider_seat };
++            self.rider_seat = at;
+             p.position = at;
+             p.velocity = Vec3::ZERO;
+             p.fall_distance = 0.0;
+diff --git a/crates/horizon-client/src/game/native_projectiles.rs b/crates/horizon-client/src/game/native_projectiles.rs
+index 55510f411a..e62addeaad 100644
+--- a/crates/horizon-client/src/game/native_projectiles.rs
++++ b/crates/horizon-client/src/game/native_projectiles.rs
+@@ -32,7 +32,7 @@ pub(super) struct Impact {
+ }
+ 
+ /// The type the mods know a projectile by: a spectral arrow is its own.
+-fn projectile_type(p: &Projectile) -> &'static str {
++pub(super) fn projectile_type(p: &Projectile) -> &'static str {
+     p.entity_type()
+ }
+ 
+diff --git a/crates/horizon-client/src/game/occlusion_culling_tests.rs b/crates/horizon-client/src/game/occlusion_culling_tests.rs
+index 3749799d8e..76fec89b6d 100644
+--- a/crates/horizon-client/src/game/occlusion_culling_tests.rs
++++ b/crates/horizon-client/src/game/occlusion_culling_tests.rs
+@@ -15,6 +15,7 @@ fn vanilla_models_and_animations_stay_inside_the_precheck_envelope() {
+     let types = MobTypes::load(&root).unwrap();
+     let data = MobData {
+         states: Vec::new(),
++        bedrock: Default::default(),
+         placements: Default::default(),
+         heightmaps: Default::default(),
+         animations: MobData::load_animations(&root),
+diff --git a/crates/horizon-client/src/game/options.rs b/crates/horizon-client/src/game/options.rs
+index e10f7d5365..746d20f65f 100644
+--- a/crates/horizon-client/src/game/options.rs
++++ b/crates/horizon-client/src/game/options.rs
+@@ -140,7 +140,8 @@ impl Game<'_> {
+     /// and the list found again when its packs changed (`PackSelectionScreen.tick`'s
+     /// watcher).
+     fn watch_pack_folder(&mut self) {
+-        if !self.ui.options.resource_packs_open() {
++        let addons = self.ui.options.addons_open();
++        if !self.ui.options.resource_packs_open() && !addons {
+             self.pack_folder = None;
+             return;
+         }
+@@ -153,8 +154,12 @@ impl Game<'_> {
+             return;
+         }
+         let signature: Vec<(String, u64, Option<std::time::SystemTime>)> =
+-            std::fs::read_dir(super::packs::packs_dir())
+-                .into_iter()
++            std::fs::read_dir(if addons {
++                super::packs::addons_dir()
++            } else {
++                super::packs::packs_dir()
++            })
++            .into_iter()
+                 .flatten()
+                 .flatten()
+                 .map(|e| {
+@@ -171,7 +176,9 @@ impl Game<'_> {
+             .as_ref()
+             .is_some_and(|(_, seen)| *seen != signature);
+         self.pack_folder = Some((now, signature));
+-        if changed {
++        if changed && addons {
++            self.ui.options.update_addon_infos(super::packs::addon_infos());
++        } else if changed {
+             let infos = super::packs::pack_infos(&self.vanilla_root(), &self.server_packs.active);
+             self.ui.options.update_pack_infos(infos);
+             self.ui.options.pack_configs = super::packs::pack_configs(&self.vanilla_root());
+@@ -419,6 +426,11 @@ impl Game<'_> {
+                     let _ = std::fs::create_dir_all(&dir);
+                     super::packs::open_folder(&dir);
+                 }
++                Event::OpenAddonFolder => {
++                    let dir = super::packs::addons_dir();
++                    let _ = std::fs::create_dir_all(&dir);
++                    super::packs::open_folder(&dir);
++                }
+                 // Horizon's own Add button: the screen picked a hit, the game
+                 // owns the folder it lands in.
+                 Event::DownloadPack(i) => {
+diff --git a/crates/horizon-client/src/game/packs.rs b/crates/horizon-client/src/game/packs.rs
+index cc572bd641..e72128c5a1 100644
+--- a/crates/horizon-client/src/game/packs.rs
++++ b/crates/horizon-client/src/game/packs.rs
+@@ -33,6 +33,10 @@ pub fn packs_dir() -> PathBuf {
+ }
+ mod folder;
+ 
++/// Where the addons are: `addons/` beside `resourcepacks/`.
++pub fn addons_dir() -> PathBuf {
++    std::env::current_dir().unwrap_or_default().join("addons")
++}
+ /// `Util.getPlatform().openPath`: the system file manager on the folder.
+ pub fn open_folder(dir: &Path) {
+     if let Err(e) = folder::command(dir).and_then(|mut command| command.spawn()) {
+@@ -62,13 +66,13 @@ pub fn startup_root(
+     selected: &[String],
+     server: &[Pack],
+ ) -> std::io::Result<PathBuf> {
+-    let all = packs::discover(vanilla, &packs_dir());
++    let all = packs::discover_all(vanilla, &packs_dir(), &addons_dir());
+     let mut enabled = packs::enabled(&all, selected);
+     enabled.extend_from_slice(server);
+     packs::resource_root(base, &enabled, &cache_dir())
+ }
+ fn info(p: &Pack) -> PackInfo {
+-    let built_in = !p.id.starts_with("file/");
++    let built_in = !(p.id.starts_with("file/") || packs::is_addon_id(&p.id));
+     PackInfo {
+         id: p.id.clone(),
+         title: p.title.clone(),
+@@ -163,6 +167,10 @@ pub(super) fn save_pack_options(
+     }
+     packs::set_polytone_choices(all);
+ }
++/// Packs the Addons screen lists: the `addons/` folder's.
++pub(super) fn addon_infos() -> Vec<PackInfo> {
++    packs::addons(&addons_dir()).iter().map(info).collect()
++}
+ impl Game<'_> {
+     pub(super) fn vanilla_root(&self) -> PathBuf {
+         if self.ui.vanilla_root.as_os_str().is_empty() {
+@@ -198,6 +206,7 @@ impl Game<'_> {
+         o.pack_browser = browsing;
+         o.pack_infos = infos;
+         o.pack_configs = configs;
++        o.addon_infos = addon_infos();
+         o.pack_selection = self.settings.resource_packs.clone();
+         o.pack_screen = None;
+     }
+@@ -265,7 +274,7 @@ impl Game<'_> {
+     /// screen again, with the error.
+     fn selection_reload_failed(&mut self, error: &str) {
+         log::warn!("Horizon: resource reload failed: {error}");
+-        let all = packs::discover(&self.vanilla_root(), &packs_dir());
++        let all = packs::discover_all(&self.vanilla_root(), &packs_dir(), &addons_dir());
+         if packs::able_to_clear_any_pack(&all, &self.settings.resource_packs) {
+             // clearResourcePacksOnError.
+             log::info!("Caught error loading resourcepacks, removing all selected resourcepacks");
+@@ -363,6 +372,7 @@ impl Game<'_> {
+             pack,
+             textures,
+             cem,
++            bedrock,
+             block_entity_shapes,
+             sounds,
+             ui_metadata,
+@@ -452,6 +462,12 @@ impl Game<'_> {
+             .cem
+             .write()
+             .unwrap_or_else(std::sync::PoisonError::into_inner) = cem;
++        *self
++            .res
++            .mob_data()
++            .bedrock
++            .write()
++            .unwrap_or_else(std::sync::PoisonError::into_inner) = bedrock;
+         self.res
+             .block_entity_render()
+             .set_shapes(block_entity_shapes);
+@@ -576,12 +592,21 @@ pub(super) fn stage_pack(
+         panorama: Arc::new(panorama.unwrap_or_else(|p| std::panic::resume_unwind(p))),
+     };
+     progress.set(2);
++    // The grass, foliage and dry foliage colormaps are the new root's (`GrassColorReloadListener`):
++    // a pack's own tint, or vanilla's back once it is off.
++    let biomes = match horizon_client::biome::Biomes::load(&root) {
++        Ok(biomes) => Arc::new(biomes),
++        Err(e) => {
++            log::warn!("Horizon: the biome colormaps of the new resources are not read: {e}");
++            context.biomes.clone()
++        }
++    };
+     let pack = PackResources::load(
+         &root,
+         assets.clone(),
+         render,
+         res.facts(),
+-        context.biomes.clone(),
++        biomes,
+         context.light.clone(),
+     )?;
+     let textures = prepare_renderer_textures(&pack);
+@@ -589,6 +614,7 @@ pub(super) fn stage_pack(
+         &root,
+         res.mob_types(),
+     ));
++    let bedrock = Arc::new(horizon_client::mobs::bedrock::BedrockMobs::load(&root));
+     let block_entity_shapes = res.block_entity_render().shapes_for(&root);
+     progress.set(3);
+     Ok(StagedPack {
+@@ -597,6 +623,7 @@ pub(super) fn stage_pack(
+         pack,
+         textures,
+         cem,
++        bedrock,
+         block_entity_shapes,
+         sounds,
+         ui_metadata,
+@@ -613,6 +640,8 @@ pub(super) struct StagedPack {
+     pub textures: PreparedTextures,
+     /// The packs' custom entity models (OptiFine CEM).
+     pub cem: Arc<horizon_client::mobs::cem::CemModels>,
++    /// The Bedrock packs' look for mobs.
++    pub bedrock: Arc<horizon_client::mobs::bedrock::BedrockMobs>,
+     /// The block entities' models, the packs' custom entity models over vanilla's.
+     pub block_entity_shapes: Arc<horizon_client::block_entity_render::BlockEntityShapes>,
+     /// The root's sound events, GUI sprite metadata and current language.
+diff --git a/crates/horizon-client/src/game/passengers.rs b/crates/horizon-client/src/game/passengers.rs
+index 126f5567da..98c7aaacb8 100644
+--- a/crates/horizon-client/src/game/passengers.rs
++++ b/crates/horizon-client/src/game/passengers.rs
+@@ -65,6 +65,28 @@ impl Game<'_> {
+         self.note_started_riding(vehicle);
+         true
+     }
++    /// The entity type of the vehicle `id`: a boat, a cart or a mob.
++    pub(super) fn vehicle_kind(&self, id: u32) -> String {
++        if let Some(b) = self.boats.iter().find(|b| b.id == id) {
++            return if b.chest { "minecraft:chest_boat" } else { "minecraft:boat" }.to_owned();
++        }
++        if let Some(c) = self.carts.iter().find(|c| c.id == id) {
++            return match c.kind {
++                super::minecarts::CartKind::Rideable => "minecraft:minecart",
++                super::minecarts::CartKind::Chest => "minecraft:chest_minecart",
++                super::minecarts::CartKind::Hopper => "minecraft:hopper_minecart",
++                super::minecarts::CartKind::Furnace => "minecraft:furnace_minecart",
++                super::minecarts::CartKind::Tnt => "minecraft:tnt_minecart",
++                super::minecarts::CartKind::CommandBlock => "minecraft:command_block_minecart",
++                super::minecarts::CartKind::Spawner => "minecraft:spawner_minecart",
++            }
++            .to_owned();
++        }
++        self.mobs
++            .iter()
++            .find(|m| m.id == id)
++            .map_or_else(String::new, |m| m.kind.id.to_string())
++    }
+     /// Riders sit on their vehicles (`Entity.positionRider`), mobs or boats,
+     /// and let go when the vehicle dies or is gone.
+     pub(super) fn sync_riders(&mut self) {
+@@ -128,6 +150,14 @@ impl Game<'_> {
+         for m in &mut self.mobs {
+             m.extra.rider = riding.get(&m.id).copied();
+         }
++        let mut kinds: Vec<(u32, String)> = Vec::new();
++        for m in &self.mobs {
++            let Some(v) = m.extra.mount else {
++                continue;
++            };
++            kinds.push((m.id, self.vehicle_kind(v)));
++        }
++        riders::set_mount_kinds(kinds);
+         self.position_riders();
+     }
+     /// `Entity.positionRider` for every mob passenger: in its boat, then on
+diff --git a/crates/horizon-client/src/game/perspective.rs b/crates/horizon-client/src/game/perspective.rs
+index 9cd5dd24c6..6d9ca6743e 100644
+--- a/crates/horizon-client/src/game/perspective.rs
++++ b/crates/horizon-client/src/game/perspective.rs
+@@ -469,6 +469,7 @@ impl Game<'_> {
+         let pose = p.pose;
+         let crouching = pose == Pose::Crouching;
+         let position = p.position;
++        let on_ground = p.ground.on_ground;
+         let (fall_flying, fly_ticks, velocity) = (p.fall_flying, p.fall_fly_ticks, p.velocity);
+         let spinning = p.auto_spin_attack_ticks > 0;
+         let using = self.using.map(|(_, ticks)| ticks as i32 + 1).unwrap_or(0);
+@@ -511,9 +512,11 @@ impl Game<'_> {
+         let bed = self.sleeping.map_or(0, |head| self.bed_facing(head));
+         let spectator = self.spectator();
+         let ridden = self.ridden_body();
++        let mount_type = self.riding.map(|id| self.vehicle_kind(id));
+         let Some(m) = self.player_model.as_mut() else {
+             return;
+         };
++        horizon_client::mobs::riders::set_player_mount(mount_type.map(|k| (m.id, k)));
+         m.extra.ints[1] = bed;
+         m.extra.model_scale = scale;
+         // The crouch flag is still last tick's here.
+@@ -593,6 +596,9 @@ impl Game<'_> {
+         // The worn stacks, for the elytra's glint (`WingsLayer`).
+         m.extra.armor = armor;
+         m.extra.crouching = crouching;
++        // Shift while flying (creative) lowers the flight: no sneak, as in Bedrock.
++        m.extra.sneaking = p.shift_key_down && !p.flying;
++        m.extra.local_player = true;
+         // Guests and server players take their pose from DATA_POSE, not here.
+         m.extra.avatar_pose = pose;
+         // What custom entity model animations read of the fluids (`is_in_water`, crawling).
+@@ -604,6 +610,9 @@ impl Game<'_> {
+         m.extra.passenger = riding;
+         m.extra.previous_velocity = m.velocity;
+         m.velocity = velocity;
++        // `is_on_ground` / `vertical_speed` of the packs: a body on the ground (gravity still
++        // pulling) is no fall; a rider is carried.
++        m.on_ground = on_ground && !riding;
+         m.extra.fall_flying = fall_flying;
+         m.extra.fall_fly_ticks = fly_ticks;
+         m.extra.auto_spin_attack = spinning;
+@@ -637,6 +646,16 @@ impl Game<'_> {
+         m.extra.swing_right_arm = swing_right_arm;
+         m.extra.swing_stab = self.swing.current.is_some_and(|c| c.animation.kind == 2);
+         m.hurt_time = hurt;
++        // What a pack asks of the blocks round the body (`relative_block_has_any_tag`: the
++        // water, the ground a fall lands on) is a sample the mobs take in their own tick.
++        if horizon_client::mobs::bedrock::wants_surroundings() {
++            let sample = self.player_model.as_ref().map(|m| {
++                horizon_client::mobs::bedrock::sample_surroundings(m, &self.mob_world_base(&[]))
++            });
++            if let (Some(sample), Some(m)) = (sample, self.player_model.as_mut()) {
++                m.extra.surroundings = Some(std::sync::Arc::new(sample));
++            }
++        }
+     }
+     /// `Entity.turn` for the player, by the mouse, a pad, the arrow keys or an
+     /// agent's `turn`.
+@@ -974,14 +993,26 @@ impl Game<'_> {
+         let stack = m.extra.armor[1]
+             .as_ref()
+             .filter(|s| chest == Some(&*s.item));
++        // A pack that dresses the elytra itself draws it on its own body: the game's wings stay out.
++        if horizon_client::mobs::render::pack_dresses_torso(m)
++            && chest.is_some_and(|c| c.trim_start_matches("minecraft:") == "elytra")
++        {
++            return;
++        }
++        let follows = horizon_client::mobs::render::worn_follows_pack(m);
+         self.wings_geometry(
+             chest,
+             stack,
+             m.cape.as_deref(),
+             false,
+-            horizon_client::mobs::render::base_transform(m, partial, camera),
++            horizon_client::mobs::render::worn_base(
++                m,
++                horizon_client::mobs::render::base_transform(m, partial, camera),
++                "elytra",
++            ),
+             m.extra.elytra.angles(partial),
+-            m.extra.crouching,
++            // The pack's body already crouches.
++            m.extra.crouching && !follows,
+             light,
+             self.wings_overlay(stack),
+             out,
+@@ -1139,14 +1170,18 @@ impl Game<'_> {
+         if layers.is_some_and(|k| k.contains_key("wings")) {
+             return;
+         }
+-        let mut base = horizon_client::mobs::render::base_transform(m, partial, camera);
+-        if layers.is_some_and(|k| k.contains_key("humanoid")) {
+-            base *= glam::Mat4::from_translation(glam::Vec3::new(0.0, -0.053125, 0.06875));
+-        }
++        let base = horizon_client::mobs::render::base_transform(m, partial, camera);
++        // Moved out over a chestplate.
++        let nudge = if layers.is_some_and(|k| k.contains_key("humanoid")) {
++            glam::Mat4::from_translation(glam::Vec3::new(0.0, -0.053125, 0.06875))
++        } else {
++            glam::Mat4::IDENTITY
++        };
+         horizon_client::mobs::render::cape(
+             m,
+             partial,
+             base,
++            nudge,
+             [rect.u0, rect.v0, rect.u1, rect.v1],
+             light,
+             self.res.mob_data(),
+@@ -1849,6 +1884,7 @@ mod preview_tests {
+             entity_tags: Default::default(),
+             villager_hats: Default::default(),
+             cem: Default::default(),
++            bedrock: Default::default(),
+             random_textures: Default::default(),
+             emissive: Default::default(),
+             blinks: Default::default(),
+diff --git a/crates/horizon-client/src/game/remote.rs b/crates/horizon-client/src/game/remote.rs
+index e368f69b54..9d28e0efe6 100644
+--- a/crates/horizon-client/src/game/remote.rs
++++ b/crates/horizon-client/src/game/remote.rs
+@@ -3867,6 +3867,16 @@ impl Game<'_> {
+                     }
+                 }
+                 self.remote_mob_data(p.id, &p.values);
++                if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32)
++                    && m.species() == horizon_client::mobs::Species::Blaze
++                {
++                    // Blaze.DATA_FLAGS_ID, bit 0: on fire, which a pack reads as `is_charged`.
++                    for (index, _, value) in &p.values {
++                        if let (16, Value::Byte(flags)) = (index, value) {
++                            horizon_client::mobs::nether::set_blaze_charged(m, flags & 1 != 0);
++                        }
++                    }
++                }
+                 if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32)
+                     && m.species() == horizon_client::mobs::Species::Creeper
+                 {
+@@ -4084,6 +4094,7 @@ impl Game<'_> {
+                     for (index, _, value) in &p.values {
+                         if let (0, Value::Byte(flags)) = (index, value) {
+                             m.extra.crouching = flags & 2 != 0;
++                            m.extra.sneaking = flags & 2 != 0;
+                             m.extra.sprinting = flags & 8 != 0;
+                         }
+                     }
+@@ -5692,6 +5703,13 @@ impl Game<'_> {
+             if !self.skin_slots.contains(OFFLINE) || !self.gui.atlas.sprites.contains_key(OFFLINE) {
+                 self.store_skin(OFFLINE.into(), rgba.clone());
+             }
++            // What a Bedrock model samples: the skin with its own alpha.
++            let raw = horizon_client::skins::OFFLINE_SKIN_RAW;
++            if let Some(image) = horizon_client::skins::offline_skin_raw()
++                && (!self.skin_slots.contains(raw) || !self.gui.atlas.sprites.contains_key(raw))
++            {
++                self.store_skin(raw.into(), image.to_vec());
++            }
+             if *is_slim {
+                 slim.insert(local);
+             }
+@@ -5890,6 +5908,13 @@ impl Game<'_> {
+         // never happened) counts as missing, so the skin is stored again.
+         if self.skin_slots.contains(location) && self.gui.atlas.sprites.contains_key(location) {
+             downloads.drawn(location);
++            // Its alpha-true copy, which a Bedrock model samples, may have been pushed out alone.
++            let raw = horizon_client::skins::raw_skin_location(location);
++            if raw != location
++                && !(self.skin_slots.contains(&raw) && self.gui.atlas.sprites.contains_key(&raw))
++            {
++                downloads.again_raw(location);
++            }
+             true
+         } else {
+             downloads.again(location);
+diff --git a/crates/horizon-client/src/game/remote_vehicles.rs b/crates/horizon-client/src/game/remote_vehicles.rs
+index c856ed4c7e..b1bdd65b83 100644
+--- a/crates/horizon-client/src/game/remote_vehicles.rs
++++ b/crates/horizon-client/src/game/remote_vehicles.rs
+@@ -411,7 +411,8 @@ impl Game<'_> {
+             let first = self.posed_rider != self.riding;
+             self.posed_rider = self.riding;
+             if let Some(v) = seat {
+-                self.previous_position = if first { v } else { p.position };
++                self.previous_position = if first { v } else { self.rider_seat };
++                self.rider_seat = v;
+                 p.position = v;
+             } else {
+                 self.previous_position = p.position;
+diff --git a/crates/horizon-client/src/game/startup_menu.rs b/crates/horizon-client/src/game/startup_menu.rs
+index 91bdfb48a2..0cedcf091c 100644
+--- a/crates/horizon-client/src/game/startup_menu.rs
++++ b/crates/horizon-client/src/game/startup_menu.rs
+@@ -535,6 +535,7 @@ impl Loading {
+         self.menu.options.languages = horizon_client::lang::available(&[&self.menu.root]);
+         self.menu.options.pack_infos = packs::pack_infos(&self.vanilla_root, &[]);
+         self.menu.options.pack_configs = packs::pack_configs(&self.vanilla_root);
++        self.menu.options.addon_infos = packs::addon_infos();
+         self.menu.options.pack_selection = self.settings.resource_packs.clone();
+         self.menu.options.pack_screen = None;
+         self.menu.options_open = true;
+@@ -577,6 +578,11 @@ impl Loading {
+                     let _ = std::fs::create_dir_all(&dir);
+                     packs::open_folder(&dir);
+                 }
++                Event::OpenAddonFolder => {
++                    let dir = packs::addons_dir();
++                    let _ = std::fs::create_dir_all(&dir);
++                    packs::open_folder(&dir);
++                }
+                 Event::DownloadPack(i) => {
+                     let dir = packs::packs_dir();
+                     if let Some(screen) = &mut self.menu.options.pack_screen
+diff --git a/crates/horizon-client/src/game/sulfur_cubes.rs b/crates/horizon-client/src/game/sulfur_cubes.rs
+index e1af9ef905..1e669afe83 100644
+--- a/crates/horizon-client/src/game/sulfur_cubes.rs
++++ b/crates/horizon-client/src/game/sulfur_cubes.rs
+@@ -18,6 +18,13 @@ fn block_transform(base: glam::Mat4, baby: bool) -> glam::Mat4 {
+         * glam::Mat4::from_translation(glam::Vec3::new(-0.5, -0.518, -0.5))
+ }
+ 
++/// The block on a pack's bone, in the model's frame (y down, in blocks): its bottom on the
++/// bone, centred on it, as the pack's own core (16 pixels from the bone up) sits.
++fn pack_block_transform(bone: glam::Mat4) -> glam::Mat4 {
++    bone * glam::Mat4::from_scale(glam::Vec3::new(1.0, -1.0, -1.0))
++        * glam::Mat4::from_translation(glam::Vec3::new(-0.5, 0.0, -0.5))
++}
++
+ fn block_overlay(fuse_ticks: i32, alpha: f32, hurt: bool) -> u32 {
+     let fuse = if fuse_ticks >= 0 {
+         fuse_ticks as f32 - alpha + 1.0
+@@ -52,6 +59,20 @@ impl Game<'_> {
+         if super::armor_stands::skull_kind(item).is_some() {
+             return;
+         }
++        // A pack that dresses the cube holds the block on its `rightitem` bone, the game's
++        // block there as in Bedrock: it turns with the pack's body and goes when the pack
++        // scales the bone to nothing (the blocks its own core draws: TNT, pumpkins).
++        let transform = match horizon_client::mobs::render::bedrock_bone_frame(
++            mob,
++            alpha,
++            base,
++            self.res.mob_data(),
++            "rightitem",
++        ) {
++            None => block_transform(base, mob.is_baby()),
++            Some(None) => return,
++            Some(Some(bone)) => pack_block_transform(bone),
++        };
+         // shortcut: the body slot retains only an item id; preserve the stack
+         // before supporting its block-state components here.
+         let Some(state) = self.items().get(item).and_then(|item| item.block) else {
+@@ -61,7 +82,7 @@ impl Game<'_> {
+         self.block_model_vertices(
+             state,
+             42,
+-            block_transform(base, mob.is_baby()),
++            transform,
+             block_light(light, self.res.facts().get(state).emission),
+             true,
+             out,
+diff --git a/crates/horizon-client/src/item_render.rs b/crates/horizon-client/src/item_render.rs
+index c3ef169cc0..be0df8bf98 100644
+--- a/crates/horizon-client/src/item_render.rs
++++ b/crates/horizon-client/src/item_render.rs
+@@ -840,6 +840,110 @@ impl ItemRenderer {
+             cit,
+         })
+     }
++    /// What an item draws in the inventory and where each picture comes from, for
++    /// `bedrock-debug.json`'s `items`: the definition file, the model file, and for every
++    /// sprite the file read, its size, dimensions and a hash (the same hash as another run's or
++    /// another pack's file means the same picture).
++    pub fn describe(&self, item: &str) -> Vec<String> {
++        let id = if item.contains(':') {
++            item.to_owned()
++        } else {
++            format!("minecraft:{item}")
++        };
++        let (namespace, name) = id.split_once(':').unwrap_or(("minecraft", &id));
++        let root = &self.sprites.root;
++        let head = |path: PathBuf| -> String {
++            match fs::read_to_string(&path) {
++                Ok(text) => {
++                    let flat: String = text.split_whitespace().collect();
++                    flat.chars().take(320).collect()
++                }
++                Err(e) => format!("({e})"),
++            }
++        };
++        let mut out = vec![format!(
++            "item {id}: definition {} {}",
++            if self.models.definitions.contains_key(&id) {
++                "loaded"
++            } else {
++                "NOT loaded"
++            },
++            head(root.join(format!("assets/{namespace}/items/{name}.json")))
++        )];
++        let stack = StackView::new(&id, 1);
++        let ctx = Context {
++            display: DisplayContext::Gui,
++            owner: None,
++            level: None,
++            seed: 0,
++        };
++        let resolved = self.models.resolve(&stack, &ctx, &horizon_assets::item_model::NoEnv);
++        for layer in resolved.layers {
++            let model = match layer.content {
++                LayerContent::Model { model } => model,
++                LayerContent::Missing => {
++                    out.push("  layer: missing model".into());
++                    continue;
++                }
++                LayerContent::Special { base, .. } => {
++                    out.push(format!("  layer: special model on base {base}"));
++                    base
++                }
++            };
++            let (model_namespace, model_path) =
++                model.split_once(':').unwrap_or(("minecraft", &model));
++            let baked = self.bake(&model);
++            out.push(format!(
++                "  model {model}: {} quads; file {}",
++                baked.quads.len(),
++                head(root.join(format!(
++                    "assets/{model_namespace}/models/{model_path}.json"
++                )))
++            ));
++            let sprites: std::collections::BTreeSet<&str> = baked
++                .quads
++                .iter()
++                .map(|q| q.material.sprite.as_str())
++                .collect();
++            for sprite in sprites {
++                let path = self.sprites.png(sprite, "textures");
++                let line = match fs::read(&path) {
++                    Ok(bytes) => {
++                        use std::hash::{Hash, Hasher};
++                        let mut hasher = std::collections::hash_map::DefaultHasher::new();
++                        bytes.hash(&mut hasher);
++                        let size = crate::hud::decode(&path)
++                            .map(|(w, h, _)| format!("{w}x{h}"))
++                            .unwrap_or_else(|_| "undecodable".into());
++                        format!(
++                            "    sprite {sprite}: {} {} bytes {size} hash {:016x}",
++                            path.display(),
++                            bytes.len(),
++                            hasher.finish()
++                        )
++                    }
++                    Err(e) => format!("    sprite {sprite}: {} ({e})", path.display()),
++                };
++                out.push(line);
++            }
++        }
++        out
++    }
++    /// Logs [`Self::describe`] for the `items` of `bedrock-debug.json` whenever that list changes.
++    pub fn report_debug_items(&self) {
++        static LAST: Mutex<Vec<String>> = Mutex::new(Vec::new());
++        let wanted = crate::mobs::bedrock_debug::settings().items.clone();
++        let mut last = LAST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
++        if *last == wanted {
++            return;
++        }
++        for item in &wanted {
++            for line in self.describe(item) {
++                log::info!("bedrock-debug: {line}");
++            }
++        }
++        *last = wanted;
++    }
+     /// `ModelBakery` item baking, cached per model.
+     pub fn bake(&self, model: &str) -> Arc<BakedItemModel> {
+         if let Ok(cache) = self.baked.lock()
+diff --git a/crates/horizon-client/src/mobs.rs b/crates/horizon-client/src/mobs.rs
+index 989bc21a94..d07a548e4c 100644
+--- a/crates/horizon-client/src/mobs.rs
++++ b/crates/horizon-client/src/mobs.rs
+@@ -15,6 +15,8 @@ pub mod armadillo;
+ pub mod armor;
+ pub mod axolotl;
+ pub mod bat;
++pub mod bedrock;
++pub mod bedrock_debug;
+ pub mod bee;
+ pub mod body_anim;
+ pub mod brain;
+@@ -1076,6 +1078,18 @@ pub struct Attrs {
+ /// `minecraft:wolf_armor`'s maximum damage.
+ pub const WOLF_ARMOR_DURABILITY: i32 = 64;
+ 
++/// How many ticks of a dragon's flight a pack reads back (`variable.historical_frame_<n>`).
++pub const HISTORY: usize = 16;
++
++/// An armor stand's pose for a pack's model: head, body, left arm, right arm, left leg, right
++/// leg in degrees (`DATA_HEAD_POSE`..), and whether the arms and the base plate show.
++#[derive(Clone, Debug, Default, PartialEq)]
++pub struct StandPose {
++    pub pose: [[f32; 3]; 6],
++    pub arms: bool,
++    pub base_plate: bool,
++}
++
+ /// Species-specific persistent state (variants, colours, taming, ageing...).
+ #[derive(Clone, Debug, Default)]
+ pub struct Extra {
+@@ -1083,6 +1097,14 @@ pub struct Extra {
+     pub from_bucket: bool,
+     /// Command-created armor instances, shared by commands and runtime damage.
+     pub armor_attributes: Option<Box<horizon_world::attributes::entity::EntityAttributes>>,
++    /// The world around the mob, for a Bedrock pack's queries (sampled while one asks).
++    pub surroundings: Option<Arc<bedrock::Surroundings>>,
++    /// An armor stand drawn by a pack's model: its Java pose and part visibility, laid over the
++    /// pack's own animations (`ArmorStandModel.setupAnim`).
++    pub stand_pose: Option<Box<StandPose>>,
++    /// The dragon's flight history for a pack (`variable.historical_frame_<n>`: its height and
++    /// yaw `n` ticks ago, `EnderDragon.getLatencyPos`), newest first.
++    pub history: Option<Box<[[f32; 2]; HISTORY]>>,
+     /// `Mob.lootTable`: the table its death rolls instead of its type's
+     /// (saved as `DeathLootTable`).
+     pub death_loot_table: Option<String>,
+@@ -1103,6 +1125,11 @@ pub struct Extra {
+     pub model_scale: f32,
+     /// Players: crouching and riding (HumanoidModel's poses).
+     pub crouching: bool,
++    /// Players: the sneak key held (`Entity.isShiftKeyDown`), also while gliding or swimming, when
++    /// the pose is no longer crouching (`query.is_sneaking`).
++    pub sneaking: bool,
++    /// The body of the player at this keyboard (`query.is_local_player`).
++    pub local_player: bool,
+     /// A player's or mannequin's synced pose (`Entity.DATA_POSE`), which
+     /// sets its box (`Avatar.POSES`).
+     pub avatar_pose: crate::pose::Pose,
+@@ -1111,6 +1138,9 @@ pub struct Extra {
+     /// which `LivingEntity.setSprinting`'s speed modifier makes faster.
+     pub sprinting: bool,
+     pub passenger: bool,
++    /// The player's first-person view model: a copy of the local player the packs' attachables
++    /// answer `context.is_first_person` for (`mobs::render::first_person_item`).
++    pub first_person: bool,
+     /// AgeableMob.age: negative while a baby (a tadpole counts up to 24000).
+     pub age: i32,
+     /// `AgeLocked` (tadpoles fed a slime ball... and ageable mobs).
+@@ -4193,7 +4223,13 @@ impl Mob {
+         // LivingEntity.tick: CombatTracker.recheckStatus.
+         let alive = self.alive();
+         self.combat.recheck(alive, self.age);
+-        neutral_anger::around_tick(self, w.game_time, |m| ai::tick(m, w, level_random, events))
++        let keep = neutral_anger::around_tick(self, w.game_time, |m| {
++            ai::tick(m, w, level_random, events)
++        });
++        if bedrock::wants_surroundings() && self.age.wrapping_add(self.id).is_multiple_of(4) {
++            self.extra.surroundings = Some(Arc::new(bedrock::sample_surroundings(self, w)));
++        }
++        keep
+     }
+     /// The section the mob is in, noted when it changes (`EntitySection` lists).
+     fn track_section(&mut self) {
+diff --git a/crates/horizon-client/src/mobs/camel.rs b/crates/horizon-client/src/mobs/camel.rs
+index 7e8967f31d..5c7494cec3 100644
+--- a/crates/horizon-client/src/mobs/camel.rs
++++ b/crates/horizon-client/src/mobs/camel.rs
+@@ -22,6 +22,22 @@ const SIT_DOWN: i64 = 40;
+ const STAND_UP: i64 = 52;
+ pub const DASH_COOLDOWN: i32 = 55;
+ 
++/// How far a resource pack's model has moved the camel's `root` and `body` bones this frame
++/// (blocks, down is negative), by camel id: the model sinks while the camel sits and the
++/// rider's seat follows the saddle it draws instead of the vanilla timing, which a pack's
++/// own sit and stand animations need not share.
++static MODEL_DROP: std::sync::Mutex<Vec<(u32, f32)>> = std::sync::Mutex::new(Vec::new());
++pub fn set_model_drop(id: u32, drop: f32) {
++    if let Ok(mut all) = MODEL_DROP.lock() {
++        match all.iter_mut().find(|(i, _)| *i == id) {
++            Some(e) => e.1 = drop,
++            None => all.push((id, drop)),
++        }
++    }
++}
++fn model_drop(id: u32) -> Option<f32> {
++    MODEL_DROP.lock().ok()?.iter().find(|(i, _)| *i == id).map(|e| e.1)
++}
+ pub fn register(m: &mut Mob) {
+     m.extra.tame = true;
+     let tempt = m.kind.tempt.clone();
+@@ -204,7 +220,13 @@ pub fn passenger_attachment(m: &Mob) -> [f64; 3] {
+ pub fn passenger_attachment_at(m: &Mob, index: usize, count: usize, animal: bool) -> [f64; 3] {
+     let scale = if m.is_baby() { 0.6 } else { 1.0 };
+     let driver = index == 0;
+-    let height = body_anchor_y(m, driver, m.height(), scale) as f32;
++    let mut height = body_anchor_y(m, driver, m.height(), scale) as f32;
++    if let Some(drop) = model_drop(m.id) {
++        // The seat of a standing camel, lowered as far as the model's body is.
++        // The standing box (2.375 tall): the camel's own height shrinks by 1.43 while it sits.
++        let standing = 2.375 * scale - if m.is_baby() { 0.09375 } else { 0.375 };
++        height = standing + drop * scale;
++    }
+     let mut offset = 0.5_f32;
+     if count > 1 {
+         if !driver {
+diff --git a/crates/horizon-client/src/mobs/cem.rs b/crates/horizon-client/src/mobs/cem.rs
+index dc1a867419..c41a11ddb0 100644
+--- a/crates/horizon-client/src/mobs/cem.rs
++++ b/crates/horizon-client/src/mobs/cem.rs
+@@ -1404,6 +1404,7 @@ mod tests {
+             blinks: Default::default(),
+             pois: Default::default(),
+             species_placements: Default::default(),
++            bedrock: Default::default(),
+         };
+         // Sprite i spans u and v from 0.2 i to 0.2 i + 0.1.
+         let atlas = |name: &str| -> Option<[f32; 4]> {
+diff --git a/crates/horizon-client/src/mobs/cem_anim.rs b/crates/horizon-client/src/mobs/cem_anim.rs
+index e8b27f7872..94c279ac5d 100644
+--- a/crates/horizon-client/src/mobs/cem_anim.rs
++++ b/crates/horizon-client/src/mobs/cem_anim.rs
+@@ -141,6 +141,11 @@ thread_local!(static IN_GUI: Cell<bool> = const { Cell::new(false) });
+ /// the entity this frame or the last. Screens draw before the world in a frame, so a
+ /// preview runs under the previous frame's counter and time. `set_frame` must not be
+ /// called inside it.
++/// Whether the current draw is a screen's preview (the inventory's player box, a paper doll).
++pub fn is_in_gui() -> bool {
++    IN_GUI.get()
++}
++
+ pub fn in_gui<R>(draw: impl FnOnce() -> R) -> R {
+     /// Puts the previous value back, even if `draw` panics.
+     struct Restore(bool);
+diff --git a/crates/horizon-client/src/mobs/data.rs b/crates/horizon-client/src/mobs/data.rs
+index 969fc96aff..eb6a6dbb5e 100644
+--- a/crates/horizon-client/src/mobs/data.rs
++++ b/crates/horizon-client/src/mobs/data.rs
+@@ -50,6 +50,8 @@ pub struct MobData {
+     pub villager_hats: std::sync::RwLock<super::villager_hats::VillagerHats>,
+     /// The packs' custom entity models (OptiFine CEM); replaced when the resource packs change.
+     pub cem: std::sync::RwLock<std::sync::Arc<super::cem::CemModels>>,
++    /// The Bedrock packs' look for mobs; replaced when the resource packs change.
++    pub bedrock: std::sync::RwLock<std::sync::Arc<super::bedrock::BedrockMobs>>,
+     /// The packs' random entity textures, replaced with them too.
+     pub random_textures: std::sync::RwLock<horizon_optifine::random_textures::RandomTextures>,
+     /// The packs' emissive overlays of entity textures, replaced with them too.
+@@ -161,6 +163,7 @@ impl MobData {
+             animations,
+             villager_hats: Default::default(),
+             cem: Default::default(),
++            bedrock: Default::default(),
+             random_textures: Default::default(),
+             emissive: Default::default(),
+             blinks: Default::default(),
+@@ -222,6 +225,7 @@ impl MobData {
+             animations: HashMap::new(),
+             villager_hats: Default::default(),
+             cem: Default::default(),
++            bedrock: Default::default(),
+             random_textures: Default::default(),
+             emissive: Default::default(),
+             blinks: Default::default(),
+diff --git a/crates/horizon-client/src/mobs/nether.rs b/crates/horizon-client/src/mobs/nether.rs
+index 4e3a12b121..10bc1913dc 100644
+--- a/crates/horizon-client/src/mobs/nether.rs
++++ b/crates/horizon-client/src/mobs/nether.rs
+@@ -31,6 +31,28 @@ pub fn register_blaze(m: &mut Mob) {
+     m.ai.targets.add(1, HurtByTarget::new().alert());
+     m.ai.targets.add(2, NearestTarget::player(true));
+ }
++/// `Blaze.setCharged`, with when it rose and fell (`ints[0]`, `ints[1]`, as `age + 1`): a pack
++/// reads the charge (`is_charged`) apart from the volley that follows it.
++pub fn set_blaze_charged(m: &mut Mob, on: bool) {
++    if m.extra.flag == on {
++        return;
++    }
++    m.extra.flag = on;
++    m.extra.ints[if on { 0 } else { 1 }] = m.age as i32 + 1;
++}
++
++/// A blaze's charge in the pack's terms: the first 60 ticks of the flag, the three-second
++/// charge; the volley after it (the flag still up) is the attack, not the charge.
++pub fn blaze_charging(m: &Mob) -> bool {
++    m.extra.flag && (m.extra.ints[0] <= 0 || (m.age as i32) - m.extra.ints[0] < 60)
++}
++
++/// A blaze in its attack: the flag up, a target of its own, or the five-second rest after.
++pub fn blaze_attacking(m: &Mob) -> bool {
++    let fell = m.extra.ints[1];
++    m.extra.flag || m.ai.target.is_some() || (fell > 0 && (m.age as i32) - fell < 100)
++}
++
+ /// `Blaze.BlazeAttackGoal`: melee up close, otherwise a 3-second charge and
+ /// three small fireballs, then a five-second rest.
+ #[derive(Clone, Debug, Default)]
+@@ -53,7 +75,7 @@ impl Goal for BlazeAttack {
+         self.step = 0;
+     }
+     fn stop(&mut self, m: &mut Mob, _: &mut Cx) {
+-        m.extra.flag = false;
++        set_blaze_charged(m, false);
+         self.last_seen = 0;
+     }
+     fn every_tick(&self) -> bool {
+@@ -95,13 +117,13 @@ impl Goal for BlazeAttack {
+                 self.step += 1;
+                 if self.step == 1 {
+                     self.time = 60;
+-                    m.extra.flag = true;
++                    set_blaze_charged(m, true);
+                 } else if self.step <= 4 {
+                     self.time = 6;
+                 } else {
+                     self.time = 100;
+                     self.step = 0;
+-                    m.extra.flag = false;
++                    set_blaze_charged(m, false);
+                 }
+                 if self.step > 1 {
+                     let sqd = d2.sqrt().sqrt() * 0.5;
+diff --git a/crates/horizon-client/src/mobs/random_textures.rs b/crates/horizon-client/src/mobs/random_textures.rs
+index 66ff9ae88e..b736737b10 100644
+--- a/crates/horizon-client/src/mobs/random_textures.rs
++++ b/crates/horizon-client/src/mobs/random_textures.rs
+@@ -261,6 +261,7 @@ mod tests {
+             animations: Default::default(),
+             villager_hats: Default::default(),
+             cem: Default::default(),
++            bedrock: Default::default(),
+             random_textures: Default::default(),
+             emissive: Default::default(),
+             blinks: Default::default(),
+diff --git a/crates/horizon-client/src/mobs/render.rs b/crates/horizon-client/src/mobs/render.rs
+index 8a6d0cbe19..ea21f1c843 100644
+--- a/crates/horizon-client/src/mobs/render.rs
++++ b/crates/horizon-client/src/mobs/render.rs
+@@ -46,6 +46,7 @@ pub const FULL_BRIGHT: u32 = 240 | 240 << 8;
+ /// HDR output, as `mesher::hdr_tier`.
+ const EYES_TIER: u8 = crate::mesher::BRIGHT;
+ 
++include!("bedrock_render/render_01.rs");
+ /// Tags quads as drawn by a render type vanilla gives an `OitPipelineSet`
+ /// (`gfx::OIT_ENTITY`): improved transparency draws them in its stages.
+ fn mark_oit(quads: &mut [Vertex]) {
+@@ -53,6 +54,7 @@ fn mark_oit(quads: &mut [Vertex]) {
+         vertex.layer |= crate::gfx::OIT_ENTITY;
+     }
+ }
++include!("bedrock_render/render_02.rs");
+ /// Whether the species' model is built with `RenderTypes::entityTranslucent`
+ /// (`Model.renderType`, which `LivingEntityRenderer.getRenderType` uses for the
+ /// body): the allay, the piglins, the breeze, the vex, the player model and the
+@@ -1215,7 +1217,7 @@ pub fn base_transform_at(m: &Mob, alpha: f32, origin: glam::Mat4) -> glam::Mat4
+                 * glam::Mat4::from_rotation_x((amount * (-10.0 - pitch)).to_radians())
+                 * glam::Mat4::from_translation(-middle);
+         }
+-    } else if m.extra.swim.amount(alpha) > 0.0 {
++    } else if m.extra.swim.amount(alpha) > 0.0 && !super::bedrock::pack_lies_down(m.id) {
+         // AvatarRenderer.setupRotations: tip forward with the swim amount,
+         // following the pitch in water, then lie along the swimming box.
+         let amount = m.extra.swim.amount(alpha);
+@@ -1405,6 +1407,27 @@ fn draw_normals(
+         return;
+     }
+     let normals = normals.part(p);
++    draw_polygons(
++        part, m, normals, uv, scroll, color, light, overlay, poses, out,
++    );
++    for c in &part.children {
++        draw_normals(c, m, normals, poses, uv, scroll, color, light, overlay, out);
++    }
++}
++/// The polygons of `part` alone, under its own matrix `m`.
++#[allow(clippy::too_many_arguments)]
++fn draw_polygons(
++    part: &Part,
++    m: glam::Mat4,
++    normals: ModelNormals,
++    uv: [f32; 4],
++    scroll: f32,
++    color: u32,
++    light: u32,
++    overlay: u32,
++    poses: &Poses,
++    out: &mut Vec<Vertex>,
++) {
+     // `skips` is a name lookup: ask once per part, not once per polygon. A part
+     // hidden this way still draws its children, so only the polygons are gated.
+     if !poses.skips(part) {
+@@ -1434,8 +1457,169 @@ fn draw_normals(
+             }
+         }
+     }
++}
++/// Every part's posed matrix and rest matrix under `part`, by name, both from the model's
++/// origin: what an attachable bound to the part needs (`posed * rest⁻¹` moves the part's own
++/// cubes from where they were modelled to where the animation put them).
++pub fn bone_matrices(
++    part: &Part,
++    poses: &Poses,
++    out: &mut std::collections::HashMap<String, (glam::Mat4, glam::Mat4)>,
++) {
++    fn walk(
++        part: &Part,
++        posed_parent: glam::Mat4,
++        rest_parent: glam::Mat4,
++        poses: &Poses,
++        out: &mut std::collections::HashMap<String, (glam::Mat4, glam::Mat4)>,
++    ) {
++        let now = posed(posed_parent, poses.pose(part));
++        let rest = posed(rest_parent, part.pose);
++        out.insert(part.name.clone(), (now, rest));
++        for c in &part.children {
++            walk(c, now, rest, poses, out);
++        }
++    }
++    walk(part, glam::Mat4::IDENTITY, glam::Mat4::IDENTITY, poses, out);
++}
++/// Where what is held is modelled from: the holder's bone (`rightitem`, with its whole pose) at
++/// the item's own origin. A model baked to the game's frame puts a bone modelled at the origin
++/// on the feet line, `MODEL_FEET` below the frame's origin, which this takes back (the matrices
++/// are in blocks: poses are in sixteenths).
++pub fn held_anchor(bone: glam::Mat4, scale: f32) -> glam::Mat4 {
++    bone * glam::Mat4::from_scale(glam::Vec3::splat(scale))
++        * glam::Mat4::from_translation(glam::Vec3::new(0.0, -MODEL_FEET, 0.0))
++}
++/// `held_anchor` for a bound bone modelled around `pivot` (the bone's rest position in the
++/// baked frame, in blocks): the game puts the bone's pivot on the hand, not the model's origin.
++/// A bone pivoted at the origin gives `held_anchor`'s `(0, MODEL_FEET, 0)`; one pivoted at the
++/// model's 24 sixteenths (a trident modelled around its own height) gives zero.
++pub fn held_anchor_at(bone: glam::Mat4, scale: f32, pivot: glam::Vec3) -> glam::Mat4 {
++    bone * glam::Mat4::from_scale(glam::Vec3::splat(scale)) * glam::Mat4::from_translation(-pivot)
++}
++/// The rest position of the part called `name` in the baked frame, in blocks (its own and its
++/// ancestors' positions added).
++pub fn rest_pivot(part: &Part, name: &str) -> Option<glam::Vec3> {
++    fn walk(part: &Part, from: glam::Vec3, name: &str) -> Option<glam::Vec3> {
++        let here = from + glam::Vec3::new(part.pose[0], part.pose[1], part.pose[2]) / 16.0;
++        if part.name == name {
++            return Some(here);
++        }
++        part.children.iter().find_map(|c| walk(c, here, name))
++    }
++    walk(part, glam::Vec3::ZERO, name)
++}
++/// How high above the model's floor the lowest cube under the part called `name` sits at rest,
++/// in pixels (Bedrock's `y`): where its model was drawn, beside the player's hand (a vanilla
++/// shield, from 17 up) or around its own origin (a pack's bell, lantern, sword).
++pub fn rest_floor(part: &Part, name: &str) -> Option<f32> {
++    fn lowest(part: &Part, y: f32) -> Option<f32> {
++        let here = y + part.pose[1];
++        let own = part
++            .polygons
++            .iter()
++            .flat_map(|p| p.vertices.iter().map(|v| here + v[1]))
++            .reduce(f32::max);
++        part.children
++            .iter()
++            .filter_map(|c| lowest(c, here))
++            .chain(own)
++            .reduce(f32::max)
++    }
++    fn find(part: &Part, y: f32, name: &str) -> Option<f32> {
++        if part.name == name {
++            return lowest(part, y);
++        }
++        let here = y + part.pose[1];
++        part.children.iter().find_map(|c| find(c, here, name))
++    }
++    // The Java frame's y grows down from 24 pixels up.
++    find(part, 0.0, name).map(|y| 24.0 - y)
++}
++/// The feet line of a baked model, in blocks (a Java model's origin is 24 sixteenths above the feet).
++const MODEL_FEET: f32 = 24.0 / 16.0;
++/// An attachable's parts: a bone with a binding is drawn where the holder's bone it follows
++/// went (`base_of` gives that bone's matrix), the others where the attachable's own pose puts
++/// them (or not at all when the model binds some of its bones). `chain` is the matrix of the
++/// parent from the model's origin.
++#[allow(clippy::too_many_arguments)]
++pub fn draw_attached(
++    part: &Part,
++    chain: glam::Mat4,
++    base: glam::Mat4,
++    bound_only: bool,
++    base_of: &dyn Fn(&str) -> Option<glam::Mat4>,
++    poses: &Poses,
++    uv: [f32; 4],
++    color: u32,
++    light: u32,
++    overlay: u32,
++    out: &mut Vec<Vertex>,
++) {
++    draw_attached_under(
++        part, chain, base, bound_only, None, base_of, poses, uv, color, light, overlay, out,
++    );
++}
++
++/// `draw_attached`, where `inherited` is the holder matrix of the nearest bound bone above: a
++/// bone with no binding of its own moves with its parent.
++#[allow(clippy::too_many_arguments)]
++fn draw_attached_under(
++    part: &Part,
++    chain: glam::Mat4,
++    base: glam::Mat4,
++    bound_only: bool,
++    inherited: Option<glam::Mat4>,
++    base_of: &dyn Fn(&str) -> Option<glam::Mat4>,
++    poses: &Poses,
++    uv: [f32; 4],
++    color: u32,
++    light: u32,
++    overlay: u32,
++    out: &mut Vec<Vertex>,
++) {
++    let p = poses.pose(part);
++    if poses.is_hidden(part) || p[6] == 0.0 && p[7] == 0.0 && p[8] == 0.0 {
++        return;
++    }
++    let mine = posed(chain, p);
++    let bound = base_of(&part.name);
++    let under = match bound.or(inherited) {
++        Some(bound) => bound,
++        None if bound_only => glam::Mat4::ZERO,
++        None => base,
++    };
++    let m = under * mine;
++    let skip = under == glam::Mat4::ZERO || poses.skips(part);
++    if !skip {
++        draw_polygons(
++            part,
++            m,
++            ModelNormals::new(m),
++            uv,
++            0.0,
++            color,
++            light,
++            overlay,
++            poses,
++            out,
++        );
++    }
+     for c in &part.children {
+-        draw_normals(c, m, normals, poses, uv, scroll, color, light, overlay, out);
++        draw_attached_under(
++            c,
++            mine,
++            base,
++            bound_only,
++            bound.or(inherited),
++            base_of,
++            poses,
++            uv,
++            color,
++            light,
++            overlay,
++            out,
++        );
+     }
+ }
+ /// A part's matrix under `base` for its pose (`ModelPart.translateAndRotate`
+@@ -1579,6 +1763,7 @@ pub fn cape(
+     m: &Mob,
+     alpha: f32,
+     base: glam::Mat4,
++    nudge: glam::Mat4,
+     uv: [f32; 4],
+     light: u32,
+     data: &MobData,
+@@ -1590,6 +1775,13 @@ pub fn cape(
+     let s = anim::state(m, alpha);
+     let mut poses = Poses::new(model);
+     anim::setup(m, &s, &mut poses, &data.animations);
++    // The pack's body carries the cape: the game's sneak and lean are not added to it.
++    let base = if worn_follows_pack(m) {
++        poses.reset(model);
++        worn_base(m, base, "cape") * nudge
++    } else {
++        base * nudge
++    };
+     let a = f64::from(alpha);
+     let at = [
+         m.previous.x + (m.position.x - m.previous.x) * a,
+@@ -1946,6 +2138,7 @@ fn posed_body(
+     let anchors = custom.map_or(Vec::new(), |c| c.anchors.clone());
+     (model, poses, anchors)
+ }
++include!("bedrock_render/render_03.rs");
+ #[allow(clippy::too_many_arguments)]
+ fn render_visible(
+     m: &Mob,
+@@ -1963,6 +2156,10 @@ fn render_visible(
+     let extra = if layers_shown(m) { extra } else { &[] };
+     let overlay = u32::from(red_overlay(m));
+     let s = anim::state(m, alpha);
++    // A Bedrock pack that dresses this mob draws it instead, with the mob's own state.
++    if body_visible && render_bedrock(m, alpha, base, atlas, light, data, out) {
++        return;
++    }
+     let (model_key, texture) = body(m);
+     // The packs' custom entity models replace a layer's parts and maybe its texture. The read
+     // guard, not a clone of the Arc: one uncontended lock per mob, nothing else without a pack.
+@@ -2571,6 +2768,7 @@ fn crossed_arms_matrix(model: &Part, base: glam::Mat4, poses: &Poses) -> Option<
+             * glam::Mat4::from_rotation_x(std::f32::consts::PI),
+     )
+ }
++include!("bedrock_render/render_04.rs");
+ /// The pose a mob's held item is submitted under (`ItemInHandLayer`:
+ /// `translateToHand`, then the hand offset; the item model adds its own
+ /// display transform), or `None` when the mob shows no held items.
+@@ -2580,6 +2778,31 @@ pub fn held_item_transform(
+     camera: glam::DVec3,
+     data: &MobData,
+     left: bool,
++) -> Option<glam::Mat4> {
++    // A pack can hide what the mob holds (`hide_held_items`) or scale it (`held_item_scale`).
++    let held = data
++        .bedrock
++        .read()
++        .unwrap_or_else(std::sync::PoisonError::into_inner)
++        .held(m)
++        .unwrap_or_default();
++    if held.hidden {
++        return None;
++    }
++    let t = held_item_transform_in_hand(m, alpha, camera, data, left)?;
++    Some(if (held.scale - 1.0).abs() > 1e-4 {
++        t * glam::Mat4::from_scale(glam::Vec3::splat(held.scale))
++    } else {
++        t
++    })
++}
++
++fn held_item_transform_in_hand(
++    m: &Mob,
++    alpha: f32,
++    camera: glam::DVec3,
++    data: &MobData,
++    left: bool,
+ ) -> Option<glam::Mat4> {
+     // PandaHoldsItemLayer: the main hand's item in its mouth.
+     if m.species() == Species::Panda {
+@@ -2639,7 +2862,10 @@ pub fn held_item_transform(
+         }
+         return crossed_arms_matrix(&model, base, &poses);
+     }
+-    let mut t = hand_base(m, &model, base, &poses, &anchors, left)?;
++    let mut t = match bedrock_hand(m, alpha, camera, data, left) {
++        Some(t) => t,
++        None => hand_base(m, &model, base, &poses, &anchors, left)?,
++    };
+     // ItemInHandLayer: a STAB swing of this arm thrusts its item out
+     // (SpearAnimations.thirdPersonAttackItem, the main hand's forward
+     // movement), and a spear in use moves with it (ArmPose.SPEAR's
+@@ -2973,6 +3199,7 @@ mod tests {
+             entity_tags: Default::default(),
+             villager_hats: Default::default(),
+             cem: Default::default(),
++            bedrock: Default::default(),
+             random_textures: Default::default(),
+             emissive: Default::default(),
+             blinks: Default::default(),
+@@ -3066,6 +3293,7 @@ mod tests {
+             entity_tags: Default::default(),
+             villager_hats: Default::default(),
+             cem: Default::default(),
++            bedrock: Default::default(),
+             random_textures: Default::default(),
+             emissive: Default::default(),
+             blinks: Default::default(),
+@@ -3123,6 +3351,7 @@ mod tests {
+             entity_tags: Default::default(),
+             villager_hats: Default::default(),
+             cem: Default::default(),
++            bedrock: Default::default(),
+             random_textures: Default::default(),
+             emissive: Default::default(),
+             blinks: Default::default(),
+@@ -3236,6 +3465,7 @@ mod tests {
+             entity_tags: Default::default(),
+             villager_hats: Default::default(),
+             cem: Default::default(),
++            bedrock: Default::default(),
+             random_textures: Default::default(),
+             emissive: Default::default(),
+             blinks: Default::default(),
+@@ -3545,6 +3775,7 @@ mod scroll_tests {
+             entity_tags: Default::default(),
+             villager_hats: Default::default(),
+             cem: Default::default(),
++            bedrock: Default::default(),
+             random_textures: Default::default(),
+             emissive: Default::default(),
+             blinks: Default::default(),
+@@ -3700,6 +3931,7 @@ mod emissive_tests {
+             entity_tags: Default::default(),
+             villager_hats: Default::default(),
+             cem: Default::default(),
++            bedrock: Default::default(),
+             random_textures: RwLock::new(random),
+             emissive: RwLock::new(Arc::new(emissive)),
+             blinks: RwLock::new(blinks),
+@@ -3976,6 +4208,7 @@ mod random_texture_tests {
+             animations: Default::default(),
+             villager_hats: Default::default(),
+             cem: Default::default(),
++            bedrock: Default::default(),
+             random_textures: RwLock::new(random),
+             emissive: Default::default(),
+             blinks: Default::default(),
+diff --git a/crates/horizon-client/src/mobs/riders.rs b/crates/horizon-client/src/mobs/riders.rs
+index 800dd85432..4c8e80af5e 100644
+--- a/crates/horizon-client/src/mobs/riders.rs
++++ b/crates/horizon-client/src/mobs/riders.rs
+@@ -17,6 +17,44 @@ const BOARDING_COOLDOWN: i32 = 60;
+ /// `Piglin.startRiding`: how many baby piglins stack on one hoglin.
+ const MAX_PASSENGERS_ON_ONE_HOGLIN: i32 = 3;
+ 
++/// The entity type of what each rider sits on, for a pack's `query.is_riding_any_entity_of_type`:
++/// the game fills it each tick (a vehicle may be a mob, a boat or a cart).
++static MOUNT_KINDS: std::sync::RwLock<Vec<(u32, String)>> = std::sync::RwLock::new(Vec::new());
++
++/// Replaces what is known of the riders' vehicles.
++pub fn set_mount_kinds(kinds: Vec<(u32, String)>) {
++    if let Ok(mut k) = MOUNT_KINDS.write() {
++        *k = kinds;
++    }
++}
++
++/// What the local player's model sits on (it is no mob of the list): its id and the vehicle's type.
++static PLAYER_MOUNT: std::sync::RwLock<Option<(u32, String)>> = std::sync::RwLock::new(None);
++
++/// Sets what the local player's model rides.
++pub fn set_player_mount(mount: Option<(u32, String)>) {
++    if let Ok(mut k) = PLAYER_MOUNT.write() {
++        *k = mount;
++    }
++}
++
++/// The entity type of the vehicle `rider` sits on.
++pub fn mount_kind(rider: u32) -> Option<String> {
++    if let Ok(k) = PLAYER_MOUNT.read()
++        && let Some((id, kind)) = k.as_ref()
++        && *id == rider
++    {
++        return Some(kind.clone());
++    }
++    MOUNT_KINDS
++        .read()
++        .ok()?
++        .iter()
++        .find(|(id, _)| *id == rider)
++        .map(|(_, k)| k.clone())
++}
++
++
+ /// `LivingEntity.getScale`: the `minecraft:scale` the server sent on any
+ /// living entity, 1 when unset (`Mob::model_scale`).
+ pub(super) fn scale(m: &Mob) -> f64 {
+diff --git a/crates/horizon-client/src/mobs/skin.rs b/crates/horizon-client/src/mobs/skin.rs
+index f03af721e2..c38f0ea076 100644
+--- a/crates/horizon-client/src/mobs/skin.rs
++++ b/crates/horizon-client/src/mobs/skin.rs
+@@ -876,6 +876,7 @@ mod tests {
+             entity_tags: Default::default(),
+             villager_hats: Default::default(),
+             cem: Default::default(),
++            bedrock: Default::default(),
+             random_textures: Default::default(),
+             emissive: Default::default(),
+             blinks: Default::default(),

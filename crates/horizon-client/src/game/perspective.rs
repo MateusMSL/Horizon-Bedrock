@@ -469,6 +469,7 @@ impl Game<'_> {
         let pose = p.pose;
         let crouching = pose == Pose::Crouching;
         let position = p.position;
+        let on_ground = p.ground.on_ground;
         let (fall_flying, fly_ticks, velocity) = (p.fall_flying, p.fall_fly_ticks, p.velocity);
         let spinning = p.auto_spin_attack_ticks > 0;
         let using = self.using.map(|(_, ticks)| ticks as i32 + 1).unwrap_or(0);
@@ -511,9 +512,11 @@ impl Game<'_> {
         let bed = self.sleeping.map_or(0, |head| self.bed_facing(head));
         let spectator = self.spectator();
         let ridden = self.ridden_body();
+        let mount_type = self.riding.map(|id| self.vehicle_kind(id));
         let Some(m) = self.player_model.as_mut() else {
             return;
         };
+        horizon_client::mobs::riders::set_player_mount(mount_type.map(|k| (m.id, k)));
         m.extra.ints[1] = bed;
         m.extra.model_scale = scale;
         // The crouch flag is still last tick's here.
@@ -593,6 +596,9 @@ impl Game<'_> {
         // The worn stacks, for the elytra's glint (`WingsLayer`).
         m.extra.armor = armor;
         m.extra.crouching = crouching;
+        // Shift while flying (creative) lowers the flight: no sneak, as in Bedrock.
+        m.extra.sneaking = p.shift_key_down && !p.flying;
+        m.extra.local_player = true;
         // Guests and server players take their pose from DATA_POSE, not here.
         m.extra.avatar_pose = pose;
         // What custom entity model animations read of the fluids (`is_in_water`, crawling).
@@ -604,6 +610,9 @@ impl Game<'_> {
         m.extra.passenger = riding;
         m.extra.previous_velocity = m.velocity;
         m.velocity = velocity;
+        // `is_on_ground` / `vertical_speed` of the packs: a body on the ground (gravity still
+        // pulling) is no fall; a rider is carried.
+        m.on_ground = on_ground && !riding;
         m.extra.fall_flying = fall_flying;
         m.extra.fall_fly_ticks = fly_ticks;
         m.extra.auto_spin_attack = spinning;
@@ -637,6 +646,16 @@ impl Game<'_> {
         m.extra.swing_right_arm = swing_right_arm;
         m.extra.swing_stab = self.swing.current.is_some_and(|c| c.animation.kind == 2);
         m.hurt_time = hurt;
+        // What a pack asks of the blocks round the body (`relative_block_has_any_tag`: the
+        // water, the ground a fall lands on) is a sample the mobs take in their own tick.
+        if horizon_client::mobs::bedrock::wants_surroundings() {
+            let sample = self.player_model.as_ref().map(|m| {
+                horizon_client::mobs::bedrock::sample_surroundings(m, &self.mob_world_base(&[]))
+            });
+            if let (Some(sample), Some(m)) = (sample, self.player_model.as_mut()) {
+                m.extra.surroundings = Some(std::sync::Arc::new(sample));
+            }
+        }
     }
     /// `Entity.turn` for the player, by the mouse, a pad, the arrow keys or an
     /// agent's `turn`.
@@ -974,14 +993,26 @@ impl Game<'_> {
         let stack = m.extra.armor[1]
             .as_ref()
             .filter(|s| chest == Some(&*s.item));
+        // A pack that dresses the elytra itself draws it on its own body: the game's wings stay out.
+        if horizon_client::mobs::render::pack_dresses_torso(m)
+            && chest.is_some_and(|c| c.trim_start_matches("minecraft:") == "elytra")
+        {
+            return;
+        }
+        let follows = horizon_client::mobs::render::worn_follows_pack(m);
         self.wings_geometry(
             chest,
             stack,
             m.cape.as_deref(),
             false,
-            horizon_client::mobs::render::base_transform(m, partial, camera),
+            horizon_client::mobs::render::worn_base(
+                m,
+                horizon_client::mobs::render::base_transform(m, partial, camera),
+                "elytra",
+            ),
             m.extra.elytra.angles(partial),
-            m.extra.crouching,
+            // The pack's body already crouches.
+            m.extra.crouching && !follows,
             light,
             self.wings_overlay(stack),
             out,
@@ -1139,14 +1170,18 @@ impl Game<'_> {
         if layers.is_some_and(|k| k.contains_key("wings")) {
             return;
         }
-        let mut base = horizon_client::mobs::render::base_transform(m, partial, camera);
-        if layers.is_some_and(|k| k.contains_key("humanoid")) {
-            base *= glam::Mat4::from_translation(glam::Vec3::new(0.0, -0.053125, 0.06875));
-        }
+        let base = horizon_client::mobs::render::base_transform(m, partial, camera);
+        // Moved out over a chestplate.
+        let nudge = if layers.is_some_and(|k| k.contains_key("humanoid")) {
+            glam::Mat4::from_translation(glam::Vec3::new(0.0, -0.053125, 0.06875))
+        } else {
+            glam::Mat4::IDENTITY
+        };
         horizon_client::mobs::render::cape(
             m,
             partial,
             base,
+            nudge,
             [rect.u0, rect.v0, rect.u1, rect.v1],
             light,
             self.res.mob_data(),
@@ -1849,6 +1884,7 @@ mod preview_tests {
             entity_tags: Default::default(),
             villager_hats: Default::default(),
             cem: Default::default(),
+            bedrock: Default::default(),
             random_textures: Default::default(),
             emissive: Default::default(),
             blinks: Default::default(),

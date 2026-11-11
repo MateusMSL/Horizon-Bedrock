@@ -876,6 +876,7 @@ mod tests {
             entity_tags: Default::default(),
             villager_hats: Default::default(),
             cem: Default::default(),
+            bedrock: Default::default(),
             random_textures: Default::default(),
             emissive: Default::default(),
             blinks: Default::default(),

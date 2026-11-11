@@ -3443,6 +3443,55 @@ impl Game<'_> {
         } else {
             (0xFFFF_FFFF, u32::from(d.hurt_time > 0))
         };
+        // A pack's dragon: its own model, posed by its animations from the dragon's flight
+        // history, in place of the game's body and eyes (the death rays and the crystal's beam
+        // stay the game's). Turned as a mob is: the pack's `setup` and `rotation` animations
+        // add `180 - body` and `body` to its root, a half turn whatever the yaw (Bedrock turns
+        // the dragon itself, its model facing the other way), so a body yaw of `yRot` turns
+        // it as the game's model is turned (`-yRot`).
+        let pack = {
+            let proxy = super::pack_proxy::Proxy {
+                entity: "minecraft:ender_dragon",
+                id: d.id,
+                at: pos,
+                yaw: yr,
+                head_yaw: yr,
+                pitch: 0.0,
+                base: None,
+                packed: light,
+            };
+            let history = std::array::from_fn(|i| {
+                let (y, yaw) = h(i);
+                [y as f32, yaw]
+            });
+            self.pack_proxy(
+                &proxy,
+                camera,
+                alpha,
+                |m| {
+                    m.health = d.health.max(0.0);
+                    m.hurt_time = d.hurt_time;
+                    m.death_time = d.death_time;
+                    m.extra.history = Some(Box::new(history));
+                },
+                out,
+            )
+        };
+        if pack {
+            if death > 0.0 {
+                let rays = additive.len();
+                self.dragon_rays(rays_base, death / 200.0, additive);
+                for v in &mut additive[rays..] {
+                    v.layer |= u32::from(horizon_client::mesher::VERY_BRIGHT) << 16;
+                }
+            }
+            if let Some(c) = d.nearest_crystal.and_then(|i| self.crystals.get(i)) {
+                let bob = f64::from(horizon_client::end_crystal::y(c.time as f32 + a));
+                let to = glam::DVec3::new(c.position.x, c.position.y + bob, c.position.z);
+                self.crystal_beam(pos, to - pos, self.ticks as f32 + a, camera, out);
+            }
+            return;
+        }
         let first = out.len();
         horizon_client::mobs::render::draw(model, base, &poses, skin, color, light, overlay, out);
         if let Some(mask) = mask {

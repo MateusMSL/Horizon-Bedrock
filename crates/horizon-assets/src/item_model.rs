@@ -766,8 +766,19 @@ impl SelectProperty {
                 DisplayContext::by_name(&s).ok_or_else(|| err("invalid display context"))?;
                 Value::String(s)
             }
-            Self::Component(_) => v.clone(),
+            Self::Component(component) => canonical_component(component, v),
         })
+    }
+}
+
+/// A component value in the one form the codec reads both ways: `potion_contents` is a bare
+/// potion id or an object, and a `component` select compares the two as equal.
+fn canonical_component(component: &str, v: &Value) -> Value {
+    match v {
+        Value::String(potion) if component == "minecraft:potion_contents" => {
+            serde_json::json!({ "potion": potion })
+        }
+        _ => v.clone(),
     }
 }
 
@@ -1490,7 +1501,9 @@ impl Resolve<'_> {
             SelectProperty::ContextDimension => {
                 self.ctx.level.map(|l| Value::String(l.dimension.clone()))
             }
-            SelectProperty::Component(component) => self.component(component).cloned(),
+            SelectProperty::Component(component) => self
+                .component(component)
+                .map(|v| canonical_component(component, v)),
         }
     }
     fn numeric(&self, property: &NumericProperty) -> f32 {

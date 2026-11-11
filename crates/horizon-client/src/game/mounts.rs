@@ -699,7 +699,8 @@ impl Game<'_> {
         let first = self.posed_rider != self.riding;
         self.posed_rider = self.riding;
         if let Some(p) = self.player.as_mut() {
-            self.previous_position = if first { at } else { p.position };
+            self.previous_position = if first { at } else { self.rider_seat };
+            self.rider_seat = at;
             p.position = at;
             p.velocity = Vec3::ZERO;
             p.fall_distance = 0.0;

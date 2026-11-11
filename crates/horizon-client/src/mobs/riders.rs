@@ -17,6 +17,44 @@ const BOARDING_COOLDOWN: i32 = 60;
 /// `Piglin.startRiding`: how many baby piglins stack on one hoglin.
 const MAX_PASSENGERS_ON_ONE_HOGLIN: i32 = 3;
 
+/// The entity type of what each rider sits on, for a pack's `query.is_riding_any_entity_of_type`:
+/// the game fills it each tick (a vehicle may be a mob, a boat or a cart).
+static MOUNT_KINDS: std::sync::RwLock<Vec<(u32, String)>> = std::sync::RwLock::new(Vec::new());
+
+/// Replaces what is known of the riders' vehicles.
+pub fn set_mount_kinds(kinds: Vec<(u32, String)>) {
+    if let Ok(mut k) = MOUNT_KINDS.write() {
+        *k = kinds;
+    }
+}
+
+/// What the local player's model sits on (it is no mob of the list): its id and the vehicle's type.
+static PLAYER_MOUNT: std::sync::RwLock<Option<(u32, String)>> = std::sync::RwLock::new(None);
+
+/// Sets what the local player's model rides.
+pub fn set_player_mount(mount: Option<(u32, String)>) {
+    if let Ok(mut k) = PLAYER_MOUNT.write() {
+        *k = mount;
+    }
+}
+
+/// The entity type of the vehicle `rider` sits on.
+pub fn mount_kind(rider: u32) -> Option<String> {
+    if let Ok(k) = PLAYER_MOUNT.read()
+        && let Some((id, kind)) = k.as_ref()
+        && *id == rider
+    {
+        return Some(kind.clone());
+    }
+    MOUNT_KINDS
+        .read()
+        .ok()?
+        .iter()
+        .find(|(id, _)| *id == rider)
+        .map(|(_, k)| k.clone())
+}
+
+
 /// `LivingEntity.getScale`: the `minecraft:scale` the server sent on any
 /// living entity, 1 when unset (`Mob::model_scale`).
 pub(super) fn scale(m: &Mob) -> f64 {

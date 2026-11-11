@@ -193,7 +193,16 @@ impl Game<'_> {
                 );
             }
             // Other players on a server: PlayerRenderer's HumanoidArmorLayer.
-            let armor = if is_player {
+            // The pack that dresses a player draws the armour itself.
+            let pack_dresses = is_player
+                && self
+                    .res
+                    .mob_data()
+                    .bedrock
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .has_entity(&mob.kind.id);
+            let armor = if is_player && !pack_dresses {
                 self.worn_armor_layers(mob)
             } else {
                 Vec::new()
@@ -393,6 +402,13 @@ impl Game<'_> {
             // own override); the sky light stays the level's.
             if let Some(block) = a.block_light_override() {
                 packed = (packed & 0xFF) | (u32::from(block) * 16) << 8;
+            }
+            // A pack's projectile, drawn by its model (`pack_proxy.rs`).
+            if let Some(burning) = self.pack_projectile(a, at, c, camera, alpha, packed, out) {
+                if burning {
+                    flame_geometry(atlas, c, 0.5, 0.5, self.yaw, light, out);
+                }
+                continue;
             }
             if a.is_arrow() {
                 let Some(model) = self.arrow_model.as_ref() else {

@@ -411,7 +411,8 @@ impl Game<'_> {
             let first = self.posed_rider != self.riding;
             self.posed_rider = self.riding;
             if let Some(v) = seat {
-                self.previous_position = if first { v } else { p.position };
+                self.previous_position = if first { v } else { self.rider_seat };
+                self.rider_seat = v;
                 p.position = v;
             } else {
                 self.previous_position = p.position;

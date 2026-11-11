@@ -141,6 +141,11 @@ thread_local!(static IN_GUI: Cell<bool> = const { Cell::new(false) });
 /// the entity this frame or the last. Screens draw before the world in a frame, so a
 /// preview runs under the previous frame's counter and time. `set_frame` must not be
 /// called inside it.
+/// Whether the current draw is a screen's preview (the inventory's player box, a paper doll).
+pub fn is_in_gui() -> bool {
+    IN_GUI.get()
+}
+
 pub fn in_gui<R>(draw: impl FnOnce() -> R) -> R {
     /// Puts the previous value back, even if `draw` panics.
     struct Restore(bool);

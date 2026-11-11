@@ -3868,6 +3868,16 @@ impl Game<'_> {
                 }
                 self.remote_mob_data(p.id, &p.values);
                 if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32)
+                    && m.species() == horizon_client::mobs::Species::Blaze
+                {
+                    // Blaze.DATA_FLAGS_ID, bit 0: on fire, which a pack reads as `is_charged`.
+                    for (index, _, value) in &p.values {
+                        if let (16, Value::Byte(flags)) = (index, value) {
+                            horizon_client::mobs::nether::set_blaze_charged(m, flags & 1 != 0);
+                        }
+                    }
+                }
+                if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32)
                     && m.species() == horizon_client::mobs::Species::Creeper
                 {
                     for (index, _, value) in &p.values {
@@ -4084,6 +4094,7 @@ impl Game<'_> {
                     for (index, _, value) in &p.values {
                         if let (0, Value::Byte(flags)) = (index, value) {
                             m.extra.crouching = flags & 2 != 0;
+                            m.extra.sneaking = flags & 2 != 0;
                             m.extra.sprinting = flags & 8 != 0;
                         }
                     }
@@ -5692,6 +5703,13 @@ impl Game<'_> {
             if !self.skin_slots.contains(OFFLINE) || !self.gui.atlas.sprites.contains_key(OFFLINE) {
                 self.store_skin(OFFLINE.into(), rgba.clone());
             }
+            // What a Bedrock model samples: the skin with its own alpha.
+            let raw = horizon_client::skins::OFFLINE_SKIN_RAW;
+            if let Some(image) = horizon_client::skins::offline_skin_raw()
+                && (!self.skin_slots.contains(raw) || !self.gui.atlas.sprites.contains_key(raw))
+            {
+                self.store_skin(raw.into(), image.to_vec());
+            }
             if *is_slim {
                 slim.insert(local);
             }
@@ -5890,6 +5908,13 @@ impl Game<'_> {
         // never happened) counts as missing, so the skin is stored again.
         if self.skin_slots.contains(location) && self.gui.atlas.sprites.contains_key(location) {
             downloads.drawn(location);
+            // Its alpha-true copy, which a Bedrock model samples, may have been pushed out alone.
+            let raw = horizon_client::skins::raw_skin_location(location);
+            if raw != location
+                && !(self.skin_slots.contains(&raw) && self.gui.atlas.sprites.contains_key(&raw))
+            {
+                downloads.again_raw(location);
+            }
             true
         } else {
             downloads.again(location);

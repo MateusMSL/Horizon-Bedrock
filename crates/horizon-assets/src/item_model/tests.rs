@@ -157,4 +157,47 @@ fn a_patched_stack_reads_its_patch_over_its_items_defaults() {
         assert_eq!(view.get(key), merged.get(key), "{key}");
     }
     assert_eq!(view.to_map(), *merged);
+fn a_potion_contents_select_matches_the_bare_and_the_object_form() {
+    let definition = ClientItem::from_json(
+        r#"{"model":{
+        "type":"minecraft:select", "property":"minecraft:component",
+        "component":"minecraft:potion_contents",
+        "cases":[{"when":["minecraft:swiftness","minecraft:long_swiftness"],
+                  "model":{"type":"minecraft:model","model":"minecraft:item/fast"}}],
+        "fallback":{"type":"minecraft:model","model":"minecraft:item/plain"}
+    }}"#,
+    )
+    .unwrap();
+    let mut models = ItemModels::default();
+    models.definitions.insert("minecraft:potion".into(), definition);
+    models.prototypes.insert(
+        "minecraft:potion".into(),
+        BTreeMap::from([(
+            "minecraft:item_model".into(),
+            Value::String("minecraft:potion".into()),
+        )]),
+    );
+    let context = Context {
+        display: DisplayContext::Gui,
+        owner: None,
+        level: None,
+        seed: 0,
+    };
+    let chosen = |contents: Value| {
+        let mut stack = StackView::new("minecraft:potion", 1);
+        stack
+            .patch
+            .insert("minecraft:potion_contents".into(), Some(contents));
+        let resolved = models.resolve(&stack, &context, &NoEnv);
+        let LayerContent::Model { model } = &resolved.layers[0].content else {
+            panic!("expected model leaf")
+        };
+        model.clone()
+    };
+    assert_eq!(chosen(serde_json::json!("minecraft:long_swiftness")), "minecraft:item/fast");
+    assert_eq!(
+        chosen(serde_json::json!({"potion": "minecraft:swiftness"})),
+        "minecraft:item/fast"
+    );
+    assert_eq!(chosen(serde_json::json!("minecraft:poison")), "minecraft:item/plain");
 }

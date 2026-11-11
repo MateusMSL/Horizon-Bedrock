@@ -1334,6 +1334,8 @@ pub enum Page {
     Language,
     Font,
     Packs,
+    /// The Packs screen over the `addons/` folder (`push` stores it as `Packs`).
+    Addons,
     Mods,
     /// Browse mods: the registry's content mods, searched (`mod_browser`).
     ModBrowser,
@@ -1535,6 +1537,8 @@ pub enum Event {
     /// Create World's Data Packs screen closed with a new selection.
     DataPacks(Vec<String>),
     OpenPackFolder,
+    /// The Addons screen's Open Pack Folder: create `addons/` if needed and open it.
+    OpenAddonFolder,
     /// Data Packs' Open Pack Folder: create the folder if needed and open it.
     OpenDataPackFolder(std::path::PathBuf),
     OpenModFolder,
@@ -1665,6 +1669,10 @@ pub struct OptionsUi {
     /// Packs: the packs found and the selection the screen opens with.
     pub pack_infos: Vec<crate::pack_screen::PackInfo>,
     pub pack_selection: Vec<String>,
+    /// The packs of `addons/`, for the Packs page when it is the Addons screen.
+    pub addon_infos: Vec<crate::pack_screen::PackInfo>,
+    /// The Packs page is the Addons screen (`Page::Addons`).
+    addons_page: bool,
     /// The open pack screen, made at its first frame.
     pub pack_screen: Option<crate::pack_screen::PackScreen>,
     /// The Packs page is Create World's Data Packs screen on this folder.
@@ -1768,6 +1776,8 @@ impl Default for OptionsUi {
             pack_browser: false,
             pack_infos: Vec::new(),
             pack_selection: Vec::new(),
+            addon_infos: Vec::new(),
+            addons_page: false,
             pack_screen: None,
             data_pack_dir: None,
             data_pack_resources: Default::default(),
@@ -2101,7 +2111,23 @@ impl OptionsUi {
     /// Whether the resource pack screen is open (not Create World's data packs on the same
     /// page).
     pub fn resource_packs_open(&self) -> bool {
-        self.page() == Page::Packs && self.data_pack_dir.is_none()
+        self.page() == Page::Packs && self.data_pack_dir.is_none() && !self.addons_page
+    }
+    /// Whether the Addons screen is open.
+    pub fn addons_open(&self) -> bool {
+        self.page() == Page::Packs && self.addons_page
+    }
+    /// The folder of `addons/` changed while the Addons screen is open: the screen is made
+    /// again over `infos`, keeping the selection made on it so far.
+    pub fn update_addon_infos(&mut self, infos: Vec<crate::pack_screen::PackInfo>) {
+        if let Some(p) = self.pack_screen.take()
+            && p.changed
+        {
+            self.pack_selection =
+                crate::packs::merge_selection(&self.pack_selection, p.commit(), true);
+            self.pack_reselected = true;
+        }
+        self.addon_infos = infos;
     }
     /// The packs in `resourcepacks/` changed while the pack screen is open
     /// (`PackSelectionScreen`'s directory watcher): the screen is made again over
@@ -2110,7 +2136,8 @@ impl OptionsUi {
         if let Some(p) = self.pack_screen.take()
             && p.changed
         {
-            self.pack_selection = p.commit();
+            self.pack_selection =
+                crate::packs::merge_selection(&self.pack_selection, p.commit(), false);
             self.pack_reselected = true;
         }
         self.pack_infos = infos;
@@ -2211,6 +2238,7 @@ impl OptionsUi {
     pub fn open_at(&mut self, in_world: bool, page: Page) {
         self.stack.clear();
         self.data_pack_dir = None;
+        self.addons_page = false;
         self.focus = None;
         self.focus_from_keyboard = false;
         self.can_change_value = false;
@@ -2219,6 +2247,15 @@ impl OptionsUi {
         self.selected_key = None;
     }
     fn push(&mut self, page: Page) {
+        let page = if page == Page::Addons {
+            self.addons_page = true;
+            Page::Packs
+        } else {
+            if page == Page::Packs {
+                self.addons_page = false;
+            }
+            page
+        };
         self.stack.push(page);
         self.scroll = 0.0;
         self.scrollbar_drag_y = None;
@@ -2296,6 +2333,7 @@ impl OptionsUi {
             Page::Language => "options.language.title",
             Page::Font => "options.font.title",
             Page::Packs => "resourcePack.title",
+            Page::Addons => "horizon.pages.addons",
             Page::Mods => "horizon.pages.mods",
             Page::ModBrowser => "horizon.mods.browse.title",
             Page::ModProject => "horizon.mods.browse.project",
@@ -2955,6 +2993,10 @@ impl OptionsUi {
                     (
                         "options.resourcepack",
                         (!self.split_guest).then_some(Page::Packs),
+                    ),
+                    (
+                        "horizon.pages.addons",
+                        (!self.split_guest).then_some(Page::Addons),
                     ),
                     ("options.accessibility", Some(Page::Accessibility)),
                     // Vanilla's Telemetry Data and Credits slots: Horizon's
@@ -3959,6 +4001,7 @@ impl OptionsUi {
             match action {
                 crate::pack_screen::Action::OpenFolder => events.push(match &self.data_pack_dir {
                     Some(dir) => Event::OpenDataPackFolder(dir.clone()),
+                    None if self.addons_page => Event::OpenAddonFolder,
                     None => Event::OpenPackFolder,
                 }),
                 crate::pack_screen::Action::Done => events.extend(self.back(s)),
@@ -4443,19 +4486,33 @@ impl OptionsUi {
                 self.pack_focus = Instant::now();
                 let title = if self.data_pack_dir.is_some() {
                     "dataPack.title"
+                } else if self.addons_page {
+                    "horizon.pages.addons"
                 } else {
                     "resourcePack.title"
                 };
+                // Resource packs and addons share the `resourcePacks` list: each screen
+                // shows its own kind.
+                let own = |id: &String| {
+                    self.data_pack_dir.is_some()
+                        || crate::packs::is_addon_id(id) == self.addons_page
+                };
+                let selection: Vec<String> =
+                    self.pack_selection.iter().filter(|id| own(id)).cloned().collect();
                 let mut screen = crate::pack_screen::PackScreen::new(
                     &m,
                     crate::text::Text::translate(title, &[]),
                     w,
                     h,
                     self.in_world,
-                    self.pack_infos.clone(),
-                    &self.pack_selection,
+                    if self.addons_page {
+                        self.addon_infos.clone()
+                    } else {
+                        self.pack_infos.clone()
+                    },
+                    &selection,
                 );
-                screen.browsing_allowed = self.pack_browser;
+                screen.browsing_allowed = self.pack_browser && !self.addons_page;
                 screen.changed = std::mem::take(&mut self.pack_reselected);
                 self.pack_screen = Some(screen);
             }
@@ -4556,6 +4613,7 @@ impl OptionsUi {
             Page::Packs => {
                 // PackSelectionScreen.onClose: PackSelectionModel.commit.
                 let data = self.data_pack_dir.take();
+                let addons = std::mem::take(&mut self.addons_page);
                 if let Some(p) = self.pack_screen.take()
                     && p.changed
                 {
@@ -4566,6 +4624,7 @@ impl OptionsUi {
                         // `PackSelectionModel.commit` already drops `server/…`
                         // ids; keep the same filter if the screen is rebuilt.
                         let ids = crate::packs::player_pack_ids(ids);
+                        let ids = crate::packs::merge_selection(&s.resource_packs, ids, addons);
                         s.resource_packs = ids.clone();
                         self.pack_selection = ids.clone();
                         events.push(Event::Packs(ids));

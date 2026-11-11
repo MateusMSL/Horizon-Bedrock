@@ -68,8 +68,8 @@ mod weather;
 mod world_text;
 use entity_batch::EntityBatch;
 pub use entity_batch::{
-    ADDITIVE_PARTICLE_OVERLAY, DISSOLVE_OVERLAY, DRAGON_RAYS_OVERLAY, ENERGY_SWIRL_OVERLAY,
-    FLUID_OVERLAY, OIT_ENTITY, SHADOW_OVERLAY, TERRAIN_MODEL_CUTOUT_MIPPED_OVERLAY,
+    ADDITIVE, ADDITIVE_PARTICLE_OVERLAY, DISSOLVE_OVERLAY, DRAGON_RAYS_OVERLAY, ENERGY_SWIRL_OVERLAY,
+    FLUID_OVERLAY, NO_DEPTH_TEST, NO_DEPTH_WRITE, OIT_ENTITY, SHADOW_OVERLAY, TERRAIN_MODEL_CUTOUT_MIPPED_OVERLAY,
     TERRAIN_MODEL_CUTOUT_OVERLAY, TERRAIN_MODEL_SOLID_OVERLAY, TEXT_POLYGON_OFFSET_OVERLAY,
     TRANSLUCENT_GLINT_ITEM_OVERLAY, TRANSLUCENT_ITEM_OVERLAY, TRANSLUCENT_PARTICLE_OVERLAY,
     WATER_MASK_OVERLAY, WORLD_TEXT_OVERLAY, WORLD_TEXT_POLYGON_OFFSET_OVERLAY, is_native_terrain,
@@ -1205,6 +1205,9 @@ pub struct Renderer {
     crumbling_pipeline: wgpu::RenderPipeline,
     shadow_blob_pipeline: wgpu::RenderPipeline,
     translucent_item_pipeline: wgpu::RenderPipeline,
+    no_depth_write_pipeline: wgpu::RenderPipeline,
+    no_depth_test_pipeline: wgpu::RenderPipeline,
+    glow_pipeline: wgpu::RenderPipeline,
     /// `RenderPipelines.WATER_MASK`: depth writes only, no colour.
     water_mask_pipeline: wgpu::RenderPipeline,
     cloud_pipeline: wgpu::RenderPipeline,
@@ -4191,6 +4194,60 @@ impl Renderer {
             alpha_blend,
             false,
         );
+        // A bedrock material with `DisableDepthWrite`: blended and depth tested like the
+        // entities, hiding nothing behind it.
+        let no_depth_write_pipeline = entity_pipeline(
+            "Entities without depth writes",
+            None,
+            false,
+            wgpu::CompareFunction::GreaterEqual,
+            wgpu::DepthBiasState {
+                constant: 128,
+                slope_scale: 0.0,
+                clamp: 0.0,
+            },
+            alpha_blend,
+            false,
+        );
+        // A bedrock material that adds its colour times its alpha (`blendSrc SourceAlpha`,
+        // `blendDst One`: a glow): depth tested, no depth write, light only ever added.
+        let glow_blend = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::SrcAlpha,
+            dst_factor: wgpu::BlendFactor::One,
+            operation: wgpu::BlendOperation::Add,
+        };
+        let glow_pipeline = entity_pipeline_with(
+            "Entity glows",
+            None,
+            false,
+            wgpu::CompareFunction::GreaterEqual,
+            wgpu::DepthBiasState {
+                constant: 128,
+                slope_scale: 0.0,
+                clamp: 0.0,
+            },
+            wgpu::BlendState {
+                color: glow_blend,
+                alpha: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::Zero,
+                    dst_factor: wgpu::BlendFactor::One,
+                    operation: wgpu::BlendOperation::Add,
+                },
+            },
+            false,
+            "fs_entity_glow",
+            wgpu::ColorWrites::ALL,
+        );
+        // A bedrock material with `DisableDepthTest`: over whatever is nearer.
+        let no_depth_test_pipeline = entity_pipeline(
+            "Entities without depth tests",
+            None,
+            false,
+            wgpu::CompareFunction::Always,
+            Default::default(),
+            alpha_blend,
+            false,
+        );
         let cloud_pipeline = entity_pipeline(
             "Clouds",
             Some(wgpu::Face::Back),
@@ -5118,6 +5175,9 @@ impl Renderer {
             crumbling_pipeline,
             shadow_blob_pipeline,
             translucent_item_pipeline,
+            no_depth_write_pipeline,
+            no_depth_test_pipeline,
+            glow_pipeline,
             water_mask_pipeline,
             cloud_pipeline,
             hdr_cloud_mark_pipeline,
@@ -9545,6 +9605,9 @@ impl Renderer {
             native_solid_quads,
             native_cutout_quads,
             native_cutout_mipped_quads,
+            no_depth_write_quads,
+            no_depth_test_quads,
+            glow_quads,
         ] = self.entity_batch.update(
             entities,
             frame.additive,
@@ -9576,7 +9639,10 @@ impl Renderer {
             + world_text_offset_quads
             + native_solid_quads
             + native_cutout_quads
-            + native_cutout_mipped_quads;
+            + native_cutout_mipped_quads
+            + no_depth_write_quads
+            + no_depth_test_quads
+            + glow_quads;
         laps.lap("r_draw_lists");
         // Where the tail of materials the classic and the improved passes
         // both draw ends: the shadows, particles and items count back from it.
@@ -11164,6 +11230,50 @@ impl Renderer {
                         * 4) as i32,
                     0..1,
                 );
+                pass.set_bind_group(0, &self.group, &[]);
+            }
+            // A bedrock add-on's materials without a depth write, then without a depth test:
+            // laid out right after the swirls. Its glows (added light) follow them, in either
+            // transparency path: light adds in any order.
+            if glow_quads > 0 {
+                let first = (entity_quads
+                    + text_quads
+                    + crumbling_quads
+                    + translucent_crumbling_quads
+                    + water_mask_quads
+                    + swirl_quads
+                    + no_depth_write_quads
+                    + no_depth_test_quads)
+                    * 4;
+                pass.set_bind_group(0, &self.entity_group, &[]);
+                pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
+                pass.set_pipeline(&self.glow_pipeline);
+                pass.draw_indexed(0..glow_quads * 6, first as i32, 0..1);
+                pass.set_bind_group(0, &self.group, &[]);
+            }
+            if no_depth_write_quads + no_depth_test_quads > 0 && !oit_on {
+                let first = (entity_quads
+                    + text_quads
+                    + crumbling_quads
+                    + translucent_crumbling_quads
+                    + water_mask_quads
+                    + swirl_quads)
+                    * 4;
+                pass.set_bind_group(0, &self.entity_group, &[]);
+                pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
+                for (pipeline, quads, from) in [
+                    (&self.no_depth_write_pipeline, no_depth_write_quads, first),
+                    (
+                        &self.no_depth_test_pipeline,
+                        no_depth_test_quads,
+                        first + no_depth_write_quads * 4,
+                    ),
+                ] {
+                    if quads > 0 {
+                        pass.set_pipeline(pipeline);
+                        pass.draw_indexed(0..quads * 6, from as i32, 0..1);
+                    }
+                }
                 pass.set_bind_group(0, &self.group, &[]);
             }
             if additive_quads > 0 && !oit_on {
@@ -13843,7 +13953,7 @@ mod tests {
         let mut batch = super::EntityBatch::default();
         let counts = batch.update(&entities, &quad(3, 5), &quad(0, 6), &quad(0, 8), false);
         let vertices = &batch.combined;
-        assert_eq!(counts, [4, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(counts, [4, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(
             vertices
                 .as_chunks::<4>()

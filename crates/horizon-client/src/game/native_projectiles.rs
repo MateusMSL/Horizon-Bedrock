@@ -32,7 +32,7 @@ pub(super) struct Impact {
 }
 
 /// The type the mods know a projectile by: a spectral arrow is its own.
-fn projectile_type(p: &Projectile) -> &'static str {
+pub(super) fn projectile_type(p: &Projectile) -> &'static str {
     p.entity_type()
 }
 

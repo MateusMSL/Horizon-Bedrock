@@ -299,6 +299,10 @@ fn entity_written_color(in: Out, color: vec4<f32>) -> vec4<f32> {
     return entity_color(in, front);
 }
 fn entity_color(in: Out, front: bool) -> vec4<f32> {
+    return entity_color_cut(in, front, 0.1);
+}
+// `entity_color` dropping texels whose alpha is below `cut` (entity.fsh's 0.1).
+fn entity_color_cut(in: Out, front: bool, cut: f32) -> vec4<f32> {
     var uv = in.uv;
     if in.overlay == 6u { uv.y = in.wrap.x + fract(in.uv.y) * in.wrap.y; }
     if in.overlay == 11u || in.overlay == 12u {
@@ -327,7 +331,7 @@ fn entity_color(in: Out, front: bool) -> vec4<f32> {
         // clouds.fsh: alpha fades out towards the cloud fog end.
         return vec4(color.rgb, color.a * (1.0 - linear_fog(in.fog_distance.x, 0.0, globals.fog_ends.y)));
     }
-    if color.a < 0.1 || (in.cull != 0u && !front) { discard; }
+    if color.a < cut || (in.cull != 0u && !front) { discard; }
     // entity.fsh calculateFinalColor: the overlay (hurt red, TNT white) over the
     // lit texture, then the lightmap, then the glint and fog.
     color = vec4(mix(in.overlay_color.rgb, color.rgb, in.overlay_color.a), color.a);
@@ -347,6 +351,19 @@ fn entity_color(in: Out, front: bool) -> vec4<f32> {
     let f = max(linear_fog(in.fog_distance.x, globals.fog.x, globals.fog.y),
                 linear_fog(in.fog_distance.y, globals.fog.z, globals.fog.w));
     return vec4(mix(color.rgb, globals.fog_color.rgb, f * globals.fog_color.a), color.a);
+}
+
+// A bedrock material that adds its colour times its alpha (`blendSrc SourceAlpha`, `blendDst
+// One`): the lit colour with the fog taken out of it, since light added to a foggy distance
+// fades with it rather than turning fog-coloured. The blend multiplies by the alpha.
+@fragment fn fs_entity_glow(in: Out, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    // Light added times its alpha has no cutout: a halo fades to its faintest texel, where
+    // entity.fsh's 0.1 cut left a hard rim around it.
+    let color = entity_color_cut(in, front, 1.0 / 512.0);
+    let f = max(linear_fog(in.fog_distance.x, globals.fog.x, globals.fog.y),
+                linear_fog(in.fog_distance.y, globals.fog.z, globals.fog.w));
+    let k = clamp(f * globals.fog_color.a, 0.0, 1.0);
+    return vec4(max(color.rgb - globals.fog_color.rgb * k, vec3(0.0)), color.a);
 }
 
 // rendertype_outline.fsh: the vertex colour (the team colour; outline vertices carry no

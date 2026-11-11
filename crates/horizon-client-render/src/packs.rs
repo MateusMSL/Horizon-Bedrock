@@ -3,6 +3,7 @@
 //! and High Contrast packs, `pack.mcmeta` metadata and format compatibility,
 //! and an overlay resource root that layers the enabled packs over the
 //! vanilla resources (later packs win), so every loader sees one tree.
+pub mod bedrock;
 mod cache;
 use crate::text::Style;
 use crate::{text::Text, zip::Zip};
@@ -648,9 +649,56 @@ pub fn discover(resources: &Path, packs_dir: &Path) -> Vec<Pack> {
     out.extend(folder(packs_dir, RESOURCE_FORMAT));
     out
 }
+/// The id prefix of the packs in `addons/`: they sit in the same `resourcePacks` list as the
+/// `file/` ones, above them, and the Addons screen lists only these.
+pub const ADDON_PREFIX: &str = "addon/";
+
+/// Whether `id` names a pack of the `addons/` folder.
+pub fn is_addon_id(id: &str) -> bool {
+    id.starts_with(ADDON_PREFIX)
+}
+
+/// The packs of the `addons/` folder (Bedrock add-ons first, Java packs too), as `addon/<name>`.
+pub fn addons(dir: &Path) -> Vec<Pack> {
+    let mut out = folder_with(dir, RESOURCE_FORMAT, true);
+    for p in &mut out {
+        if let Some(name) = p.id.strip_prefix("file/") {
+            p.id = format!("{ADDON_PREFIX}{name}");
+        }
+    }
+    out
+}
+
+/// [`discover`] and the `addons/` folder's packs.
+pub fn discover_all(resources: &Path, packs_dir: &Path, addons_dir: &Path) -> Vec<Pack> {
+    let mut out = discover(resources, packs_dir);
+    out.extend(addons(addons_dir));
+    out
+}
+
+/// A `resourcePacks` list after one of the two screens committed `chosen`: the screen's own
+/// kind is replaced and the other kind stays; addons go above the resource packs.
+pub fn merge_selection(current: &[String], chosen: Vec<String>, addons_screen: bool) -> Vec<String> {
+    let kept = current
+        .iter()
+        .filter(|id| is_addon_id(id) != addons_screen)
+        .cloned();
+    let (below, above): (Vec<String>, Vec<String>) = if addons_screen {
+        (kept.collect(), chosen)
+    } else {
+        (chosen, kept.collect())
+    };
+    below.into_iter().chain(above).collect()
+}
+
 /// The packs (folders and zips) in `dir`, by name, as `FolderRepositorySource`
 /// finds them; their compatibility is against `format`.
 pub fn folder(dir: &Path, format: (i64, i64)) -> Vec<Pack> {
+    folder_with(dir, format, false)
+}
+/// [`folder`], with Bedrock's packs (`.mcpack`, `.mcaddon`, a folder or zip with a
+/// `manifest.json`) listed too when `bedrock`: only the `addons/` folder takes them.
+pub fn folder_with(dir: &Path, format: (i64, i64), bedrock: bool) -> Vec<Pack> {
     let mut user: Vec<Pack> = fs::read_dir(dir)
         .into_iter()
         .flatten()
@@ -659,17 +707,43 @@ pub fn folder(dir: &Path, format: (i64, i64)) -> Vec<Pack> {
             let path = e.path();
             let name = e.file_name().to_string_lossy().into_owned();
             let source = if path.is_dir() {
-                Source::Dir(path)
+                Source::Dir(path.clone())
             } else if name.ends_with(".zip") {
-                Source::Zip(path)
+                Source::Zip(path.clone())
+            } else if bedrock::is_bedrock_file(&name) {
+                // `.mcpack` and `.mcaddon` are Bedrock's: converted below.
+                return bedrock.then(|| bedrock_pack(dir, &path, name, format))?;
             } else {
                 return None;
             };
-            pack_for(format!("file/{name}"), Text::literal(name), source, format)
+            pack_for(
+                format!("file/{name}"),
+                Text::literal(name.clone()),
+                source,
+                format,
+            )
+            .or_else(|| bedrock.then(|| bedrock_pack(dir, &path, name, format))?)
         })
         .collect();
     user.sort_by(|a, b| a.id.cmp(&b.id));
     user
+}
+/// A Bedrock resource pack (a folder or zip with a `manifest.json` and no `pack.mcmeta`, a
+/// `.mcpack` or a `.mcaddon`) as the Java pack [`bedrock::convert`] makes of it, kept in
+/// `.horizon-cache/bedrock/` beside `dir` and made again only when the file changes.
+fn bedrock_pack(dir: &Path, path: &Path, name: String, format: (i64, i64)) -> Option<Pack> {
+    let cache = dir
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(".horizon-cache/bedrock");
+    let subpack = bedrock::chosen_subpack(dir, &name);
+    let converted = bedrock::convert(path, &cache, format, subpack.as_deref())?;
+    pack_for(
+        format!("file/{name}"),
+        Text::literal(name),
+        Source::Dir(converted),
+        format,
+    )
 }
 /// A file a pack provides: its path (folder packs) and its name inside the pack.
 type Provided = (Option<PathBuf>, String);
@@ -995,6 +1069,7 @@ fn build_overlay_uncached(
     // player only accepts, and a gigabyte of zeros deflates to a megabyte, so without it a pack
     // at the download limit wrote hundreds of gigabytes here. Vanilla never unpacks a pack.
     let budget = std::sync::atomic::AtomicU64::new(unpack_budget(packs));
+    write_bedrock_order(&files, out)?;
     // Inflating and writing a big pack's files one by one was most of a cold build; its
     // folders all exist by now.
     let extracted: io::Result<()> = crate::par::par_map(&extract, |(owner, inner, target)| {
@@ -1040,6 +1115,44 @@ fn unpack_budget(packs: &[Pack]) -> u64 {
         .sum::<u64>()
         .saturating_mul(16)
         .clamp(64 << 20, 8 << 30)
+}
+/// `assets/horizon_bedrock/order.txt`: the converted Bedrock packs' folders, the lowest pack of
+/// the stack first, which is how [`horizon_bedrock::bundle::Bundle`] lets a pack above another
+/// win an identifier both define (the files themselves never collide: each pack has a folder).
+fn write_bedrock_order(files: &BTreeMap<String, (usize, Provided)>, out: &Path) -> io::Result<()> {
+    const DATA: [&str; 9] = [
+        "entity",
+        "attachables",
+        "animations",
+        "animation_controllers",
+        "render_controllers",
+        "models",
+        "particles",
+        "materials",
+        "sounds",
+    ];
+    let prefix = "assets/horizon_bedrock/";
+    let mut folders: BTreeMap<&str, usize> = BTreeMap::new();
+    for (name, (owner, _)) in files.range(prefix.to_owned()..) {
+        let Some(rest) = name.strip_prefix(prefix) else {
+            break;
+        };
+        if let Some((folder, _)) = rest.split_once('/')
+            && !DATA.contains(&folder)
+        {
+            let slot = folders.entry(folder).or_insert(*owner);
+            *slot = (*slot).max(*owner);
+        }
+    }
+    if folders.is_empty() {
+        return Ok(());
+    }
+    let mut order: Vec<(&str, usize)> = folders.into_iter().collect();
+    order.sort_by_key(|(folder, owner)| (*owner, *folder));
+    let text: String = order.iter().map(|(f, _)| format!("{f}\n")).collect();
+    let dir = out.join("assets/horizon_bedrock");
+    fs::create_dir_all(&dir)?;
+    fs::write(dir.join("order.txt"), text)
 }
 /// Files vanilla loads from every pack in turn (`getResourceStack`) rather
 /// than from the top pack only.
@@ -1396,6 +1509,61 @@ impl SelectionModel {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn each_screen_replaces_its_own_kind_and_addons_stay_above() {
+        let list = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let current = list(&["file/a.zip", "addon/x", "file/b.zip", "addon/y"]);
+        assert_eq!(
+            super::merge_selection(&current, list(&["file/c.zip"]), false),
+            list(&["file/c.zip", "addon/x", "addon/y"])
+        );
+        assert_eq!(
+            super::merge_selection(&current, list(&["addon/z"]), true),
+            list(&["file/a.zip", "file/b.zip", "addon/z"])
+        );
+    }
+
+    #[test]
+    fn resourcepacks_ignore_bedrock_files() {
+        let dir = std::env::temp_dir().join(format!("horizon-nobedrock-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        for name in ["a.mcpack", "b.mcaddon"] {
+            fs::write(dir.join(name), b"x").unwrap();
+        }
+        let none = super::folder(&dir, RESOURCE_FORMAT);
+        let _ = fs::remove_dir_all(&dir);
+        assert!(none.is_empty());
+    }
+
+    #[test]
+    fn addon_folders_list_as_addon_ids() {
+        let dir = std::env::temp_dir().join(format!("horizon-addons-{}", std::process::id()));
+        let pack = dir.join("Look");
+        fs::create_dir_all(&pack).unwrap();
+        fs::write(pack.join("pack.mcmeta"), br#"{"pack":{"pack_format":1,"description":"x"}}"#)
+            .unwrap();
+        let found = super::addons(&dir);
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, "addon/Look");
+        assert!(super::is_addon_id(&found[0].id));
+    }
+    #[test]
+    fn converted_bedrock_packs_are_listed_lowest_first() {
+        let out = std::env::temp_dir().join(format!("horizon-bedrock-order-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&out);
+        let provided: Provided = (None, String::new());
+        let mut files = BTreeMap::new();
+        files.insert("assets/horizon_bedrock/top/materials/entity.material".to_owned(), (2, provided.clone()));
+        files.insert("assets/horizon_bedrock/low/materials/entity.material".to_owned(), (0, provided.clone()));
+        files.insert("assets/horizon_bedrock/low/entity/a.json".to_owned(), (0, provided.clone()));
+        files.insert("assets/horizon_bedrock/entity/legacy.json".to_owned(), (1, provided));
+        write_bedrock_order(&files, &out).unwrap();
+        let text = fs::read_to_string(out.join("assets/horizon_bedrock/order.txt")).unwrap();
+        assert_eq!(text, "low\ntop\n");
+        let _ = fs::remove_dir_all(&out);
+    }
+
     use super::*;
 
     /// `DownloadedPackSource.DOWNLOADED_PACK_SELECTION`: the pack is selected,

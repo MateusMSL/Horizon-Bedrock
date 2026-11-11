@@ -1,0 +1,314 @@
+{
+ "animations": {
+  "animation.cow.baby_transform": {
+   "loop": true,
+   "bones": {
+    "head": {
+     "scale": 1.5,
+     "position": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  "animation.pig.baby_transform": {
+   "loop": true,
+   "bones": {
+    "head": {
+     "scale": 1.5,
+     "position": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  "animation.sheep.baby_transform": {
+   "loop": true,
+   "bones": {
+    "head": {
+     "scale": 1.5,
+     "position": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  "animation.polarbear.baby_transform": {
+   "loop": true,
+   "bones": {
+    "head": {
+     "scale": 1.5,
+     "position": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  "animation.goat.baby_transform": {
+   "loop": true,
+   "bones": {
+    "head": {
+     "scale": 1.4
+    }
+   }
+  },
+  "animation.llama.baby_transform": {
+   "loop": true,
+   "bones": {
+    "head": {
+     "scale": 1.4
+    }
+   }
+  },
+  "animation.horse.baby_transform": {
+   "loop": true,
+   "bones": {
+    "head": {
+     "scale": 1.4
+    }
+   }
+  },
+  "animation.wolf.baby_transform": {
+   "loop": true,
+   "bones": {
+    "head": {
+     "scale": 1.4
+    }
+   }
+  },
+  "animation.villager.baby_transform": {
+   "loop": true,
+   "bones": {
+    "head": {
+     "scale": 1.5
+    }
+   }
+  },
+  "animation.zombie.baby_transform": {
+   "loop": true,
+   "bones": {
+    "head": {
+     "scale": 1.4
+    }
+   }
+  },
+  "animation.humanoid.big_head": {
+   "loop": true,
+   "bones": {
+    "head": {
+     "scale": 1.4
+    }
+   }
+  },
+  "animation.humanoid.riding.arms": {
+   "loop": true,
+   "bones": {
+    "rightarm": {
+     "rotation": [
+      -36,
+      0,
+      0
+     ]
+    },
+    "leftarm": {
+     "rotation": [
+      -36,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  "animation.humanoid.riding.legs": {
+   "loop": true,
+   "bones": {
+    "rightleg": {
+     "rotation": [
+      -72,
+      18,
+      0
+     ]
+    },
+    "leftleg": {
+     "rotation": [
+      -72,
+      -18,
+      0
+     ]
+    }
+   }
+  },
+  "animation.player.riding.arms": {
+   "loop": true,
+   "bones": {
+    "rightarm": {
+     "rotation": [
+      -36,
+      0,
+      0
+     ]
+    },
+    "leftarm": {
+     "rotation": [
+      -36,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  "animation.bee.no_stinger": {
+   "loop": true,
+   "bones": {
+    "stinger": {
+     "scale": 0
+    }
+   }
+  },
+  "animation.elytra.default": {
+   "loop": true,
+   "bones": {
+    "leftwing": {
+     "rotation": [
+      15,
+      0,
+      -15
+     ]
+    },
+    "rightwing": {
+     "rotation": [
+      15,
+      0,
+      15
+     ]
+    }
+   }
+  },
+  "animation.elytra.sneaking": {
+   "loop": true,
+   "bones": {
+    "leftwing": {
+     "rotation": [
+      30,
+      0,
+      -15
+     ]
+    },
+    "rightwing": {
+     "rotation": [
+      30,
+      0,
+      15
+     ]
+    }
+   }
+  },
+  "animation.elytra.sleeping": {
+   "loop": true,
+   "bones": {
+    "leftwing": {
+     "rotation": [
+      15,
+      0,
+      -15
+     ]
+    },
+    "rightwing": {
+     "rotation": [
+      15,
+      0,
+      15
+     ]
+    }
+   }
+  },
+  "animation.cod.flop": {
+   "loop": true,
+   "bones": {
+    "body": {
+     "rotation": [
+      0,
+      0,
+      "90 + math.sin(query.anim_time * 1500) * 8"
+     ]
+    }
+   }
+  },
+  "animation.tropicalfish.flop": {
+   "loop": true,
+   "bones": {
+    "body": {
+     "rotation": [
+      0,
+      0,
+      "90 + math.sin(query.anim_time * 1500) * 8"
+     ]
+    }
+   }
+  },
+  "animation.villager.raise_arms": {
+   "loop": true,
+   "bones": {
+    "rightarm": {
+     "rotation": [
+      -90,
+      0,
+      0
+     ]
+    },
+    "leftarm": {
+     "rotation": [
+      -90,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  "animation.evocation_fang.bite": {
+   "loop": "hold_on_last_frame",
+   "animation_length": 1.0,
+   "bones": {
+    "base": {
+     "position": [
+      0,
+      "v.animation_progress=Math.clamp(q.anim_time,0,1); return (Math.clamp(q.anim_time,0,1)+Math.sin(Math.clamp(q.anim_time,0,1)*154.7))*7.2;",
+      0
+     ]
+    },
+    "upper_jaw": {
+     "position": [
+      0,
+      "(Math.clamp(q.anim_time,0,1)+Math.sin(Math.clamp(q.anim_time,0,1)*154.7))*7.2",
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      "-63*(1-Math.min(Math.clamp(q.anim_time,0,1)*2,1)*Math.min(Math.clamp(q.anim_time,0,1)*2,1))*(1-Math.min(Math.clamp(q.anim_time,0,1)*2,1)*Math.min(Math.clamp(q.anim_time,0,1)*2,1))"
+     ]
+    },
+    "lower_jaw": {
+     "position": [
+      0,
+      "(Math.clamp(q.anim_time,0,1)+Math.sin(Math.clamp(q.anim_time,0,1)*154.7))*7.2",
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      "63*(1-Math.min(Math.clamp(q.anim_time,0,1)*2,1)*Math.min(Math.clamp(q.anim_time,0,1)*2,1))*(1-Math.min(Math.clamp(q.anim_time,0,1)*2,1)*Math.min(Math.clamp(q.anim_time,0,1)*2,1))"
+     ]
+    }
+   }
+  }
+ }
+}

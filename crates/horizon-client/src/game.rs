@@ -56,11 +56,13 @@ mod agent;
 mod agent_settings;
 mod allays;
 mod armor_stands;
+mod pack_proxy;
 mod atlas_slots;
 mod attachment_sync;
 mod autosave;
 mod banners;
 mod beacon;
+mod bedrock;
 mod beds;
 mod beehives;
 mod block_breaking;
@@ -2742,6 +2744,9 @@ struct Game<'a> {
     /// a seat is taken (`Entity.moveTo`, no camera sweep) from the ones that
     /// follow it (`positionRider`, interpolated as usual).
     posed_rider: Option<u32>,
+    /// Where the ridden mount last seated the player: the next tick's start, whatever the player's
+    /// own physics did to its position meanwhile.
+    rider_seat: Vec3,
     /// The vehicle the player's file names, waiting for it to be in the world
     /// (`ServerPlayer.loadAndSpawnParentVehicle`).
     pending_vehicle: Option<[i32; 4]>,
@@ -6580,7 +6585,18 @@ impl Game<'_> {
             })
         };
         laps.lap("eg_prep");
+        let bedrock = self
+            .res
+            .mob_data()
+            .bedrock
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         for m in &self.mobs {
+            // A Bedrock pack that burns the mob itself leaves the game's flames out.
+            if bedrock.replaces_flames(&m.kind.id) {
+                continue;
+            }
             // Blaze.isOnFire: a charged blaze burns.
             let blazing = m.species() == horizon_client::mobs::Species::Blaze && m.extra.flag;
             if (m.is_on_fire() || blazing) && !m.removed {
@@ -7206,6 +7222,7 @@ impl Game<'_> {
         laps.lap("eg_objects");
         // Particles (ParticleEngine.extract): camera-facing quads.
         self.mark_stage(out.len(), "PARTICLES");
+        self.bedrock_effects(camera, &mut out);
         let world = &self.world;
         let particle_mode = self.settings.horizon.particle_culling;
         if particle_mode == horizon_client::graphics::ParticleCullingMode::Off {
@@ -11902,6 +11919,7 @@ impl<'a> Game<'a> {
             started_riding: Vec::new(),
             rotation_forced: false,
             posed_rider: None,
+            rider_seat: Vec3::ZERO,
             pending_vehicle: None,
             ender_items: vec![None; 27],
             ender_open: None,
@@ -12237,6 +12255,9 @@ fn load_world_rest(
         } else {
             horizon_client::mobs::cem::CemModels::default()
         }));
+        mob_data.bedrock = std::sync::RwLock::new(Arc::new(
+            horizon_client::mobs::bedrock::BedrockMobs::load(root),
+        ));
         horizon_client::mobs::trial_spawner::load_registry(root);
         Ok((mob_types, mob_data))
     };

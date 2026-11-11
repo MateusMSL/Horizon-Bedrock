@@ -124,6 +124,8 @@
   "horizon.studio.path.locked": "Воспроизведение пути камеры Studio включено",
   "horizon.studio.path.unlocked": "Воспроизведение пути камеры Studio остановлено",
   "horizon.studio.path.usage": "Использование: /studio path <lock|unlock> (сначала добавьте хотя бы один ключевой кадр)",
+  "horizon.pages.addons": "Аддоны",
+  "horizon.pages.addons.tooltip": "Аддоны Bedrock из папки addons. Применяются поверх наборов ресурсов.",
   "horizon.pages.mods": "Моды",
   "horizon.pages.shader_packs": "Шейдерпаки",
   "horizon.pages.controller": "Настройки контроллера",

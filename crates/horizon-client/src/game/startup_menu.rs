@@ -535,6 +535,7 @@ impl Loading {
         self.menu.options.languages = horizon_client::lang::available(&[&self.menu.root]);
         self.menu.options.pack_infos = packs::pack_infos(&self.vanilla_root, &[]);
         self.menu.options.pack_configs = packs::pack_configs(&self.vanilla_root);
+        self.menu.options.addon_infos = packs::addon_infos();
         self.menu.options.pack_selection = self.settings.resource_packs.clone();
         self.menu.options.pack_screen = None;
         self.menu.options_open = true;
@@ -574,6 +575,11 @@ impl Loading {
                 }
                 Event::OpenPackFolder => {
                     let dir = packs::packs_dir();
+                    let _ = std::fs::create_dir_all(&dir);
+                    packs::open_folder(&dir);
+                }
+                Event::OpenAddonFolder => {
+                    let dir = packs::addons_dir();
                     let _ = std::fs::create_dir_all(&dir);
                     packs::open_folder(&dir);
                 }

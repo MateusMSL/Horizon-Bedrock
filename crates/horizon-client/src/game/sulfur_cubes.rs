@@ -18,6 +18,13 @@ fn block_transform(base: glam::Mat4, baby: bool) -> glam::Mat4 {
         * glam::Mat4::from_translation(glam::Vec3::new(-0.5, -0.518, -0.5))
 }
 
+/// The block on a pack's bone, in the model's frame (y down, in blocks): its bottom on the
+/// bone, centred on it, as the pack's own core (16 pixels from the bone up) sits.
+fn pack_block_transform(bone: glam::Mat4) -> glam::Mat4 {
+    bone * glam::Mat4::from_scale(glam::Vec3::new(1.0, -1.0, -1.0))
+        * glam::Mat4::from_translation(glam::Vec3::new(-0.5, 0.0, -0.5))
+}
+
 fn block_overlay(fuse_ticks: i32, alpha: f32, hurt: bool) -> u32 {
     let fuse = if fuse_ticks >= 0 {
         fuse_ticks as f32 - alpha + 1.0
@@ -52,6 +59,20 @@ impl Game<'_> {
         if super::armor_stands::skull_kind(item).is_some() {
             return;
         }
+        // A pack that dresses the cube holds the block on its `rightitem` bone, the game's
+        // block there as in Bedrock: it turns with the pack's body and goes when the pack
+        // scales the bone to nothing (the blocks its own core draws: TNT, pumpkins).
+        let transform = match horizon_client::mobs::render::bedrock_bone_frame(
+            mob,
+            alpha,
+            base,
+            self.res.mob_data(),
+            "rightitem",
+        ) {
+            None => block_transform(base, mob.is_baby()),
+            Some(None) => return,
+            Some(Some(bone)) => pack_block_transform(bone),
+        };
         // shortcut: the body slot retains only an item id; preserve the stack
         // before supporting its block-state components here.
         let Some(state) = self.items().get(item).and_then(|item| item.block) else {
@@ -61,7 +82,7 @@ impl Game<'_> {
         self.block_model_vertices(
             state,
             42,
-            block_transform(base, mob.is_baby()),
+            transform,
             block_light(light, self.res.facts().get(state).emission),
             true,
             out,

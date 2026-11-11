@@ -1,0 +1,172 @@
+.gitignore|/resourcepacks
+Cargo.toml|"crates/horizon-bedrock",
+crates/horizon-assets/src/item_model.rs|Self::Component(component) => canonical_component(component, v),
+crates/horizon-assets/src/item_model.rs|fn canonical_component(component: &str, v: &Value) -> Value {
+crates/horizon-assets/src/item_model.rs|Value::String(potion) if component == "minecraft:potion_contents" => {
+crates/horizon-assets/src/item_model.rs|serde_json::json!({ "potion": potion })
+crates/horizon-assets/src/item_model.rs|_ => v.clone(),
+crates/horizon-assets/src/item_model.rs|SelectProperty::Component(component) => self
+crates/horizon-assets/src/item_model/tests.rs|fn a_potion_contents_select_matches_the_bare_and_the_object_form() {
+crates/horizon-client-lib/Cargo.toml|# Bedrock resource packs: the look of mobs, sounds and particles (docs/bedrock.md).
+crates/horizon-client-lib/Cargo.toml|horizon-bedrock = { path = "../horizon-bedrock" }
+crates/horizon-client-render/Cargo.toml|# Bedrock resource packs in `resourcepacks/`, converted to Java packs when discovered.
+crates/horizon-client-render/Cargo.toml|horizon-bedrock = { path = "../horizon-bedrock" }
+crates/horizon-client-render/src/entity.wgsl|return entity_color_cut(in, front, 0.1);
+crates/horizon-client-render/src/entity.wgsl|fn entity_color_cut(in: Out, front: bool, cut: f32) -> vec4<f32> {
+crates/horizon-client-render/src/entity.wgsl|if color.a < cut || (in.cull != 0u && !front) { discard; }
+crates/horizon-client-render/src/entity.wgsl|@fragment fn fs_entity_glow(in: Out, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+crates/horizon-client-render/src/entity.wgsl|let color = entity_color_cut(in, front, 1.0 / 512.0);
+crates/horizon-client-render/src/entity.wgsl|let f = max(linear_fog(in.fog_distance.x, globals.fog.x, globals.fog.y),
+crates/horizon-client-render/src/gfx.rs|ADDITIVE, ADDITIVE_PARTICLE_OVERLAY, DISSOLVE_OVERLAY, DRAGON_RAYS_OVERLAY, ENERGY_SWIRL_OVERLAY,
+crates/horizon-client-render/src/gfx.rs|FLUID_OVERLAY, NO_DEPTH_TEST, NO_DEPTH_WRITE, OIT_ENTITY, SHADOW_OVERLAY, TERRAIN_MODEL_CUTOUT_MIPPED_OVERLAY,
+crates/horizon-client-render/src/gfx.rs|no_depth_write_pipeline: wgpu::RenderPipeline,
+crates/horizon-client-render/src/gfx.rs|no_depth_test_pipeline: wgpu::RenderPipeline,
+crates/horizon-client-render/src/gfx.rs|glow_pipeline: wgpu::RenderPipeline,
+crates/horizon-client-render/src/gfx.rs|let no_depth_write_pipeline = entity_pipeline(
+crates/horizon-client-render/src/gfx/entity_batch.rs|fn bedrock_materials_sit_between_the_swirls_and_the_shadows() {
+crates/horizon-client-render/src/hud.rs||| (gh <= 1024 && name.starts_with("entity/bedrock/"))))
+crates/horizon-client-render/src/options_ui.rs|OpenAddonFolder,
+crates/horizon-client-render/src/options_ui.rs|pub addon_infos: Vec<crate::pack_screen::PackInfo>,
+crates/horizon-client-render/src/options_ui.rs|addons_page: bool,
+crates/horizon-client-render/src/options_ui.rs|addon_infos: Vec::new(),
+crates/horizon-client-render/src/options_ui.rs|addons_page: false,
+crates/horizon-client-render/src/options_ui.rs|self.page() == Page::Packs && self.data_pack_dir.is_none() && !self.addons_page
+crates/horizon-client-render/src/options_ui_pages.rs|Page::Addons => "horizon.pages.addons.tooltip",
+crates/horizon-client-render/src/pack_screen.rs|subpacks: Vec<crate::packs::bedrock::Subpack>,
+crates/horizon-client-render/src/pack_screen.rs|defs: Vec<horizon_bedrock::settings::Def>,
+crates/horizon-client-render/src/pack_screen.rs|values: HashMap<String, horizon_bedrock::settings::Choice>,
+crates/horizon-client-render/src/pack_screen.rs|fn value(&self, i: usize) -> horizon_bedrock::settings::Choice {
+crates/horizon-client-render/src/pack_screen.rs|use horizon_bedrock::settings::Kind;
+crates/horizon-client-render/src/pack_screen.rs|use horizon_bedrock::settings::{Choice, Kind, title_of};
+crates/horizon-client-render/src/packs.rs|pub mod bedrock;
+crates/horizon-client-render/src/packs.rs|pub fn folder_with(dir: &Path, format: (i64, i64), bedrock: bool) -> Vec<Pack> {
+crates/horizon-client-render/src/packs.rs|} else if bedrock::is_bedrock_file(&name) {
+crates/horizon-client-render/src/packs.rs|return bedrock.then(|| bedrock_pack(dir, &path, name, format))?;
+crates/horizon-client-render/src/packs.rs|.or_else(|| bedrock.then(|| bedrock_pack(dir, &path, name, format))?)
+crates/horizon-client-render/src/packs.rs|fn bedrock_pack(dir: &Path, path: &Path, name: String, format: (i64, i64)) -> Option<Pack> {
+crates/horizon-client-render/src/skins.rs|offline_skins().as_ref().map(|(skin, _)| skin)
+crates/horizon-client-render/src/skins.rs|pub fn offline_skin_raw() -> Option<&'static [u8]> {
+crates/horizon-client-render/src/skins.rs|offline_skins().as_ref().map(|(_, raw)| raw.as_slice())
+crates/horizon-client-render/src/skins.rs|type OfflineSkin = Option<((Vec<u8>, bool), Vec<u8>)>;
+crates/horizon-client-render/src/skins.rs|fn offline_skins() -> &'static OfflineSkin {
+crates/horizon-client-render/src/skins.rs|static SKIN: std::sync::OnceLock<OfflineSkin> = std::sync::OnceLock::new();
+crates/horizon-client/Cargo.toml|# Bedrock resource packs: the look of mobs, sounds and particles (docs/bedrock.md).
+crates/horizon-client/Cargo.toml|horizon-bedrock = { path = "../horizon-bedrock" }
+crates/horizon-client/assets/horizon/lang/en_us.json|"horizon.pages.addons.tooltip": "Bedrock add-ons, from the addons folder. They apply on top of the resource packs.",
+crates/horizon-client/assets/horizon/lang/pt_br.json|"horizon.pages.addons.tooltip": "Add-ons do Bedrock, da pasta addons. Valem por cima dos pacotes de recursos.",
+crates/horizon-client/assets/horizon/lang/ru_ru.json|"horizon.pages.addons.tooltip": "Аддоны Bedrock из папки addons. Применяются поверх наборов ресурсов.",
+crates/horizon-client/src/game.rs|mod bedrock;
+crates/horizon-client/src/game.rs|let bedrock = self
+crates/horizon-client/src/game.rs|if bedrock.replaces_flames(&m.kind.id) {
+crates/horizon-client/src/game.rs|self.bedrock_effects(camera, &mut out);
+crates/horizon-client/src/game.rs|mob_data.bedrock = std::sync::RwLock::new(Arc::new(
+crates/horizon-client/src/game.rs|horizon_client::mobs::bedrock::BedrockMobs::load(root),
+crates/horizon-client/src/game/armor_stands.rs|if !a.invisible && self.pack_stand(a, camera, alpha, wobble, packed, out) {
+crates/horizon-client/src/game/armor_stands.rs|fn pack_stand(
+crates/horizon-client/src/game/armor_stands.rs|a: &ArmorStand,
+crates/horizon-client/src/game/armor_stands.rs|camera: glam::DVec3,
+crates/horizon-client/src/game/armor_stands.rs|alpha: f64,
+crates/horizon-client/src/game/armor_stands.rs|wobble: f32,
+crates/horizon-client/src/game/creatures/mob_geometry.rs|let pack_dresses = is_player
+crates/horizon-client/src/game/creatures/mob_geometry.rs|.mob_data()
+crates/horizon-client/src/game/creatures/mob_geometry.rs|.unwrap_or_else(std::sync::PoisonError::into_inner)
+crates/horizon-client/src/game/creatures/mob_geometry.rs|.has_entity(&mob.kind.id);
+crates/horizon-client/src/game/creatures/mob_geometry.rs|let armor = if is_player && !pack_dresses {
+crates/horizon-client/src/game/creatures/mob_geometry.rs|if let Some(burning) = self.pack_projectile(a, at, c, camera, alpha, packed, out) {
+crates/horizon-client/src/game/dragon.rs|let pack = {
+crates/horizon-client/src/game/dragon.rs|let proxy = super::pack_proxy::Proxy {
+crates/horizon-client/src/game/dragon.rs|entity: "minecraft:ender_dragon",
+crates/horizon-client/src/game/dragon.rs|head_yaw: yr,
+crates/horizon-client/src/game/dragon.rs|pitch: 0.0,
+crates/horizon-client/src/game/dragon.rs|base: None,
+crates/horizon-client/src/game/frame_geometry.rs|let rest = to_world
+crates/horizon-client/src/game/frame_geometry.rs|* horizon_client::first_person::item_pose(left, inverse_height, 0.0, ItemPose::Using);
+crates/horizon-client/src/game/frame_geometry.rs|let mut dressed = Vec::new();
+crates/horizon-client/src/game/frame_geometry.rs|if self.first_person_pack_item(&stack.item, hand == Hand::Off, a, rest, packed, &mut dressed) {
+crates/horizon-client/src/game/frame_geometry.rs|runs.push((out.len() as u32, item_id));
+crates/horizon-client/src/game/frame_geometry.rs|out.append(&mut dressed);
+crates/horizon-client/src/game/minecarts.rs|const PASSENGER_Y: f64 = 0.1875 + 0.47;
+crates/horizon-client/src/game/minecarts.rs|self.previous_position = Vec3::new(c.previous.x, c.previous.y + SEAT, c.previous.z);
+crates/horizon-client/src/game/minecarts.rs|let pack_block = c.custom_display.is_none()
+crates/horizon-client/src/game/minecarts.rs|&& matches!(
+crates/horizon-client/src/game/minecarts.rs|CartKind::Chest | CartKind::Hopper | CartKind::Tnt | CartKind::CommandBlock
+crates/horizon-client/src/game/minecarts.rs|&& self.pack_draws(c.kind.id());
+crates/horizon-client/src/game/mob_blocks.rs|if species == Species::SnowGolem
+crates/horizon-client/src/game/mob_blocks.rs|.mob_data()
+crates/horizon-client/src/game/mob_blocks.rs|.unwrap_or_else(std::sync::PoisonError::into_inner)
+crates/horizon-client/src/game/mob_blocks.rs|.has_entity(&mob.kind.id)
+crates/horizon-client/src/game/mob_blocks.rs|if render::held_item_replaced(mob, self.res.mob_data(), off_hand) {
+crates/horizon-client/src/game/mounts.rs|self.previous_position = if first { at } else { self.rider_seat };
+crates/horizon-client/src/game/mounts.rs|self.rider_seat = at;
+crates/horizon-client/src/game/native_projectiles.rs|pub(super) fn projectile_type(p: &Projectile) -> &'static str {
+crates/horizon-client/src/game/occlusion_culling_tests.rs|bedrock: Default::default(),
+crates/horizon-client/src/game/options.rs|let addons = self.ui.options.addons_open();
+crates/horizon-client/src/game/options.rs|if !self.ui.options.resource_packs_open() && !addons {
+crates/horizon-client/src/game/options.rs|std::fs::read_dir(if addons {
+crates/horizon-client/src/game/options.rs|super::packs::addons_dir()
+crates/horizon-client/src/game/options.rs|super::packs::packs_dir()
+crates/horizon-client/src/game/options.rs|.into_iter()
+crates/horizon-client/src/game/packs.rs|.unwrap_or_else(std::sync::PoisonError::into_inner) = bedrock;
+crates/horizon-client/src/game/packs.rs|let bedrock = Arc::new(horizon_client::mobs::bedrock::BedrockMobs::load(&root));
+crates/horizon-client/src/game/packs.rs|pub bedrock: Arc<horizon_client::mobs::bedrock::BedrockMobs>,
+crates/horizon-client/src/game/passengers.rs|pub(super) fn vehicle_kind(&self, id: u32) -> String {
+crates/horizon-client/src/game/passengers.rs|if let Some(b) = self.boats.iter().find(|b| b.id == id) {
+crates/horizon-client/src/game/passengers.rs|return if b.chest { "minecraft:chest_boat" } else { "minecraft:boat" }.to_owned();
+crates/horizon-client/src/game/passengers.rs|if let Some(c) = self.carts.iter().find(|c| c.id == id) {
+crates/horizon-client/src/game/passengers.rs|return match c.kind {
+crates/horizon-client/src/game/passengers.rs|super::minecarts::CartKind::Rideable => "minecraft:minecart",
+crates/horizon-client/src/game/perspective.rs|if horizon_client::mobs::bedrock::wants_surroundings() {
+crates/horizon-client/src/game/perspective.rs|horizon_client::mobs::bedrock::sample_surroundings(m, &self.mob_world_base(&[]))
+crates/horizon-client/src/game/perspective.rs|bedrock: Default::default(),
+crates/horizon-client/src/game/remote.rs|if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32)
+crates/horizon-client/src/game/remote.rs|&& m.species() == horizon_client::mobs::Species::Blaze
+crates/horizon-client/src/game/remote.rs|for (index, _, value) in &p.values {
+crates/horizon-client/src/game/remote.rs|if let (16, Value::Byte(flags)) = (index, value) {
+crates/horizon-client/src/game/remote.rs|horizon_client::mobs::nether::set_blaze_charged(m, flags & 1 != 0);
+crates/horizon-client/src/game/remote.rs|m.extra.sneaking = flags & 2 != 0;
+crates/horizon-client/src/game/remote_vehicles.rs|self.previous_position = if first { v } else { self.rider_seat };
+crates/horizon-client/src/game/remote_vehicles.rs|self.rider_seat = v;
+crates/horizon-client/src/game/startup_menu.rs|self.menu.options.addon_infos = packs::addon_infos();
+crates/horizon-client/src/game/startup_menu.rs|Event::OpenAddonFolder => {
+crates/horizon-client/src/game/startup_menu.rs|let dir = packs::addons_dir();
+crates/horizon-client/src/game/startup_menu.rs|let _ = std::fs::create_dir_all(&dir);
+crates/horizon-client/src/game/startup_menu.rs|packs::open_folder(&dir);
+crates/horizon-client/src/game/sulfur_cubes.rs|let transform = match horizon_client::mobs::render::bedrock_bone_frame(
+crates/horizon-client/src/item_render.rs|let wanted = crate::mobs::bedrock_debug::settings().items.clone();
+crates/horizon-client/src/item_render.rs|log::info!("bedrock-debug: {line}");
+crates/horizon-client/src/mobs.rs|pub mod bedrock;
+crates/horizon-client/src/mobs.rs|pub mod bedrock_debug;
+crates/horizon-client/src/mobs.rs|pub surroundings: Option<Arc<bedrock::Surroundings>>,
+crates/horizon-client/src/mobs.rs|if bedrock::wants_surroundings() && self.age.wrapping_add(self.id).is_multiple_of(4) {
+crates/horizon-client/src/mobs.rs|self.extra.surroundings = Some(Arc::new(bedrock::sample_surroundings(self, w)));
+crates/horizon-client/src/mobs/camel.rs|static MODEL_DROP: std::sync::Mutex<Vec<(u32, f32)>> = std::sync::Mutex::new(Vec::new());
+crates/horizon-client/src/mobs/camel.rs|pub fn set_model_drop(id: u32, drop: f32) {
+crates/horizon-client/src/mobs/camel.rs|if let Ok(mut all) = MODEL_DROP.lock() {
+crates/horizon-client/src/mobs/camel.rs|match all.iter_mut().find(|(i, _)| *i == id) {
+crates/horizon-client/src/mobs/camel.rs|Some(e) => e.1 = drop,
+crates/horizon-client/src/mobs/camel.rs|None => all.push((id, drop)),
+crates/horizon-client/src/mobs/cem.rs|bedrock: Default::default(),
+crates/horizon-client/src/mobs/cem_anim.rs|pub fn is_in_gui() -> bool {
+crates/horizon-client/src/mobs/cem_anim.rs|IN_GUI.get()
+crates/horizon-client/src/mobs/data.rs|pub bedrock: std::sync::RwLock<std::sync::Arc<super::bedrock::BedrockMobs>>,
+crates/horizon-client/src/mobs/data.rs|bedrock: Default::default(),
+crates/horizon-client/src/mobs/nether.rs|pub fn set_blaze_charged(m: &mut Mob, on: bool) {
+crates/horizon-client/src/mobs/nether.rs|if m.extra.flag == on {
+crates/horizon-client/src/mobs/nether.rs|m.extra.flag = on;
+crates/horizon-client/src/mobs/nether.rs|m.extra.ints[if on { 0 } else { 1 }] = m.age as i32 + 1;
+crates/horizon-client/src/mobs/nether.rs|pub fn blaze_charging(m: &Mob) -> bool {
+crates/horizon-client/src/mobs/nether.rs|m.extra.flag && (m.extra.ints[0] <= 0 || (m.age as i32) - m.extra.ints[0] < 60)
+crates/horizon-client/src/mobs/random_textures.rs|bedrock: Default::default(),
+crates/horizon-client/src/mobs/render.rs|include!("bedrock_render/render_01.rs");
+crates/horizon-client/src/mobs/render.rs|include!("bedrock_render/render_02.rs");
+crates/horizon-client/src/mobs/render.rs|} else if m.extra.swim.amount(alpha) > 0.0 && !super::bedrock::pack_lies_down(m.id) {
+crates/horizon-client/src/mobs/render.rs|include!("bedrock_render/render_03.rs");
+crates/horizon-client/src/mobs/render.rs|if body_visible && render_bedrock(m, alpha, base, atlas, light, data, out) {
+crates/horizon-client/src/mobs/render.rs|include!("bedrock_render/render_04.rs");
+crates/horizon-client/src/mobs/riders.rs|static MOUNT_KINDS: std::sync::RwLock<Vec<(u32, String)>> = std::sync::RwLock::new(Vec::new());
+crates/horizon-client/src/mobs/riders.rs|pub fn set_mount_kinds(kinds: Vec<(u32, String)>) {
+crates/horizon-client/src/mobs/riders.rs|if let Ok(mut k) = MOUNT_KINDS.write() {
+crates/horizon-client/src/mobs/riders.rs|*k = kinds;
+crates/horizon-client/src/mobs/riders.rs|static PLAYER_MOUNT: std::sync::RwLock<Option<(u32, String)>> = std::sync::RwLock::new(None);
+crates/horizon-client/src/mobs/riders.rs|pub fn set_player_mount(mount: Option<(u32, String)>) {
+crates/horizon-client/src/mobs/skin.rs|bedrock: Default::default(),

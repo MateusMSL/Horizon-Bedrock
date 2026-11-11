@@ -47,6 +47,7 @@ members = [
     "crates/horizon-shaders",
     "crates/horizon-optifine",
     "crates/horizon-polytone",
+    "crates/horizon-bedrock",
     "crates/horizon-shader-api",
     "crates/horizon-release-sign",
     "crates/horizon-mod-deps",

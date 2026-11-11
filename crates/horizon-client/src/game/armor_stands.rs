@@ -1486,6 +1486,12 @@ impl Game<'_> {
             let probe = a.light_probe(alpha, |x, y, z| self.world.light(x, y, z));
             let light = self.world.light(probe[0], probe[1], probe[2]);
             let packed = a.render_light(light);
+            // A pack with its own armor stand draws it with its model: the stand's pose laid
+            // over the pack's, its gear through the pack's attachables. An invisible stand keeps
+            // the game's layers (its items and armour without a body).
+            if !a.invisible && self.pack_stand(a, camera, alpha, wobble, packed, out) {
+                continue;
+            }
             let skinned = if skinning {
                 let mut models = self.skin_models.borrow_mut();
                 let mut frame = self.skin_frame.borrow_mut();
@@ -1501,6 +1507,59 @@ impl Game<'_> {
                 self.cull_skinned(out, entity_start, skinned);
             }
         }
+    }
+    /// Stand `a` drawn by the pack that has a model for `minecraft:armor_stand`, through a mob
+    /// that stands in for it (`pack_proxy`): false when no pack has one.
+    fn pack_stand(
+        &self,
+        a: &ArmorStand,
+        camera: glam::DVec3,
+        alpha: f64,
+        wobble: f32,
+        packed: u32,
+        out: &mut Vec<Vertex>,
+    ) -> bool {
+        let at = super::entity_culling::at(a.render_position(alpha));
+        let proxy = super::pack_proxy::Proxy {
+            entity: "minecraft:armor_stand",
+            id: a.id,
+            at,
+            // `setupRotations`' wobble after a hit turns the whole stand.
+            yaw: a.render_yaw(alpha as f32) - wobble,
+            head_yaw: a.render_yaw(alpha as f32) - wobble,
+            pitch: 0.0,
+            base: None,
+            packed,
+        };
+        self.pack_proxy(
+            &proxy,
+            camera,
+            alpha,
+            |m| {
+                m.on_ground = a.on_ground;
+                m.extra.age = if a.small { -1 } else { 0 };
+                let item = |i: usize| a.equipment[i].as_ref().map(|s| s.item.clone());
+                m.extra.main_hand = item(0);
+                m.extra.off_hand = item(1);
+                m.extra.feet = item(2);
+                m.extra.legs = item(3);
+                m.extra.chest = item(4);
+                m.extra.head = item(5);
+                m.extra.armor = [5, 4, 3, 2].map(|i| a.equipment[i].clone());
+                m.custom_name = a.custom_name.as_ref().map(|t| t.plain());
+                let stand = horizon_client::mobs::StandPose {
+                    pose: a.pose,
+                    // Bedrock stands always have arms, and the pack's stand is drawn as Bedrock
+                    // draws it.
+                    arms: true,
+                    base_plate: !a.no_base_plate,
+                };
+                if m.extra.stand_pose.as_deref() != Some(&stand) {
+                    m.extra.stand_pose = Some(Box::new(stand));
+                }
+            },
+            out,
+        )
     }
     /// `ArmorStandRenderer.submit` for stand `a` under `base` (its
     /// `setupRotations`): the body, the hand and head items, the armour and

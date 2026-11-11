@@ -65,6 +65,28 @@ impl Game<'_> {
         self.note_started_riding(vehicle);
         true
     }
+    /// The entity type of the vehicle `id`: a boat, a cart or a mob.
+    pub(super) fn vehicle_kind(&self, id: u32) -> String {
+        if let Some(b) = self.boats.iter().find(|b| b.id == id) {
+            return if b.chest { "minecraft:chest_boat" } else { "minecraft:boat" }.to_owned();
+        }
+        if let Some(c) = self.carts.iter().find(|c| c.id == id) {
+            return match c.kind {
+                super::minecarts::CartKind::Rideable => "minecraft:minecart",
+                super::minecarts::CartKind::Chest => "minecraft:chest_minecart",
+                super::minecarts::CartKind::Hopper => "minecraft:hopper_minecart",
+                super::minecarts::CartKind::Furnace => "minecraft:furnace_minecart",
+                super::minecarts::CartKind::Tnt => "minecraft:tnt_minecart",
+                super::minecarts::CartKind::CommandBlock => "minecraft:command_block_minecart",
+                super::minecarts::CartKind::Spawner => "minecraft:spawner_minecart",
+            }
+            .to_owned();
+        }
+        self.mobs
+            .iter()
+            .find(|m| m.id == id)
+            .map_or_else(String::new, |m| m.kind.id.to_string())
+    }
     /// Riders sit on their vehicles (`Entity.positionRider`), mobs or boats,
     /// and let go when the vehicle dies or is gone.
     pub(super) fn sync_riders(&mut self) {
@@ -128,6 +150,14 @@ impl Game<'_> {
         for m in &mut self.mobs {
             m.extra.rider = riding.get(&m.id).copied();
         }
+        let mut kinds: Vec<(u32, String)> = Vec::new();
+        for m in &self.mobs {
+            let Some(v) = m.extra.mount else {
+                continue;
+            };
+            kinds.push((m.id, self.vehicle_kind(v)));
+        }
+        riders::set_mount_kinds(kinds);
         self.position_riders();
     }
     /// `Entity.positionRider` for every mob passenger: in its boat, then on

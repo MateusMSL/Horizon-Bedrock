@@ -15,6 +15,8 @@ pub mod armadillo;
 pub mod armor;
 pub mod axolotl;
 pub mod bat;
+pub mod bedrock;
+pub mod bedrock_debug;
 pub mod bee;
 pub mod body_anim;
 pub mod brain;
@@ -1076,6 +1078,18 @@ pub struct Attrs {
 /// `minecraft:wolf_armor`'s maximum damage.
 pub const WOLF_ARMOR_DURABILITY: i32 = 64;
 
+/// How many ticks of a dragon's flight a pack reads back (`variable.historical_frame_<n>`).
+pub const HISTORY: usize = 16;
+
+/// An armor stand's pose for a pack's model: head, body, left arm, right arm, left leg, right
+/// leg in degrees (`DATA_HEAD_POSE`..), and whether the arms and the base plate show.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StandPose {
+    pub pose: [[f32; 3]; 6],
+    pub arms: bool,
+    pub base_plate: bool,
+}
+
 /// Species-specific persistent state (variants, colours, taming, ageing...).
 #[derive(Clone, Debug, Default)]
 pub struct Extra {
@@ -1083,6 +1097,14 @@ pub struct Extra {
     pub from_bucket: bool,
     /// Command-created armor instances, shared by commands and runtime damage.
     pub armor_attributes: Option<Box<horizon_world::attributes::entity::EntityAttributes>>,
+    /// The world around the mob, for a Bedrock pack's queries (sampled while one asks).
+    pub surroundings: Option<Arc<bedrock::Surroundings>>,
+    /// An armor stand drawn by a pack's model: its Java pose and part visibility, laid over the
+    /// pack's own animations (`ArmorStandModel.setupAnim`).
+    pub stand_pose: Option<Box<StandPose>>,
+    /// The dragon's flight history for a pack (`variable.historical_frame_<n>`: its height and
+    /// yaw `n` ticks ago, `EnderDragon.getLatencyPos`), newest first.
+    pub history: Option<Box<[[f32; 2]; HISTORY]>>,
     /// `Mob.lootTable`: the table its death rolls instead of its type's
     /// (saved as `DeathLootTable`).
     pub death_loot_table: Option<String>,
@@ -1103,6 +1125,11 @@ pub struct Extra {
     pub model_scale: f32,
     /// Players: crouching and riding (HumanoidModel's poses).
     pub crouching: bool,
+    /// Players: the sneak key held (`Entity.isShiftKeyDown`), also while gliding or swimming, when
+    /// the pose is no longer crouching (`query.is_sneaking`).
+    pub sneaking: bool,
+    /// The body of the player at this keyboard (`query.is_local_player`).
+    pub local_player: bool,
     /// A player's or mannequin's synced pose (`Entity.DATA_POSE`), which
     /// sets its box (`Avatar.POSES`).
     pub avatar_pose: crate::pose::Pose,
@@ -1111,6 +1138,9 @@ pub struct Extra {
     /// which `LivingEntity.setSprinting`'s speed modifier makes faster.
     pub sprinting: bool,
     pub passenger: bool,
+    /// The player's first-person view model: a copy of the local player the packs' attachables
+    /// answer `context.is_first_person` for (`mobs::render::first_person_item`).
+    pub first_person: bool,
     /// AgeableMob.age: negative while a baby (a tadpole counts up to 24000).
     pub age: i32,
     /// `AgeLocked` (tadpoles fed a slime ball... and ageable mobs).
@@ -4193,7 +4223,13 @@ impl Mob {
         // LivingEntity.tick: CombatTracker.recheckStatus.
         let alive = self.alive();
         self.combat.recheck(alive, self.age);
-        neutral_anger::around_tick(self, w.game_time, |m| ai::tick(m, w, level_random, events))
+        let keep = neutral_anger::around_tick(self, w.game_time, |m| {
+            ai::tick(m, w, level_random, events)
+        });
+        if bedrock::wants_surroundings() && self.age.wrapping_add(self.id).is_multiple_of(4) {
+            self.extra.surroundings = Some(Arc::new(bedrock::sample_surroundings(self, w)));
+        }
+        keep
     }
     /// The section the mob is in, noted when it changes (`EntitySection` lists).
     fn track_section(&mut self) {

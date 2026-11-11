@@ -335,6 +335,18 @@ impl Game<'_> {
         if !on_head || horizon_client::mobs::trader::is_invisible(mob) {
             return;
         }
+        // A pack's snow golem carries its own pumpkin in its model.
+        if species == Species::SnowGolem
+            && self
+                .res
+                .mob_data()
+                .bedrock
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .has_entity(&mob.kind.id)
+        {
+            return;
+        }
         let registry = &self.pack.assets.registry;
         let block = match species {
             Species::SnowGolem => "minecraft:carved_pumpkin",
@@ -400,6 +412,9 @@ impl Game<'_> {
         // ItemInHandLayer submits with OverlayTexture.NO_OVERLAY: no hurt tint.
         for (item, off_hand) in [(&mob.extra.main_hand, false), (&mob.extra.off_hand, true)] {
             let Some(item) = item else { continue };
+            if render::held_item_replaced(mob, self.res.mob_data(), off_hand) {
+                continue;
+            }
             let left = off_hand != mob.main_arm_left();
             // PlayerItemInHandLayer.submitArmWithItem (avatars only): a spyglass
             // in use, with no swing in progress, is held to the eye (`heldOnHead`).

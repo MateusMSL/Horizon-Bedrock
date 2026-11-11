@@ -46,6 +46,7 @@ pub const FULL_BRIGHT: u32 = 240 | 240 << 8;
 /// HDR output, as `mesher::hdr_tier`.
 const EYES_TIER: u8 = crate::mesher::BRIGHT;
 
+include!("bedrock_render/render_01.rs");
 /// Tags quads as drawn by a render type vanilla gives an `OitPipelineSet`
 /// (`gfx::OIT_ENTITY`): improved transparency draws them in its stages.
 fn mark_oit(quads: &mut [Vertex]) {
@@ -53,6 +54,7 @@ fn mark_oit(quads: &mut [Vertex]) {
         vertex.layer |= crate::gfx::OIT_ENTITY;
     }
 }
+include!("bedrock_render/render_02.rs");
 /// Whether the species' model is built with `RenderTypes::entityTranslucent`
 /// (`Model.renderType`, which `LivingEntityRenderer.getRenderType` uses for the
 /// body): the allay, the piglins, the breeze, the vex, the player model and the
@@ -1215,7 +1217,7 @@ pub fn base_transform_at(m: &Mob, alpha: f32, origin: glam::Mat4) -> glam::Mat4 
                 * glam::Mat4::from_rotation_x((amount * (-10.0 - pitch)).to_radians())
                 * glam::Mat4::from_translation(-middle);
         }
-    } else if m.extra.swim.amount(alpha) > 0.0 {
+    } else if m.extra.swim.amount(alpha) > 0.0 && !super::bedrock::pack_lies_down(m.id) {
         // AvatarRenderer.setupRotations: tip forward with the swim amount,
         // following the pitch in water, then lie along the swimming box.
         let amount = m.extra.swim.amount(alpha);
@@ -1405,6 +1407,27 @@ fn draw_normals(
         return;
     }
     let normals = normals.part(p);
+    draw_polygons(
+        part, m, normals, uv, scroll, color, light, overlay, poses, out,
+    );
+    for c in &part.children {
+        draw_normals(c, m, normals, poses, uv, scroll, color, light, overlay, out);
+    }
+}
+/// The polygons of `part` alone, under its own matrix `m`.
+#[allow(clippy::too_many_arguments)]
+fn draw_polygons(
+    part: &Part,
+    m: glam::Mat4,
+    normals: ModelNormals,
+    uv: [f32; 4],
+    scroll: f32,
+    color: u32,
+    light: u32,
+    overlay: u32,
+    poses: &Poses,
+    out: &mut Vec<Vertex>,
+) {
     // `skips` is a name lookup: ask once per part, not once per polygon. A part
     // hidden this way still draws its children, so only the polygons are gated.
     if !poses.skips(part) {
@@ -1434,8 +1457,169 @@ fn draw_normals(
             }
         }
     }
+}
+/// Every part's posed matrix and rest matrix under `part`, by name, both from the model's
+/// origin: what an attachable bound to the part needs (`posed * rest⁻¹` moves the part's own
+/// cubes from where they were modelled to where the animation put them).
+pub fn bone_matrices(
+    part: &Part,
+    poses: &Poses,
+    out: &mut std::collections::HashMap<String, (glam::Mat4, glam::Mat4)>,
+) {
+    fn walk(
+        part: &Part,
+        posed_parent: glam::Mat4,
+        rest_parent: glam::Mat4,
+        poses: &Poses,
+        out: &mut std::collections::HashMap<String, (glam::Mat4, glam::Mat4)>,
+    ) {
+        let now = posed(posed_parent, poses.pose(part));
+        let rest = posed(rest_parent, part.pose);
+        out.insert(part.name.clone(), (now, rest));
+        for c in &part.children {
+            walk(c, now, rest, poses, out);
+        }
+    }
+    walk(part, glam::Mat4::IDENTITY, glam::Mat4::IDENTITY, poses, out);
+}
+/// Where what is held is modelled from: the holder's bone (`rightitem`, with its whole pose) at
+/// the item's own origin. A model baked to the game's frame puts a bone modelled at the origin
+/// on the feet line, `MODEL_FEET` below the frame's origin, which this takes back (the matrices
+/// are in blocks: poses are in sixteenths).
+pub fn held_anchor(bone: glam::Mat4, scale: f32) -> glam::Mat4 {
+    bone * glam::Mat4::from_scale(glam::Vec3::splat(scale))
+        * glam::Mat4::from_translation(glam::Vec3::new(0.0, -MODEL_FEET, 0.0))
+}
+/// `held_anchor` for a bound bone modelled around `pivot` (the bone's rest position in the
+/// baked frame, in blocks): the game puts the bone's pivot on the hand, not the model's origin.
+/// A bone pivoted at the origin gives `held_anchor`'s `(0, MODEL_FEET, 0)`; one pivoted at the
+/// model's 24 sixteenths (a trident modelled around its own height) gives zero.
+pub fn held_anchor_at(bone: glam::Mat4, scale: f32, pivot: glam::Vec3) -> glam::Mat4 {
+    bone * glam::Mat4::from_scale(glam::Vec3::splat(scale)) * glam::Mat4::from_translation(-pivot)
+}
+/// The rest position of the part called `name` in the baked frame, in blocks (its own and its
+/// ancestors' positions added).
+pub fn rest_pivot(part: &Part, name: &str) -> Option<glam::Vec3> {
+    fn walk(part: &Part, from: glam::Vec3, name: &str) -> Option<glam::Vec3> {
+        let here = from + glam::Vec3::new(part.pose[0], part.pose[1], part.pose[2]) / 16.0;
+        if part.name == name {
+            return Some(here);
+        }
+        part.children.iter().find_map(|c| walk(c, here, name))
+    }
+    walk(part, glam::Vec3::ZERO, name)
+}
+/// How high above the model's floor the lowest cube under the part called `name` sits at rest,
+/// in pixels (Bedrock's `y`): where its model was drawn, beside the player's hand (a vanilla
+/// shield, from 17 up) or around its own origin (a pack's bell, lantern, sword).
+pub fn rest_floor(part: &Part, name: &str) -> Option<f32> {
+    fn lowest(part: &Part, y: f32) -> Option<f32> {
+        let here = y + part.pose[1];
+        let own = part
+            .polygons
+            .iter()
+            .flat_map(|p| p.vertices.iter().map(|v| here + v[1]))
+            .reduce(f32::max);
+        part.children
+            .iter()
+            .filter_map(|c| lowest(c, here))
+            .chain(own)
+            .reduce(f32::max)
+    }
+    fn find(part: &Part, y: f32, name: &str) -> Option<f32> {
+        if part.name == name {
+            return lowest(part, y);
+        }
+        let here = y + part.pose[1];
+        part.children.iter().find_map(|c| find(c, here, name))
+    }
+    // The Java frame's y grows down from 24 pixels up.
+    find(part, 0.0, name).map(|y| 24.0 - y)
+}
+/// The feet line of a baked model, in blocks (a Java model's origin is 24 sixteenths above the feet).
+const MODEL_FEET: f32 = 24.0 / 16.0;
+/// An attachable's parts: a bone with a binding is drawn where the holder's bone it follows
+/// went (`base_of` gives that bone's matrix), the others where the attachable's own pose puts
+/// them (or not at all when the model binds some of its bones). `chain` is the matrix of the
+/// parent from the model's origin.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_attached(
+    part: &Part,
+    chain: glam::Mat4,
+    base: glam::Mat4,
+    bound_only: bool,
+    base_of: &dyn Fn(&str) -> Option<glam::Mat4>,
+    poses: &Poses,
+    uv: [f32; 4],
+    color: u32,
+    light: u32,
+    overlay: u32,
+    out: &mut Vec<Vertex>,
+) {
+    draw_attached_under(
+        part, chain, base, bound_only, None, base_of, poses, uv, color, light, overlay, out,
+    );
+}
+
+/// `draw_attached`, where `inherited` is the holder matrix of the nearest bound bone above: a
+/// bone with no binding of its own moves with its parent.
+#[allow(clippy::too_many_arguments)]
+fn draw_attached_under(
+    part: &Part,
+    chain: glam::Mat4,
+    base: glam::Mat4,
+    bound_only: bool,
+    inherited: Option<glam::Mat4>,
+    base_of: &dyn Fn(&str) -> Option<glam::Mat4>,
+    poses: &Poses,
+    uv: [f32; 4],
+    color: u32,
+    light: u32,
+    overlay: u32,
+    out: &mut Vec<Vertex>,
+) {
+    let p = poses.pose(part);
+    if poses.is_hidden(part) || p[6] == 0.0 && p[7] == 0.0 && p[8] == 0.0 {
+        return;
+    }
+    let mine = posed(chain, p);
+    let bound = base_of(&part.name);
+    let under = match bound.or(inherited) {
+        Some(bound) => bound,
+        None if bound_only => glam::Mat4::ZERO,
+        None => base,
+    };
+    let m = under * mine;
+    let skip = under == glam::Mat4::ZERO || poses.skips(part);
+    if !skip {
+        draw_polygons(
+            part,
+            m,
+            ModelNormals::new(m),
+            uv,
+            0.0,
+            color,
+            light,
+            overlay,
+            poses,
+            out,
+        );
+    }
     for c in &part.children {
-        draw_normals(c, m, normals, poses, uv, scroll, color, light, overlay, out);
+        draw_attached_under(
+            c,
+            mine,
+            base,
+            bound_only,
+            bound.or(inherited),
+            base_of,
+            poses,
+            uv,
+            color,
+            light,
+            overlay,
+            out,
+        );
     }
 }
 /// A part's matrix under `base` for its pose (`ModelPart.translateAndRotate`
@@ -1579,6 +1763,7 @@ pub fn cape(
     m: &Mob,
     alpha: f32,
     base: glam::Mat4,
+    nudge: glam::Mat4,
     uv: [f32; 4],
     light: u32,
     data: &MobData,
@@ -1590,6 +1775,13 @@ pub fn cape(
     let s = anim::state(m, alpha);
     let mut poses = Poses::new(model);
     anim::setup(m, &s, &mut poses, &data.animations);
+    // The pack's body carries the cape: the game's sneak and lean are not added to it.
+    let base = if worn_follows_pack(m) {
+        poses.reset(model);
+        worn_base(m, base, "cape") * nudge
+    } else {
+        base * nudge
+    };
     let a = f64::from(alpha);
     let at = [
         m.previous.x + (m.position.x - m.previous.x) * a,
@@ -1946,6 +2138,7 @@ fn posed_body(
     let anchors = custom.map_or(Vec::new(), |c| c.anchors.clone());
     (model, poses, anchors)
 }
+include!("bedrock_render/render_03.rs");
 #[allow(clippy::too_many_arguments)]
 fn render_visible(
     m: &Mob,
@@ -1963,6 +2156,10 @@ fn render_visible(
     let extra = if layers_shown(m) { extra } else { &[] };
     let overlay = u32::from(red_overlay(m));
     let s = anim::state(m, alpha);
+    // A Bedrock pack that dresses this mob draws it instead, with the mob's own state.
+    if body_visible && render_bedrock(m, alpha, base, atlas, light, data, out) {
+        return;
+    }
     let (model_key, texture) = body(m);
     // The packs' custom entity models replace a layer's parts and maybe its texture. The read
     // guard, not a clone of the Arc: one uncontended lock per mob, nothing else without a pack.
@@ -2571,10 +2768,36 @@ fn crossed_arms_matrix(model: &Part, base: glam::Mat4, poses: &Poses) -> Option<
             * glam::Mat4::from_rotation_x(std::f32::consts::PI),
     )
 }
+include!("bedrock_render/render_04.rs");
 /// The pose a mob's held item is submitted under (`ItemInHandLayer`:
 /// `translateToHand`, then the hand offset; the item model adds its own
 /// display transform), or `None` when the mob shows no held items.
 pub fn held_item_transform(
+    m: &Mob,
+    alpha: f32,
+    camera: glam::DVec3,
+    data: &MobData,
+    left: bool,
+) -> Option<glam::Mat4> {
+    // A pack can hide what the mob holds (`hide_held_items`) or scale it (`held_item_scale`).
+    let held = data
+        .bedrock
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .held(m)
+        .unwrap_or_default();
+    if held.hidden {
+        return None;
+    }
+    let t = held_item_transform_in_hand(m, alpha, camera, data, left)?;
+    Some(if (held.scale - 1.0).abs() > 1e-4 {
+        t * glam::Mat4::from_scale(glam::Vec3::splat(held.scale))
+    } else {
+        t
+    })
+}
+
+fn held_item_transform_in_hand(
     m: &Mob,
     alpha: f32,
     camera: glam::DVec3,
@@ -2639,7 +2862,10 @@ pub fn held_item_transform(
         }
         return crossed_arms_matrix(&model, base, &poses);
     }
-    let mut t = hand_base(m, &model, base, &poses, &anchors, left)?;
+    let mut t = match bedrock_hand(m, alpha, camera, data, left) {
+        Some(t) => t,
+        None => hand_base(m, &model, base, &poses, &anchors, left)?,
+    };
     // ItemInHandLayer: a STAB swing of this arm thrusts its item out
     // (SpearAnimations.thirdPersonAttackItem, the main hand's forward
     // movement), and a spear in use moves with it (ArmPose.SPEAR's
@@ -2973,6 +3199,7 @@ mod tests {
             entity_tags: Default::default(),
             villager_hats: Default::default(),
             cem: Default::default(),
+            bedrock: Default::default(),
             random_textures: Default::default(),
             emissive: Default::default(),
             blinks: Default::default(),
@@ -3066,6 +3293,7 @@ mod tests {
             entity_tags: Default::default(),
             villager_hats: Default::default(),
             cem: Default::default(),
+            bedrock: Default::default(),
             random_textures: Default::default(),
             emissive: Default::default(),
             blinks: Default::default(),
@@ -3123,6 +3351,7 @@ mod tests {
             entity_tags: Default::default(),
             villager_hats: Default::default(),
             cem: Default::default(),
+            bedrock: Default::default(),
             random_textures: Default::default(),
             emissive: Default::default(),
             blinks: Default::default(),
@@ -3236,6 +3465,7 @@ mod tests {
             entity_tags: Default::default(),
             villager_hats: Default::default(),
             cem: Default::default(),
+            bedrock: Default::default(),
             random_textures: Default::default(),
             emissive: Default::default(),
             blinks: Default::default(),
@@ -3545,6 +3775,7 @@ mod scroll_tests {
             entity_tags: Default::default(),
             villager_hats: Default::default(),
             cem: Default::default(),
+            bedrock: Default::default(),
             random_textures: Default::default(),
             emissive: Default::default(),
             blinks: Default::default(),
@@ -3700,6 +3931,7 @@ mod emissive_tests {
             entity_tags: Default::default(),
             villager_hats: Default::default(),
             cem: Default::default(),
+            bedrock: Default::default(),
             random_textures: RwLock::new(random),
             emissive: RwLock::new(Arc::new(emissive)),
             blinks: RwLock::new(blinks),
@@ -3976,6 +4208,7 @@ mod random_texture_tests {
             animations: Default::default(),
             villager_hats: Default::default(),
             cem: Default::default(),
+            bedrock: Default::default(),
             random_textures: RwLock::new(random),
             emissive: Default::default(),
             blinks: Default::default(),

@@ -26,6 +26,8 @@ horizon-hooks = { path = "../horizon-hooks" }
 horizon-mcp = { path = "../horizon-mcp" }
 # The server thread ahead of the workers (MinecraftServer.spin's Thread.setPriority).
 horizon-optifine = { path = "../horizon-optifine" }
+# Bedrock resource packs: the look of mobs, sounds and particles (docs/bedrock.md).
+horizon-bedrock = { path = "../horizon-bedrock" }
 horizon-threads = { path = "../horizon-threads" }
 horizon-hdr = { path = "../horizon-hdr" }
 horizon-world = { path = "../horizon-world" }

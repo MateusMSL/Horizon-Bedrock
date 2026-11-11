@@ -140,7 +140,8 @@ impl Game<'_> {
     /// and the list found again when its packs changed (`PackSelectionScreen.tick`'s
     /// watcher).
     fn watch_pack_folder(&mut self) {
-        if !self.ui.options.resource_packs_open() {
+        let addons = self.ui.options.addons_open();
+        if !self.ui.options.resource_packs_open() && !addons {
             self.pack_folder = None;
             return;
         }
@@ -153,8 +154,12 @@ impl Game<'_> {
             return;
         }
         let signature: Vec<(String, u64, Option<std::time::SystemTime>)> =
-            std::fs::read_dir(super::packs::packs_dir())
-                .into_iter()
+            std::fs::read_dir(if addons {
+                super::packs::addons_dir()
+            } else {
+                super::packs::packs_dir()
+            })
+            .into_iter()
                 .flatten()
                 .flatten()
                 .map(|e| {
@@ -171,7 +176,9 @@ impl Game<'_> {
             .as_ref()
             .is_some_and(|(_, seen)| *seen != signature);
         self.pack_folder = Some((now, signature));
-        if changed {
+        if changed && addons {
+            self.ui.options.update_addon_infos(super::packs::addon_infos());
+        } else if changed {
             let infos = super::packs::pack_infos(&self.vanilla_root(), &self.server_packs.active);
             self.ui.options.update_pack_infos(infos);
             self.ui.options.pack_configs = super::packs::pack_configs(&self.vanilla_root());
@@ -416,6 +423,11 @@ impl Game<'_> {
                 }
                 Event::OpenPackFolder => {
                     let dir = super::packs::packs_dir();
+                    let _ = std::fs::create_dir_all(&dir);
+                    super::packs::open_folder(&dir);
+                }
+                Event::OpenAddonFolder => {
+                    let dir = super::packs::addons_dir();
                     let _ = std::fs::create_dir_all(&dir);
                     super::packs::open_folder(&dir);
                 }

@@ -1351,7 +1351,11 @@ impl HudAtlas {
                     maps.iter().any(Option::is_some).then(|| Box::new(maps))
                 })
                 .flatten();
-            (gw <= 1024 && (gh <= 512 || name.starts_with("font/"))).then_some((
+            (gw <= 1024
+                && (gh <= 512
+                    || name.starts_with("font/")
+                    || (gh <= 1024 && name.starts_with("entity/bedrock/"))))
+            .then_some((
                 (name, w, h, pixels),
                 flags,
                 gui_size,
