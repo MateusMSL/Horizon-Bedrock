@@ -233,11 +233,6 @@ machine can read it in the process list. Horizon keeps it out of argv:
   A file older than two minutes is refused (and deleted), so a stale file can't be replayed.
 - Without a session file the game is offline as today (`--name`, offline UUID).
 - `HORIZON_SESSION_FILE` is the same as `--session-file` (development and harnesses).
-- A game started on its own (an IDE, a script: no session file, no `--name`, not headless, not a benchmark or a
-  dedicated server) asks the launcher for the selected account: it reads `accounts.json` in the launcher's data
-  folder, finds the launcher (`HORIZON_LAUNCHER_EXE`, else `launcher-exe.txt` there, which the launcher writes at
-  every start, else `horizon-launcher` on the `PATH`) and runs `account session UUID --json`. No launcher, no
-  account or no answer in 40 s: offline as before. `HORIZON_NO_LAUNCHER_ACCOUNT=1` turns it off.
 - `--session-stdin` takes the same JSON on standard input instead, so nothing touches the disk (for other
   launchers: [the Launch API](api/launch.md)).
 

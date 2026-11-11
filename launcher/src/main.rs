@@ -5423,7 +5423,6 @@ fn main() {
     }
     perf::process_started();
     backend::exe_path();
-    backend::remember_exe();
     #[cfg(windows)]
     backend::remove_replaced_binaries();
     backend::cleanup_launcher_updates();

@@ -568,20 +568,6 @@ impl Options {
                 .map(|path| horizon_client::auth::AuthSession::load(path.as_ref()))
                 .transpose()
         };
-        // Started on its own (an IDE, a script): the launcher's selected account, as when the
-        // launcher starts the game. Not for harnesses, a benchmark, a dedicated server or a
-        // name given on the command line.
-        let session = match session {
-            Ok(None)
-                if !o.headless
-                    && o.benchmark.is_none()
-                    && o.dedicated.is_none()
-                    && o.player_name.is_none() =>
-            {
-                Ok(horizon_client::auth::session_from_launcher())
-            }
-            other => other,
-        };
         match session {
             Ok(Some(session)) => {
                 o.player_name = Some(session.name.clone());

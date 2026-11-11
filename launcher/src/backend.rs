@@ -2724,20 +2724,6 @@ pub fn exe_path() -> &'static Path {
     EXE.get_or_init(|| std::env::current_exe().unwrap_or_else(|_| PathBuf::from(LAUNCHER_BINARY)))
 }
 
-/// The file a game started on its own reads to find this launcher (`launcher-exe.txt` in the
-/// launcher's data folder): its path, so the game can ask it for the signed-in account's session
-/// (`account session`, docs/microsoft-account.md). Written at every start, errors ignored.
-pub fn remember_exe() {
-    let exe = appimage_path().unwrap_or_else(|| exe_path().to_path_buf());
-    let file = data_dir().join("launcher-exe.txt");
-    let text = exe.to_string_lossy().into_owned();
-    if std::fs::read_to_string(&file).is_ok_and(|old| old.trim() == text) {
-        return;
-    }
-    let _ = std::fs::create_dir_all(data_dir());
-    let _ = std::fs::write(file, text);
-}
-
 /// The AppImage this launcher runs from, when it does: the runtime sets `$APPIMAGE` to the file it
 /// mounted and `$APPDIR` to the mount, while [`exe_path`] then names a copy inside that read-only
 /// mount, gone with it. Updating and restarting work on this file, and the menu entry, shortcuts and
