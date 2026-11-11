@@ -40,3 +40,4 @@
 .idea/
 *.iml
 aplicar-bedrock.ps1
+/release
