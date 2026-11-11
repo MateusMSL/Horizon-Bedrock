@@ -37,3 +37,6 @@
 /exporters/
 /resourcepacks
 /addons
+
+.idea/
+*.iml
