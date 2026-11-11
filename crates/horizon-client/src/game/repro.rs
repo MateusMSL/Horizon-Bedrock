@@ -583,25 +583,20 @@ impl Game<'_> {
         if include_world {
             let root = world_root.as_ref().expect("a local world's save folder");
             if let Some(server) = self.integrated.as_ref() {
-                // The server thread saves, then waits there for the copy: pausing it instead
-                // runs its pause save (which renames files into place) during the copy.
-                let (saved_tx, saved) = mpsc::channel();
-                let (copied, copied_rx) = mpsc::channel::<()>();
-                // A server that has stopped drops the task, and `saved_tx` with it.
-                server.post(move |game| {
-                    let _ = saved_tx.send(game.save_game().map_err(|e| e.to_string()));
-                    let _ = copied_rx.recv();
-                });
-                match saved.recv() {
-                    Ok(Ok(())) => {}
-                    Ok(Err(e)) => {
+                server.set_paused(true);
+                let saved = server.call(|game| game.save_game().map_err(|e| e.to_string()));
+                let copied = copy_tree(root, &dir.join("world"));
+                server.set_paused(self.pause);
+                match saved {
+                    Some(Ok(())) => {}
+                    Some(Err(e)) => {
                         return Err(format!("saving the world for the recording: {e}").into());
                     }
-                    Err(_) => return Err("the integrated server has stopped".into()),
+                    None => {
+                        log::warn!("Horizon: the integrated server did not save for the recording")
+                    }
                 }
-                let result = copy_tree(root, &dir.join("world"));
-                drop(copied);
-                result.map_err(|e| format!("copying the world: {e}"))?;
+                copied.map_err(|e| format!("copying the world: {e}"))?;
             } else {
                 self.save_game_with(true)?;
                 copy_tree(root, &dir.join("world"))
@@ -1391,11 +1386,6 @@ impl Game<'_> {
 }
 
 impl Repro {
-    /// A replay is running or waiting for its world.
-    pub(super) fn replaying(&self) -> bool {
-        self.replay.is_some() || self.pending_replay.is_some()
-    }
-
     /// An agent event while recording joins `events.jsonl`.
     pub(super) fn note_event(&mut self, tick: u64, event: &Value) {
         let Some(rec) = self.recording.as_mut() else {

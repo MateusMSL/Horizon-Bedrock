@@ -30,33 +30,9 @@ impl CollisionItem<'_> {
     }
 }
 
-/// Classification supplied by the caller that owns the actual entity, never inferred
-/// from its runtime ID. Living means a non-player living entity. None preserves
-/// defaults for entity-less queries and callers which have not captured a class.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EntityContextKind {
-    Item,
-    Player,
-    Living,
-    Other,
-    None,
-}
-impl EntityContextKind {
-    pub(crate) fn index(self) -> Option<usize> {
-        match self {
-            Self::Item => Some(0),
-            Self::Player => Some(1),
-            Self::Living => Some(2),
-            Self::Other => Some(3),
-            Self::None => None,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 pub struct CollisionEntity<'a> {
     pub identity: EntityIdentity,
-    pub kind: EntityContextKind,
     /// Entity.getY(), not the minimum Y of its bounding box.
     pub y: f64,
     pub descending: bool,
@@ -79,7 +55,6 @@ pub struct CollisionContext<'a> {
     held: CollisionItem<'a>,
     entity: Option<EntityIdentity>,
     living: bool,
-    kind: EntityContextKind,
     position_only: bool,
 }
 impl<'a> CollisionContext<'a> {
@@ -92,7 +67,6 @@ impl<'a> CollisionContext<'a> {
             held: CollisionItem::EMPTY,
             entity: None,
             living: false,
-            kind: EntityContextKind::None,
             position_only: false,
         }
     }
@@ -123,7 +97,6 @@ impl<'a> CollisionContext<'a> {
             held: entity.main_hand.unwrap_or(CollisionItem::EMPTY),
             entity: Some(entity.identity),
             living: entity.main_hand.is_some(),
-            kind: entity.kind,
             position_only: false,
         }
     }
@@ -148,10 +121,6 @@ impl<'a> CollisionContext<'a> {
         );
         context.placement = true;
         context
-    }
-
-    pub fn entity_kind(&self) -> EntityContextKind {
-        self.kind
     }
 
     pub fn entity(&self) -> Option<EntityIdentity> {

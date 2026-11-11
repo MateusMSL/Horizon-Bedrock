@@ -1,0 +1,50 @@
+/gamemode survival
+/gamemode creative
+/weather clear
+/time set 0
+/time set minecraft:night
+/time set 18000
+/data merge entity @e[type=minecraft:spider,limit=1,sort=nearest] {NoAI:1b}
+/time set minecraft:night
+/data merge entity @e[type=minecraft:happy_ghast,limit=1,sort=nearest] {NoAI:1b}
+/time set 18000
+/summon creeper ~ ~ ~ {powered:1}
+/time set 18000
+/time set minecraft:night
+/data merge entity @e[type=minecraft:armor_stand,limit=1,sort=nearest] {Pose:{RightArm:[-90f,0f,0f],LeftArm:[-90f,0f,0f]}}
+/locate structure minecraft:stronghold
+/gamemode spectator
+/tp @s 3120 ~ 3920
+/gamemode creative
+/gamemode survival
+/gamemode creative
+/kill ImKyruu
+/locate structure minecraft:village_plains
+/tp @s -1072 ~ -1088
+/locate structure minecraft:village_taiga
+/tp @s 1936 ~ -4000
+/weather clear
+/time set 0
+/locate structure minecraft:village_taiga
+/locate structure minecraft:stronghold
+/gamemode spectator
+/tp @s 1904 ~ -5232
+/gamemode adventure
+/gamemode creative
+/time set minecraft:night
+/time set day
+/give @s bucket
+/give @s flint_and_steel
+/give @s ender_eye
+/time set day
+/give @s bucket
+/give @s flint_and_steel
+/give @s ender_eye
+/time set day
+/give @s flint_and_steel
+/give @s ender_eye
+/give @s bucket
+/time set day
+/time set 0
+/weather clear
+/time set 0

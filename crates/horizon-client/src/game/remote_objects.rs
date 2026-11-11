@@ -112,8 +112,6 @@ impl Game<'_> {
                 fixed: false,
                 invisible: false,
                 check_interval: 0,
-                custom_name: None,
-                random: horizon_client::random_source::entity(),
             });
         } else if kind == "minecraft:cushion" {
             // BlockAttachedEntity.pos: `BlockPos.containing` of the spawn.
@@ -124,7 +122,6 @@ impl Game<'_> {
                 yaw: super::cushions::snap_yaw(yaw),
                 color: 0,
                 check_interval: 0,
-                custom_name: None,
             });
         } else if kind == "minecraft:lightning_bolt" {
             self.spawn_remote_bolt(id, position);
@@ -272,17 +269,6 @@ impl Game<'_> {
                     (8, Value::Int(v)) => c.hurt_time = *v,
                     (9, Value::Int(v)) => c.hurt_dir = *v,
                     (10, Value::Float(v)) => c.damage = *v,
-                    // AbstractMinecart.DATA_ID_CUSTOM_DISPLAY_BLOCK (0, air,
-                    // for none) and DATA_ID_DISPLAY_OFFSET.
-                    (11, Value::Id(state)) => {
-                        c.custom_display = (*state > 0).then(|| {
-                            horizon_client::entity_nbt::state_to_nbt(
-                                self.pack.assets.registry,
-                                horizon_world::registry::BlockStateId(*state as u32),
-                            )
-                        });
-                    }
-                    (12, Value::Int(offset)) => c.custom_offset = Some(*offset),
                     (13, Value::Bool(lit)) if c.kind == super::minecarts::CartKind::Furnace => {
                         c.fuel = i32::from(*lit);
                     }
@@ -333,7 +319,7 @@ impl Game<'_> {
     pub(super) fn turn_remote_object(&mut self, id: i32, yaw: Option<f32>, on_ground: bool) {
         let id = id as u32;
         // The boat the player drives turns here (isLocalInstanceAuthoritative).
-        let driven = self.riding.filter(|&id| self.controls_boat(id));
+        let driven = self.riding;
         if let Some(b) = self.boats.iter_mut().find(|b| b.id == id) {
             if Some(id) == driven {
                 return;
@@ -391,7 +377,7 @@ impl Game<'_> {
             }
         }
         // The boat the player drives moves here, not where the server says.
-        let driven = self.riding.filter(|&id| self.controls_boat(id));
+        let driven = self.riding;
         for b in &mut self.boats {
             if Some(b.id) == driven {
                 continue;
@@ -457,11 +443,6 @@ impl Game<'_> {
     }
 
     /// Every object a server sent (a new connection, level or dimension).
-    /// Experience orbs too: `ClientPacketListener.handleRespawn` replaces the
-    /// `ClientLevel` on a dimension change, and `Hub::change_level` does not
-    /// remove the old level's entities one by one. An orb kept here follows
-    /// the player (`ExperienceOrb.tick` on the client) and is never
-    /// `playerTouch`ed.
     pub(super) fn clear_remote_objects(&mut self) {
         self.text_displays.clear();
         self.interactions.clear();
@@ -473,7 +454,6 @@ impl Game<'_> {
         self.cushions.clear();
         self.item_frames.clear();
         self.paintings.clear();
-        self.orbs.clear();
     }
 
     pub(super) fn remove_remote_object(&mut self, id: u32) {

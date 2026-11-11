@@ -11,8 +11,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     io,
 };
-mod resources;
-pub use resources::{resource_files, resource_tags};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DamageTypeId(usize);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,7 +28,7 @@ impl Scaling {
         }
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Definition {
     pub name: String,
     pub message_id: String,
@@ -39,7 +37,7 @@ pub struct Definition {
     pub effects: String,
     pub death_message_type: String,
 }
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Catalog {
     definitions: Vec<Definition>,
     ids: BTreeMap<String, DamageTypeId>,

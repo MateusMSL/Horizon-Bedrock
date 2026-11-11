@@ -6,8 +6,7 @@
 use super::Game;
 use horizon_client::{
     mobs::{Species, bee, guardian, sniffer},
-    random_source,
-    sound_engine::{MobSound, RiddenSound, SoundInstance, Sounds},
+    sound_engine::{MobSound, RiddenSound, SoundEngine, SoundInstance, Sounds},
 };
 
 impl Game<'_> {
@@ -47,9 +46,9 @@ impl Game<'_> {
                 Some(Species::Nautilus | Species::ZombieNautilus)
             );
             let instance = if nautilus {
-                SoundInstance::riding_nautilus(&sound, random_source::create())
+                SoundInstance::riding_nautilus(&sound, SoundEngine::unseeded())
             } else {
-                SoundInstance::riding_happy_ghast(&sound, random_source::create())
+                SoundInstance::riding_happy_ghast(&sound, SoundEngine::unseeded())
             };
             self.audio.play_instance(instance, false);
         }
@@ -61,51 +60,48 @@ impl Game<'_> {
     /// that are gone, and read what the instances follow.
     pub(super) fn start_mob_sounds(&mut self) -> Vec<MobSound> {
         let game_time = self.world.game_time;
-        let mut mobs = Vec::new();
-        let mut bee_indices = Vec::new();
-
-        for m in &self.mobs {
-            if m.removed {
-                continue;
-            }
-            let species = m.species();
-            if !matches!(
-                species,
-                Species::Bee | Species::Guardian | Species::ElderGuardian | Species::Sniffer
-            ) {
-                continue;
-            }
-            let is_bee = species == Species::Bee;
-            let sound = MobSound {
+        let mobs: Vec<MobSound> = self
+            .mobs
+            .iter()
+            .filter(|m| {
+                !m.removed
+                    && matches!(
+                        m.species(),
+                        Species::Bee
+                            | Species::Guardian
+                            | Species::ElderGuardian
+                            | Species::Sniffer
+                    )
+            })
+            .map(|m| MobSound {
                 id: m.id,
                 position: [m.position.x, m.position.y, m.position.z],
                 // Vec3.horizontalDistance.
                 speed: m.velocity.x.hypot(m.velocity.z),
                 baby: m.is_baby(),
                 // NeutralMob.isAngry: the anger end time is ahead.
-                angry: is_bee
+                angry: m.species() == Species::Bee
                     && bee::get(m).is_some_and(|b| b.anger_end > 0 && b.anger_end - game_time > 0),
                 silent: m.silent,
                 attack_scale: guardian::attack_scale(m),
                 // SnifferSoundInstance.tick.
-                sniffer_digging: species == Species::Sniffer
+                sniffer_digging: m.species() == Species::Sniffer
                     && m.ai.target.is_none()
                     && sniffer::can_play_digging_sound(m),
-            };
-            if is_bee {
-                bee_indices.push(mobs.len());
-            }
-            mobs.push(sound);
-        }
+            })
+            .collect();
         self.guardian_sounds
             .retain(|id| mobs.iter().any(|m| m.id == *id));
         self.bee_sounds
             .retain(|id, _| mobs.iter().any(|m| m.id == *id));
-        for &idx in &bee_indices {
-            let sound = &mobs[idx];
-            if self.bee_sounds.get(&sound.id) != Some(&sound.angry) {
+        for sound in &mobs {
+            let is_bee = self
+                .mobs
+                .iter()
+                .any(|m| m.id == sound.id && m.species() == Species::Bee);
+            if is_bee && self.bee_sounds.get(&sound.id) != Some(&sound.angry) {
                 self.bee_sounds.insert(sound.id, sound.angry);
-                let instance = SoundInstance::bee(sound, sound.angry, random_source::create());
+                let instance = SoundInstance::bee(sound, sound.angry, SoundEngine::unseeded());
                 self.audio.play_instance(instance, false);
             }
         }
@@ -134,7 +130,7 @@ impl Game<'_> {
             attack_scale: guardian::attack_scale(m),
             sniffer_digging: false,
         };
-        let instance = SoundInstance::guardian_attack(&sound, random_source::create());
+        let instance = SoundInstance::guardian_attack(&sound, SoundEngine::unseeded());
         self.audio.play_instance(instance, false);
     }
 
@@ -151,7 +147,7 @@ impl Game<'_> {
         if m.silent {
             return;
         }
-        let instance = SoundInstance::sniffer(id, random_source::create());
+        let instance = SoundInstance::sniffer(id, SoundEngine::unseeded());
         self.audio.play_instance(instance, false);
     }
 }

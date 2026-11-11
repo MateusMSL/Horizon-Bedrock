@@ -200,7 +200,7 @@ fn quote(out: &mut String, s: &str, html_safe: bool) {
 pub fn parse(text: &str, whole: bool) -> Result<Json, String> {
     let chars: Vec<char> = text.chars().collect();
     let mut p = Parser { c: &chars, i: 0 };
-    let v = p.value(0)?;
+    let v = p.value()?;
     if whole {
         p.ws();
         if p.i != chars.len() {
@@ -209,10 +209,6 @@ pub fn parse(text: &str, whole: bool) -> Result<Json, String> {
     }
     Ok(v)
 }
-
-/// The deepest nesting a document may parse: a file past this is not a list
-/// the server reads, and the recursion is bounded (serde's own limit is 128).
-const MAX_DEPTH: usize = 128;
 
 struct Parser<'a> {
     c: &'a [char],
@@ -228,10 +224,7 @@ impl Parser<'_> {
             self.i += 1;
         }
     }
-    fn value(&mut self, depth: usize) -> Result<Json, String> {
-        if depth >= MAX_DEPTH {
-            return Err("Nesting too deep".into());
-        }
+    fn value(&mut self) -> Result<Json, String> {
         self.ws();
         match self.c.get(self.i) {
             None => Err("End of input".into()),
@@ -254,7 +247,7 @@ impl Parser<'_> {
                         return Err("Expected ':'".into());
                     }
                     self.i += 1;
-                    let v = self.value(depth + 1)?;
+                    let v = self.value()?;
                     if let Some(slot) = m.iter_mut().find(|(n, _)| *n == k) {
                         slot.1 = v;
                     } else {
@@ -280,7 +273,7 @@ impl Parser<'_> {
                     return Ok(Json::Array(items));
                 }
                 loop {
-                    items.push(self.value(depth + 1)?);
+                    items.push(self.value()?);
                     self.ws();
                     match self.c.get(self.i) {
                         Some(',') => self.i += 1,
@@ -425,16 +418,5 @@ mod tests {
         );
         assert_eq!(Json::Array(vec![]).pretty(), "[]");
         assert!(parse("{a:1}", true).is_err());
-    }
-
-    /// A document nested past the cap is refused, not recursed into forever:
-    /// files and remote responses the server reads can be any nesting.
-    #[test]
-    fn nesting_is_bounded() {
-        let ok = "[".repeat(MAX_DEPTH) + &"]".repeat(MAX_DEPTH);
-        let deep = "[".repeat(MAX_DEPTH + 1) + &"]".repeat(MAX_DEPTH + 1);
-        assert!(parse(&ok, true).is_ok());
-        assert!(parse(&deep, true).is_err());
-        assert!(parse(&deep, false).is_err());
     }
 }

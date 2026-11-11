@@ -35,3 +35,5 @@
 
 # Release-only compiled original exporter bundle.
 /exporters/
+/resourcepacks
+/addons

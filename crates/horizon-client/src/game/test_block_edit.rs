@@ -1,7 +1,7 @@
 //! `TestBlockEditScreen`: the test block's mode and message.
 use super::{
     Game,
-    block_editor::{Editor, Item, Outcome, Pos, cycle, footer_action},
+    block_editor::{Editor, Item, Outcome, Pos, cycle},
 };
 use horizon_client::{
     containers::BlockEntity,
@@ -48,7 +48,6 @@ impl Editor for TestBlockEditor {
             w: bw,
             label: text,
             active: true,
-            action: footer_action(id, DONE, CANCEL),
         };
         let mut items = Vec::new();
         // The message box shows unless the block starts tests.

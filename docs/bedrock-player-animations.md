@@ -1,0 +1,895 @@
+# Animações do jogador (A&S, `minecraft:player`)
+
+Checklist de teste no jogo e inventário do pacote (729 animações, 90 controladores, 70 entradas em `scripts.animate`; nomes ofuscados).
+
+## Checklist de teste
+
+### Água / nado
+- [ ] Parado na superfície: em pé, flutuando (sem animação de nado)
+- [ ] Correndo na água (sprint): animação de nado (`is_swimming` = pose de nado)
+- [ ] Nadar para cima e para baixo (espaço / agachar) sem correr
+- [ ] Submerso parado: sem nado até correr
+- [ ] Pular na água (entrada): transição sem nado indevido
+- [ ] Sair da água (subir na margem, pular para fora): sem nado preso
+- [ ] Água de 1 bloco de altura: nado/rastejar
+- [ ] Correr na água e parar: volta a flutuar em pé
+- [ ] Nado com Graça do golfinho
+- [ ] Lava: sem animação de nado
+- [ ] Capacete de tartaruga: sair da água (respiração aquática), entrar, armadura visível e sem animação extra
+- [ ] Capacete de tartaruga sem correr / correndo na água
+- [ ] Barco: remar, entrar, sair, água sob o barco
+
+### Agachar / ar / queda
+- [ ] Agachar parado, andando, com itens na mão
+- [ ] Agachar no ar durante queda longa: "bola de canhão" (v102: amostra de blocos do jogador, 6 laterais, 48 abaixo)
+- [ ] Agachar no ar em queda curta (< 1,1 bloco): sem bola de canhão
+- [ ] Agachar no ar com deslocamento lateral e para trás: variações do salto
+- [ ] Pousar de queda longa: animação de aterrissagem
+- [ ] Pulo (parado / correndo / com agachar)
+
+### Planar (elytra)
+- [ ] Abrir, planar, pousar, `barrel roll` ao agachar planando, colisão de parede
+
+### Montaria / itens / outros
+- [ ] Cavalo, porco, barco, carrinho, camelo: sentar, olhar, remar
+- [ ] Espada, arco, besta, tridente, escudo, lança, maça, vara, tesoura, comida, poção, bandeira
+- [ ] Mão esquerda e direita (`main_hand_left`)
+- [ ] Dormir, rastejar, emote, morte, dano, primeira pessoa, inventário (UI)
+- [ ] Armadura: capacete, peitoral, calças, botas (animações com `*_armor_layer_hidden`)
+
+## Inventário do pacote
+
+- [ ] `hspnai` = `yxsuam` — consulta: anim_time, bone_orientation_trs, is_in_ui
+  - `default`: rxkiuo
+  - `biuohp`: rxkiuo
+- [ ] `wjfipe` = `dpcxlx` — consulta: equipped_item_any_tag, get_equipped_item_name, is_emoting, is_gliding, is_item_name_any, is_swimming
+  - `default`: lsiklr
+  - `ydkyzm`: lsiklr
+  - `nxbnll`: ·
+  - `ssulqn`: xhexyy, lsiklr
+- [ ] `kcexxa` = `njvelc` — consulta: blocking, equipped_item_any_tag, get_equipped_item_name, ground_speed, is_emoting, is_gliding, is_in_water, is_item_equipped, is_item_name_any, is_swimming
+  - `default`: bob, holding, afmdju, prhiys, hxygku, zoqgum
+  - `ydkyzm`: afmdju, bob, prhiys, hxygku, zoqgum, bqvlex
+  - `nxbnll`: bob, prhiys, hxygku, zoqgum, bqvlex, qdyytq
+  - `ssulqn`: bob, holding, fzimtw, afmdju, prhiys, hxygku
+  - `edebnx`: mtgdcm, ypjqpd, mshwsb, fzimtw
+  - `ltqtzr`: mshwsb, tcucxa
+  - `tjnuyj`: bphbtz, tjnuyj, mshwsb
+  - `lvkwjg`: bob, qturaa, prhiys, hxygku, zoqgum, bqvlex
+  - `rfcjcg`: bob, bphbtz, shears, uyaebq, prhiys, hxygku
+  - `cfsugb`: whatac, mshwsb, prhiys, hxygku, zoqgum, bqvlex
+  - `pgieij`: nbliop, rlrbbg, cqdyxq, mshwsb, prhiys, hxygku
+  - `crwayt`: bob, bphbtz, tvugex, txypgz, prhiys, hxygku
+  - `etuxkz`: bob, bbvbhl, etuxkz, toisea, prhiys, hxygku
+  - `ieyepd`: holding, mshwsb, zxbclh
+- [ ] `fjtwtc` = `fomrzp` — consulta: blocking, equipped_item_any_tag, get_equipped_item_name, is_item_name_any, is_riding_any_entity_of_type
+  - `default`: ·
+  - `ssulqn`: fzimtw
+  - `ltqtzr`: tcucxa
+  - `ydkyzm`: pfunsk
+  - `lvkwjg`: bphbtz, qturaa
+  - `rfcjcg`: bphbtz, shears, uyaebq
+  - `ieyepd`: zxbclh
+- [ ] `ybphcg` = `knoyhk` — consulta: all_animations_finished, any_animation_finished, blocking, cooldown_time_remaining, equipped_item_any_tag, get_animation_frame, get_equipped_item_name, is_gliding, is_in_ui, is_in_water
+  - `default`: ·
+  - `shield`: ·
+  - `lvexfc`: pjkxis
+  - `btdwij`: oghagy
+  - `asudbd`: ·
+  - `rdjpaz`: sxoybj, tooting_goat_horn
+  - `uvixvh`: ujgolc, tjekez
+  - `ofpzzq`: ofpzzq, rewixh
+  - `vpfhlo`: ofpzzq, rewixh
+  - `ygsrfx`: sxoybj, ygsrfx
+  - `youfdz`: sxoybj, eat
+  - `brush`: brush
+  - `tsnnjv`: bvdkjk
+  - `dmyegi`: rjnuku, onbevx, rgqato, izceee, ccjmet
+  - `nvtgap`: ·
+  - `rrncnq`: itnwuj, sizyvh
+  - `kngqzz`: itnwuj, tnnzib
+  - `yjkinw`: tnnzib
+  - `tdmrba`: ·
+  - `inhpcc`: mlndpo, zfdtwh
+  - `smxmmh`: ircufr, zybvfq
+  - `zobkiz`: ynzbly, warynq, umhcat
+  - `hmhqgx`: nqqvnn, hddrqo, llywjj
+  - `gjhnog`: mhyyzj, hfnozn, humanoid_base_pose
+  - `ikvaib`: dtfqyg
+  - `kuyjab`: cfsugb, gyjqzs, lnbnqq, nngcdl
+  - `nookvi`: psfxly, tlpihx, ubrffa, wmwndh, kacdpv, rmzrev
+  - `jskozw`: bphbtz, jskozw, zlwuzz
+- [ ] `zxbclh` = `wieeaw` — consulta: is_riding, item_is_charged, state_time
+  - `default`: ·
+  - `rfqyve`: samtup
+  - `ikvaib`: ooixee
+- [ ] `whatac` = `idxeob` — consulta: cooldown_time_remaining, is_on_ground, modified_move_speed, state_time
+  - `default`: ·
+  - `ztvjhq`: ztvjhq
+- [ ] `rlrbbg` = `npjwol` — consulta: blocking, is_gliding, life_time
+  - `default`: ·
+  - `odsvuw`: zvagyy
+  - `kielvs`: ·
+  - `xlsdju`: ·
+- [ ] `cqdyxq` = `mvczxy` — consulta: is_on_ground, life_time, modified_move_speed, state_time
+  - `default`: ·
+  - `viviil`: fchryf
+  - `odpwot`: voxihn
+- [ ] `nngcdl` = `cqkhdi` — consulta: blocking, cooldown_time, cooldown_time_remaining, equipped_item_any_tag, in_range, is_gliding, is_in_ui, is_item_name_any, is_on_ground, is_riding
+  - `default`: ·
+  - `tmahcq`: tmahcq, uqdzip, jxojqk, cluxhl, uyecpe
+  - `daaide`: tmahcq, uqdzip, jxojqk, cluxhl, uyecpe
+  - `lgjvtl`: ·
+- [ ] `jciuon` = `trtwoj` — consulta: any_animation_finished, is_in_water, is_on_ground, state_time, vertical_speed
+  - `default`: ·
+  - `fall`: chfyqw
+  - `yytrhz`: fthnmp
+  - `qazmxb`: fthnmp
+  - `jump`: cxzrui
+- [ ] `sxxqrd` = `lcolpr` — consulta: 
+  - `default`: ·
+  - `lgjvtl`: mdsrps
+- [ ] `plmvav` = `cqjjgz` — consulta: all_animations_finished, state_time
+  - `default`: ·
+  - `wgpjfy`: ·
+  - `wmxhvi`: ·
+  - `blzrmm`: ·
+  - `tculwn`: htozgw
+  - `qofebb`: bemwjj
+  - `hyopyb`: zycbjs, zexwzt
+  - `lsswib`: dyuetw, ctjhjp
+- [ ] `ptaudk` = `camimd` — consulta: all_animations_finished, any_animation_finished, cooldown_time_remaining, distance_from_camera, equipped_item_any_tag, get_animation_frame, get_equipped_item_name, in_range, is_gliding, is_in_ui
+  - `default`: ·
+  - `fmriac`: ·
+  - `punch`: afmxrw, spften, attack
+  - `muqdev`: afmxrw, spften, nswqio
+  - `tggbpq`: afmxrw, spften, nswqio
+  - `ciakok`: afmxrw, ccdlig, ilbzbh, iipemm, virzrd, wqmnij
+  - `cbjzqu`: afmxrw, ccdlig, ilbzbh, iipemm, virzrd, wqmnij
+  - `zefcct`: afmxrw, ccdlig, pgieij, mfwjey, smebii, kvpche
+  - `bhukbt`: afmxrw, ccdlig, pgieij, mfwjey, smebii, kvpche
+  - `thdqsk`: afmxrw, ccdlig, pgieij, mfwjey, dtymzj, uoveuo
+  - `eqlzfq`: afmxrw, ccdlig, pgieij, mfwjey, ilbzbh, gocjip
+  - `oyevwx`: kcncjx, oyevwx
+  - `throw`: kcncjx, throw
+  - `lbdphr`: kcncjx, throw
+  - `plxeqv`: afmxrw, plxeqv
+  - `fishing_rod`: ·
+  - `pgwnom`: mtgdcm, pgwnom, cehpib
+  - `bpjnso`: mtgdcm, bpjnso, cehpib
+  - `uopzwf`: mtgdcm, uopzwf, cehpib
+  - `smhmom`: ejamcj, qvgpyp, smhmom, mmgzov
+  - `ydhzuj`: ydhzuj, ioasoc
+  - `hqynlj`: hqynlj, ioasoc
+  - `cobzmn`: mtgdcm, uopzwf, cehpib, cobzmn, ioasoc
+  - `etiuec`: mtgdcm, uopzwf, cehpib, etiuec, ioasoc
+  - `mace`: ·
+  - `bcyrdi`: ·
+  - `aqfcvc`: huqdun, kvpche, dopxsq
+  - `azdvph`: tuxedu, znxmrl
+  - `hjmytu`: bbvbhl, yspduf, uoveuo, dopxsq
+  - `qbiqbl`: gduwtv
+  - `qwqond`: ·
+  - `qwqond.1`: ·
+  - `dxdudb.jbrcdj`: lhmzom, kvpche
+  - `dxdudb.htgavg`: bbvbhl, sgdlzo, uoveuo
+  - `dxdudb.qclrte`: bbvbhl, lhmzom, kvpche
+  - `dxdudb.a`: kkyulq
+  - `dxdudb.b`: kkyulq
+  - `dxdudb.c`: mvkirz
+  - `dxdudb.d`: mvkirz
+  - `vdmqkr`: bbvbhl, cixjgp, ousprd
+  - `yrmdck`: bbvbhl, giaakz, vcidrz
+  - `ydiysr`: bbvbhl, giaakz, vcidrz
+  - `iovhzd`: afmxrw, vorgpv
+  - `iyrdcv`: afmxrw, vorgpv
+  - `yafbed`: bbvbhl, thaslm, rxtbga
+  - `eutrbz`: bbvbhl, oprkqi, oardtx
+  - `kuyjab`: ·
+  - `flint_and_steel`: bphbtz, ubcyiz
+  - `ecnujd`: bphbtz, ecnujd
+  - `vaknop`: bphbtz, ecnujd
+  - `ahswoq`: bphbtz, ahswoq
+  - `phzzls`: bphbtz, ahswoq
+  - `glvhfw`: bphbtz, glvhfw
+  - `tatdag`: bphbtz, glvhfw
+  - `lasrrf`: lasrrf, gxtbmc
+  - `jtbyya`: lasrrf, gxtbmc
+  - `obvmgz`: zuqsru, pyuhhn
+  - `margoc`: zuqsru, pyuhhn
+  - `sotmvv`: sotmvv, lnmxra
+  - `oggmww`: sotmvv, lnmxra
+  - `shvsed`: nedxhd, ygkshq
+  - `lllecg`: nedxhd, ygkshq
+- [ ] `ebevco` = `particles` — consulta: 
+  - `default`: ·
+- [ ] `veywgp` = `lhbuwm` — consulta: is_in_ui, is_in_water, is_on_ground, is_pack_setting_selected, state_time, vertical_speed
+  - `run`: move, move_right, move_left, pgnnhd, hxfxxu, kiggsk
+  - `xdchdk`: ksoign, ijczfy, movjvc, nlkzpp, hxfxxu, inxmkt
+  - `onccai`: walk, vwyhwm, pvgbyg, kzuqni, bqirai, iuktbd
+  - `rdvwhr`: usmlvw, move_right, move_left, bkydlx, kiggsk, yonenf
+  - `icxyyv`: icxyyv, vwyhwm, pvgbyg, kzhobv, bqirai, iuktbd
+  - `knxfvl`: ·
+  - `zhbjho`: pkdlkc, hnhukj, txkksi, xvsgam, fly, qbfoza
+- [ ] `zpbnrr` = `ofwkgu` — consulta: is_in_ui, is_in_water, is_on_ground, is_pack_setting_selected, is_sneaking, state_time, vertical_speed
+  - `run`: move, move_right, move_left, pgnnhd, hxfxxu, wbvgqg
+  - `xdchdk`: ksoign, ijczfy, movjvc, nlkzpp, hxfxxu, inxmkt
+  - `onccai`: walk, vwyhwm, pvgbyg, kzuqni, yfnjhu, oprmcp
+  - `flsjtm`: snevrd, oprmcp
+  - `rdvwhr`: usmlvw, move_right, move_left, bkydlx, wbvgqg
+  - `icxyyv`: icxyyv, vwyhwm, pvgbyg, kzhobv, yfnjhu
+  - `knxfvl`: ·
+  - `zhbjho`: pkdlkc, hnhukj, txkksi, xvsgam, fly, qbfoza
+- [ ] `dprsws` = `oajpnn` — consulta: is_in_ui, is_in_water, is_on_ground, is_pack_setting_selected, state_time, vertical_speed
+  - `run`: pnvtis, avltzz, sounvx, aaqlcs
+  - `onccai`: spvxth, ihnwbv, ezxntw, wfnadc
+  - `rdvwhr`: pnvtis, avltzz, sounvx, aaqlcs
+  - `icxyyv`: spvxth, ihnwbv, ezxntw, wfnadc
+  - `knxfvl`: ·
+  - `zhbjho`: pkdlkc, hnhukj, txkksi, xvsgam, fly, qbfoza
+- [ ] `psowex` = `pygoip` — consulta: any_animation_finished, is_on_ground, is_pack_setting_selected, is_sprinting
+  - `default`: ·
+  - `ptvsjb`: xahrzd
+  - `zhbjho`: ·
+  - `stop`: sjvffv
+- [ ] `zndszf` = `yztvac` — consulta: graphics_mode_is_any, is_on_ground, state_time, vertical_speed
+  - `default`: ·
+  - `drdubp`: ·
+  - `lildce`: ·
+- [ ] `ejkkyk` = `ylzimv` — consulta: graphics_mode_is_any, is_on_ground, state_time, vertical_speed
+  - `default`: ·
+  - `drdubp`: ·
+  - `lildce`: ·
+- [ ] `fcwepb` = `dhkyfi` — consulta: in_range
+  - `default`: ·
+  - `left`: ·
+  - `right`: ·
+- [ ] `rylnkt` = `sktggi` — consulta: any_animation_finished, equipped_item_any_tag, is_gliding, is_item_name_any, is_pack_setting_selected, is_sneaking, state_time
+  - `default`: ·
+  - `qfzlng`: qfzlng, cpmbud, dajodh, upkpvm, lrtoaw, kmahlu
+  - `aodlni`: aodlni, runlvk, bwfocg
+- [ ] `controller.player_movement.offset` = `yemteq` — consulta: is_in_ui, is_on_ground
+  - `default`: ·
+  - `upatrp`: upatrp
+  - `rcdxne`: rcdxne
+  - `dvwvti`: dvwvti
+- [ ] `flkskc` = `wrmobv` — consulta: is_on_ground, state_time
+  - `default`: ·
+  - `rwbslw`: yvmkva
+  - `ggywux`: yvmkva
+- [ ] `okjrob` = `iplurh` — consulta: is_local_player, is_on_ground, is_pack_setting_selected, relative_block_has_any_tag, vertical_speed
+  - `default`: ·
+  - `eryuvy`: pyhwuc, ngeixo, muiqdc, kcexxa, fjtwtc, wjfipe
+  - `hgnodg`: kjlymd, ngeixo, vqkstr, kcexxa, fjtwtc, wjfipe
+  - `pluejt`: pluejt, emkqik
+- [ ] `cwxfxl` = `fbwreq` — consulta: blocking, equipped_item_any_tag, is_in_water, is_item_name_any, is_on_ground, is_swimming, main_hand_item_use_duration, relative_block_has_any_tag, state_time, vertical_speed
+  - `default`: ·
+  - `hihqcy`: kojrxg
+  - `pqblez`: ·
+- [ ] `pyioph` = `votwby` — consulta: delta_time, ground_speed, is_in_ui, is_in_water, relative_block_has_any_tag, state_time, target_x_rotation, vertical_speed
+  - `default`: qgafwd
+  - `xzmjxw`: swim, txfjro, zvrxfq, enppde, uhcxuu, qqrcaz
+  - `geddfs`: yohkuj, oshqeo, txfjro, zvrxfq, enppde, psnocz
+- [ ] `pgyqvq` = `lmcmux` — consulta: is_in_water, is_swimming, relative_block_has_any_tag, state_time
+  - `default`: ·
+  - `vqqpmq`: fvvoqo, ibcnah
+- [ ] `fvvoqo` = `tuvscm` — consulta: in_range
+  - `default`: ·
+  - `right`: ·
+  - `left`: ·
+- [ ] `ibcnah` = `fxpiul` — consulta: in_range
+  - `default`: ·
+  - `nmcpmu`: ·
+  - `pkdmxy`: ·
+- [ ] `ngeixo` = `lfjeov` — consulta: in_range, is_in_water, is_jumping, is_on_ground, is_pack_setting_selected, is_sprinting, life_time, state_time, vertical_speed
+  - `default`: ·
+  - `yutray`: ·
+  - `fmzeml`: ·
+  - `jump`: jump, orsiea, dvjdse, ffopif
+  - `ypqtmb`: wxzmsp, lnscqe, nsfqmy, aaxdxj
+  - `seridw`: rnmred, xyxtfo, vaotnm, rebyum
+  - `float`: ·
+  - `hihqcy`: wjmfbh, ytimjn
+  - `vcwrsx`: wjmfbh, ytimjn
+- [ ] `cmdvzm` = `osqylo` — consulta: is_on_ground, is_pack_setting_selected, is_sneaking, life_time, state_time
+  - `default`: ·
+  - `caixnr`: ebnfyd, fqvjvt, wmvkpm
+  - `xjwmoq`: ebnfyd, fqvjvt, wmvkpm
+  - `ppgltu`: yjeqzi, gbqknj, wmvkpm
+  - `benjta`: yjeqzi, gbqknj, wmvkpm
+  - `njuqpk`: eboowj, utfydu, wmvkpm
+  - `krcvcr`: eboowj, utfydu, wmvkpm
+  - `lawawe`: ytrpcp, aohpww, wmvkpm
+  - `iqlijs`: ytrpcp, aohpww, wmvkpm
+- [ ] `muiqdc` = `quiyxu` — consulta: any, in_range, is_in_water, is_item_name_any, is_on_ground, is_pack_setting_selected, is_sneaking, life_time, state_time, vertical_speed
+  - `default`: ·
+  - `nqtrjo`: fall, wjmfbh, bnuejw, hxawyn
+  - `rfrkhc`: ·
+  - `taekbc`: taekbc, xcccfu, rtaoje, fqparn
+  - `uhcxuu`: pgmfeo, gjocsa, kkpgpe
+  - `ttfwop`: ttfwop
+  - `yjxkeo`: ttfwop
+  - `lbmawh`: kuoukc, lbmawh
+  - `gquyku`: gquyku, qzkghc
+  - `miyvhk`: gquyku, qzkghc
+  - `oevndx`: oevndx, nqaxws
+  - `xfajjj`: xfajjj
+  - `tqcvlk`: xfajjj
+  - `hwuwvi`: ·
+  - `kzieij`: ·
+- [ ] `vqkstr` = `itvdym` — consulta: any, in_range, is_in_water, is_item_name_any, is_on_ground, is_pack_setting_selected, is_sneaking, life_time, state_time, vertical_speed
+  - `gvbikx`: ·
+  - `nqtrjo`: fall, wjmfbh, bnuejw, hxawyn, ytimjn
+  - `rfrkhc`: ·
+  - `taekbc`: taekbc, xcccfu, rtaoje, fqparn
+  - `uhcxuu`: pgmfeo, gjocsa, kkpgpe
+  - `ttfwop`: ttfwop
+  - `yjxkeo`: ttfwop
+  - `lbmawh`: kuoukc, lbmawh
+  - `gquyku`: gquyku, qzkghc
+  - `miyvhk`: gquyku, qzkghc
+  - `oevndx`: oevndx, nqaxws
+  - `xfajjj`: xfajjj
+  - `tqcvlk`: xfajjj
+  - `hwuwvi`: ·
+  - `kzieij`: ·
+- [ ] `pyhwuc` = `tjytvl` — consulta: any_animation_finished, in_range, is_alive, is_in_water, is_jumping, is_on_ground, is_pack_setting_selected, is_sprinting, main_hand_item_use_duration, position
+  - `default`: ·
+  - `wwzgzr`: wwzgzr, ukckzf, hxqdkw
+  - `eyztea`: wwzgzr, ukckzf
+  - `ejguut`: ejguut, thqyqq
+  - `rrppmg`: wwzgzr, ukckzf
+  - `flwuqu`: flwuqu, neiorb, hxqdkw
+  - `zkmqrc`: zkmqrc, neiorb
+  - `liqruq`: liqruq, neiorb
+  - `cfpejq`: srluww, ebipbw, yyucpd
+  - `yytrhz`: ydsari, ebipbw, kzhexa, aoltyd, lhdanp
+  - `aahvsz`: aahvsz, exrzei, hbuhsd
+  - `puuzne`: puuzne
+  - `zhbjho`: ·
+- [ ] `kjlymd` = `vowjlb` — consulta: any_animation_finished, in_range, is_alive, is_in_water, is_on_ground, is_pack_setting_selected, is_sprinting, main_hand_item_use_duration, modified_distance_moved, position
+  - `uwpoku`: ·
+  - `default`: ·
+  - `wwzgzr`: wwzgzr, ukckzf, hxqdkw
+  - `eyztea`: wwzgzr, ukckzf
+  - `ejguut`: ejguut, thqyqq
+  - `rrppmg`: wwzgzr, ukckzf
+  - `flwuqu`: flwuqu, neiorb, hxqdkw
+  - `zkmqrc`: zkmqrc, neiorb
+  - `liqruq`: liqruq, neiorb
+  - `cfpejq`: cfpejq, ebipbw
+  - `yytrhz`: yytrhz, ebipbw, kzhexa, aoltyd, lhdanp
+  - `aahvsz`: aahvsz, exrzei, hbuhsd
+  - `puuzne`: puuzne
+  - `zhbjho`: ·
+- [ ] `hgymxj` = `ismckx` — consulta: any_animation_finished, health, is_pack_setting_selected, state_time
+  - `default`: ·
+  - `nmagsu`: xnifpo, hurt, vlexuo, inwnxn
+  - `dovmdl`: dovmdl
+  - `ebniro`: xnifpo, hurt, vlexuo, inwnxn
+  - `sxuoyn`: sxuoyn
+- [ ] `agyfrv` = `irkwzk` — consulta: delta_time, head_y_rotation, in_range, is_in_ui, state_time
+  - `default`: ·
+  - `knxfvl`: ·
+  - `vywhcj`: rjfeeq, ejnecs
+  - `tuuckd`: ·
+- [ ] `cjlqub` = `dnpzfz` — consulta: any_animation_finished, is_on_ground, is_pack_setting_selected, is_sneaking, state_time, target_x_rotation
+  - `default`: ·
+  - `npdehu`: odztzw
+  - `emlggj`: lntylf
+- [ ] `eudgiz` = `sloczo` — consulta: any, any_animation_finished, is_gliding, is_in_ui, is_in_water, is_on_ground, is_pack_setting_selected, is_sneaking, life_time, modified_move_speed
+  - `default`: ·
+  - `awsgka`: ·
+  - `wpqorb`: wpqorb, hsyyaw, luhwjm, yzykxu
+  - `wecuin`: wecuin
+  - `idjknv`: idjknv
+- [ ] `bwdayn` = `jfnfyo` — consulta: all_animations_finished, any_animation_finished, in_range, is_in_water, is_on_ground, is_pack_setting_selected, is_sneaking, life_time, modified_move_speed, state_time
+  - `default`: ·
+  - `ppbtyi`: ·
+  - `ipeupc`: lfiwjn, dcjlkm, ipeupc, vunnpm, ouhzka, fggzye
+  - `bkyiaw`: bkyiaw, vunnpm, ouhzka, fggzye
+  - `roxqma`: pcxynf, jbbdkw, roxqma, vunnpm
+  - `fimtyz`: fimtyz
+- [ ] `xnocvc` = `wqjvtj` — consulta: equipped_item_any_tag, get_equipped_item_name, is_item_name_any, state_time
+  - `default`: ·
+  - `lantern`: qjyoyo, owjeqt, kznwiv
+  - `mkphec`: sgvsfc, kznwiv, vcxlip
+  - `ssulqn`: sgvsfc, kznwiv
+  - `iszmjh`: nibjkr
+- [ ] `zdumse` = `ofrcyn` — consulta: blocking, equipped_item_any_tag, get_equipped_item_name, is_item_name_any, is_riding_any_entity_of_type, life_time, main_hand_item_use_duration, state_time
+  - `default`: first_person_swap_item
+  - `bow`: bdpsjn, dpxncc, bfcoju
+  - `brush`: bdpsjn, dpxncc, sqsobf
+  - `fishing_rod`: bdpsjn, dpxncc
+  - `flint_and_steel`: bdpsjn, dpxncc
+  - `golden_dandelion`: bdpsjn, sgvsfc, seciea, kubzoq
+  - `shears`: bdpsjn, sgvsfc, hewara, dzpltm
+  - `shield`: bdpsjn, dpxncc, vcxlip
+  - `oyevwx`: bdpsjn, tzoest, vnwuqj
+  - `nnblkt`: bdpsjn, jovquu
+  - `crossbow`: first_person_crossbow_hold, ghxdpy
+  - `goat_horn`: bdpsjn, dpxncc, wkddof
+  - `kuyjab`: jzaqej, jymmdz, dpxncc
+  - `nookvi`: bpkafj, dfvnsb, ieaiqi, nolkoc, ryxtuf
+  - `trident`: bdpsjn, dpxncc, bdfssm
+  - `lantern`: uryzic
+  - `mainhand`: bdpsjn, dpxncc, fuicbq
+  - `reset`: ·
+  - `ygnlht`: ieuavg
+- [ ] `mbpzen` = `pwqhcf` — consulta: all_animations_finished, any_animation_finished, cooldown_time, cooldown_time_remaining, equipped_item_any_tag, get_animation_frame, get_equipped_item_name, in_range, is_item_name_any, is_on_ground
+  - `default`: ·
+  - `fmriac`: rvwopr
+  - `ckxkxw`: ·
+  - `fumdir`: ·
+  - `htrord`: ·
+  - `musgsd`: ·
+  - `vvgaoj`: ·
+  - `hpajvt`: ·
+  - `ajyoxm`: ·
+  - `ylxrpq`: nrbvlz, pdgmno
+  - `bxrccn`: ·
+  - `mbrenc`: ·
+  - `zjhbje`: ·
+  - `ewfgow`: ·
+  - `alpgfw`: fdlcmu, bwvgsg
+  - `ubfqqi`: ·
+  - `tluupy`: rvwopr, jaawph, aovuvg, simrfu
+  - `kokxvt`: rvwopr, jaawph, gcmhpq
+  - `pykbys`: rvwopr, jaawph, gcmhpq
+  - `jgaflp`: rvwopr, jaawph, bmzgyq
+  - `fxksyo`: ·
+  - `wbzzur`: rvwopr, pfpoqw, hieskk, fudbvz
+  - `ijlwyi`: rvwopr, pfpoqw, wkdkto
+  - `huiypu`: rvwopr, pfpoqw, wkdkto
+  - `rthjhp`: rvwopr, pfpoqw, lcjjcq
+  - `kqeutm`: ·
+  - `kbwcll`: qysndt
+  - `qmayqz`: rxxsjs, ccqkmf
+  - `nfpbms`: rxxsjs, aummym
+  - `jroajt`: wtorrn, snfdlz, sxnbxz, yflkpb, srfcmm
+  - `uopzwf`: mrdomy, snfdlz, vdisya, yflkpb, srfcmm
+  - `bpjnso`: ytuuvz, izreoz, usaogi, qypvid, srvxjj, pacusm
+  - `smhmom`: tthstm, ebfmfm, pfiyqx, vjdnhc, srfcmm
+  - `ecnujd`: sizqjc
+  - `vaknop`: sizqjc
+  - `ahswoq`: kwklcq
+  - `phzzls`: kwklcq
+  - `glvhfw`: fxmeqx
+  - `tatdag`: fxmeqx
+  - `dsrgim`: urbdlq
+  - `evwndy`: urbdlq
+  - `mine`: xsegte, xhgjfy
+  - `fpenke`: mksawo, oaewmz, nfheju
+  - `opctuq`: mksawo, oaewmz, nfheju
+  - `psitzj`: mbcbus, nfheju
+  - `rrjacy`: aummym, nfheju
+  - `azdvph`: oaewmz
+  - `qbiqbl`: lulsqj
+  - `ssnjmx`: lulsqj
+  - `golden_dandelion`: wmflts, rpcmmb, fovtvq, czuvdz
+  - `htekyb`: wpgkek, bbrzsn, kbhpou
+  - `fthqpx`: wpgkek, bbrzsn, kbhpou
+  - `bqtqqe`: bgjune, kduvad
+  - `xjklnt`: asetzz, wkjmwq
+  - `bvdtzm`: asetzz, wkjmwq
+  - `vmbmhq`: nlqtvi
+  - `udrmqt`: clpsyb
+  - `kuyjab`: jqxbjy
+  - `vnsrck`: jqxbjy
+  - `uipbyx`: ·
+  - `kzxkbg`: ccqkmf, ioasoc, jgppzz, ssoorx, oikwhp, taqjbz
+  - `rhrdjx`: ccqkmf, ioasoc, jgppzz, ssoorx, oikwhp, taqjbz
+  - `wwypyv`: mrdomy, snfdlz, vdisya, yflkpb, srfcmm, ztkhbu
+  - `srocyx`: mrdomy, snfdlz, vdisya, yflkpb, srfcmm, ztkhbu
+  - `uhiykp`: aummym, ioasoc, jgppzz, ssoorx, oikwhp, taqjbz
+  - `kqyqft`: urbdlq, ioasoc, jgppzz, ssoorx, oikwhp, taqjbz
+  - `aojfba`: mgrqbz
+  - `sfdinx`: mgrqbz
+  - `lhsovj`: splzfu
+  - `kmpmle`: splzfu
+  - `rqnbaq`: vfngfu, rvwopr, ubywgf
+  - `throw`: jmvsdt, aaxsrq
+  - `znedrw`: jmvsdt, aaxsrq
+  - `btyzga`: vfngfu, rvwopr, ubywgf
+- [ ] `bfcoju` = `oqctis` — consulta: all_animations_finished, any_animation_finished, main_hand_item_use_duration, state_time
+  - `default`: cdklul
+  - `wfzeen`: ieluqf
+  - `dmwtio`: dgsvch
+  - `gdgjmx`: rvwopr, nibjkr
+  - `shoot`: fzallz
+- [ ] `sqsobf` = `mazfxe` — consulta: any_animation_finished, main_hand_item_use_duration
+  - `default`: ·
+  - `brush`: nfwexo, abysxf
+  - `tsnnjv`: krgevf
+- [ ] `vcxlip` = `jkzzlr` — consulta: any_animation_finished, blocking, equipped_item_any_tag, is_item_name_any, is_riding_any_entity_of_type
+  - `default`: ·
+  - `wtmojn`: eiloph, tsvmfg
+  - `njohhi`: ckpnxi, hoxdia
+- [ ] `ghxdpy` = `ooceit` — consulta: all_animations_finished, any_animation_finished, blocking, equipped_item_any_tag, get_animation_frame, is_item_name_any, main_hand_item_use_duration
+  - `default`: ·
+  - `cancel`: nibjkr
+  - `kypqpn`: humanoid_base_pose, zuqizi
+- [ ] `bdfssm` = `htgpzd` — consulta: all_animations_finished, any_animation_finished, main_hand_item_use_duration, state_time
+  - `default`: ·
+  - `huqnch`: xwtors
+  - `ewrfxh`: xyqubr
+  - `cancel`: upekdi
+- [ ] `wkddof` = `tnrbpo` — consulta: any_animation_finished, main_hand_item_use_duration
+  - `default`: ·
+  - `jntewe`: qfawhu
+  - `pclrkn`: yxbbwb
+- [ ] `oypqkc` = `kjlghl` — consulta: any_animation_finished, equipped_item_any_tag, is_item_name_any, is_local_player, is_on_ground, is_pack_setting_selected, main_hand_item_use_duration, relative_block_has_any_tag, vertical_speed
+  - `default`: ·
+  - `ndyglg`: srluww
+  - `yytrhz`: srluww
+  - `zhbjho`: ·
+  - `pluejt`: zavmgb, emkqik
+- [ ] `qjdkxn` = `bzcwhc` — consulta: equipped_item_any_tag, get_animation_frame, is_crawling, is_item_name_any, is_swimming, relative_block_has_any_tag
+  - `default`: ·
+  - `qgafwd`: mihrhd
+  - `uhcxuu`: idsczu
+  - `xzmjxw`: zxqxbo
+- [ ] `mqmgvu` = `lvsjla` — consulta: equipped_item_any_tag, is_item_name_any, main_hand_item_use_duration
+  - `default`: ·
+  - `youfdz`: fnbrkd
+  - `ygsrfx`: hkqtbi, qsveyr, ezchno
+- [ ] `xeilsx` = `ejxbht` — consulta: any_animation_finished, equipped_item_any_tag, is_in_water, is_item_name_any, is_on_ground, is_pack_setting_selected, is_sneaking, life_time, main_hand_item_use_duration, vertical_speed
+  - `default`: ·
+  - `uhcxuu`: tkktku, chpzrg, qzrvat, dewkqn, fvhujl, uejykw
+  - `ttfwop`: kwtkko, xahpfz, vfrhhn, dmhvzl
+- [ ] `fxsaqw` = `itjppu` — consulta: is_alive, is_in_water, is_local_player, is_on_ground, is_sneaking, state_time
+  - `zvdydz`: spawn
+  - `dmamrb`: ·
+  - `bnyqbz`: ·
+- [ ] `rzkmtm` = `xunqct` — consulta: any, is_alive, is_emoting, is_gliding, is_in_ui, is_riding, is_riding_any_entity_of_type, is_sleeping, life_time
+  - `default`: xfltzh, cape, controller.player_movement.offset, flkskc, veywgp, dprsws
+  - `bnyqbz`: ·
+  - `sykxyi`: sleeping
+  - `zqihwb`: cape, fjtwtc, ptaudk, ybphcg, ceotii
+- [ ] `wqrfcb` = `wducfe` — consulta: equipped_item_any_tag, get_equipped_item_name, is_item_name_any, state_time
+  - `spawn`: ·
+  - `default`: ·
+  - `wefber`: ·
+  - `nswhsx`: ·
+  - `bkxcld`: ·
+  - `gchunj`: ·
+  - `nganmj`: ·
+  - `gqkgco`: ·
+  - `nlyvxv`: ·
+  - `hsagdr`: ·
+  - `pjddss`: ·
+  - `khmlti`: ·
+  - `copper_chest`: ·
+  - `kwbgip`: ·
+  - `sjxhfu`: ·
+  - `ddrfzp`: ·
+  - `egg`: ·
+  - `zqrdmk`: ·
+  - `uytrac`: ·
+  - `fire`: ·
+  - `flynsi`: ·
+  - `qcxiec`: ·
+  - `ybxvur`: ·
+  - `lqxhhq`: ·
+  - `lasxqn`: ·
+  - `ayhbgg`: ·
+  - `lantern`: ·
+  - `gfnzkk`: ·
+  - `znfozf`: ·
+  - `lcetbb`: ·
+  - `bohisl`: ·
+  - `lbmxin`: ·
+  - `paper`: ·
+  - `fzorbx`: ·
+  - `rail`: ·
+  - `ptoqii`: ·
+  - `sculk`: ·
+  - `tqudih`: ·
+  - `treasure`: ·
+  - `wood`: ·
+  - `euzuuf`: ·
+  - `sfafrw`: ·
+  - `boat`: ·
+  - `brewing_stand`: ·
+  - `detector_rail`: ·
+  - `end_crystal`: ·
+  - `nether_star`: ·
+  - `lever`: ·
+  - `lightning_rod`: ·
+  - `sign`: ·
+  - `reapsw`: ·
+  - `string`: ·
+  - `rcbatt`: ·
+  - `patsfe`: ·
+  - `qnjlcq`: ·
+  - `wind_charge`: ·
+  - `chain`: ·
+  - `bell`: ·
+  - `bucket`: ·
+  - `bow`: ·
+  - `bundle`: ·
+  - `wolf_armor`: ·
+  - `totem_of_undying`: ·
+  - `alnvmb`: ·
+  - `mace`: ·
+  - `dragon_egg`: ·
+  - `elytra`: ·
+  - `shield`: ·
+  - `shears`: ·
+  - `crossbow`: ·
+  - `trident`: ·
+- [ ] `bwnfrb` = `pyzbux` — consulta: is_local_player
+  - `default`: ·
+  - `pluejt`: ·
+  - `oanmgj`: ·
+  - `izwdnw`: ·
+- [ ] `hywuox` = `tdfmaf` — consulta: is_item_name_any
+  - `default`: ·
+  - `kljcph`: ·
+  - `vaytog`: ·
+  - `dvducw`: ·
+  - `gcgtfs`: ·
+  - `bgucln`: ·
+  - `fyxtif`: ·
+  - `zudtuw`: ·
+- [ ] `rzytgh` = `buxefn` — consulta: is_item_name_any
+  - `default`: ·
+  - `rmybjb`: ·
+  - `vspfew`: ·
+  - `ceqlnk`: ·
+  - `xwqfbi`: ·
+  - `uftkmd`: ·
+  - `vqdxoo`: ·
+  - `aomuwi`: ·
+- [ ] `bqtrpv` = `ybkmlx` — consulta: is_item_name_any, state_time, ticks_since_last_kinetic_weapon_hit
+  - `default`: ·
+  - `gczhgd`: ·
+  - `uedapo`: ·
+  - `xejgei`: ·
+  - `thjota`: ·
+  - `yakyhn`: ·
+  - `mmqykj`: ·
+  - `qtbidh`: ·
+  - `gtzlme`: ·
+- [ ] `buawny` = `xgzdyd` — consulta: 
+  - `default`: ·
+  - `spyjic`: ·
+  - `zdmpmm`: ·
+  - `nvlagq`: ·
+- [ ] `yfwojd` = `fmesio` — consulta: delta_time, is_in_ui, is_riding_any_entity_of_type, life_time
+  - `default`: ·
+  - `lxxcez`: ufoejh
+- [ ] `rbxcao` = `fmyvzk` — consulta: is_alive
+  - `default`: hgymxj, dskssn
+  - `bnyqbz`: ·
+- [ ] `vsndpt` = `oqkgnn` — consulta: death_ticks, is_alive, is_local_player
+  - `default`: ·
+  - `adxebz`: cqznrp, qpypjv, crpujt
+  - `hvescl`: tzjdeu
+  - `yxbbhe`: tzjdeu
+  - `xuvgzc`: mhmvrv
+  - `swjnzp`: wjcpik
+  - `mkrmge`: zpylmq
+  - `psawmc`: kuewhd
+  - `pabyes`: fohwlg
+  - `maiduz`: kuewhd
+  - `pncjhv`: kuewhd
+- [ ] `dskssn` = `zyrcdq` — consulta: is_alive, is_emoting, is_gliding, is_in_ui, is_item_equipped, is_item_name_any, is_riding, is_spectator
+  - `default`: ·
+  - `zcqdcv`: look_at_target_ui
+  - `xmioyc`: ·
+  - `paperdoll`: humanoid_base_pose, riprhp, qkoqcq
+  - `first_person`: first_person_base_pose, first_person_empty_hand, oypqkc, baiuuc, first_person_walk, rweyer
+  - `third_person`: riprhp, qkoqcq, humanoid_base_pose
+- [ ] `ppzqvo` = `rnxhgi` — consulta: any, any_animation_finished, state_time
+  - `default`: ·
+  - `njqykr`: bvlbek
+  - `vmmbqn`: bvlbek
+  - `tiybks`: drqjht
+- [ ] `bypidi` = `hnkztu` — consulta: any_animation_finished, state_time
+  - `default`: ·
+  - `njqykr`: iodvus
+- [ ] `bjmscc` = `fotixv` — consulta: all_animations_finished, any_animation_finished, armor_texture_slot, entity_biome_has_any_tags, equipped_item_any_tag, get_animation_frame, ground_speed, is_emoting, is_item_name_any, is_on_ground
+  - `uwpoku`: ·
+  - `wkbbnc`: ·
+  - `ssaxeh`: ·
+  - `blzrmm`: ·
+  - `tesczf`: tesczf
+  - `tculwn`: tculwn
+  - `qofebb`: vrkauw, qofebb
+  - `hyopyb`: vrkauw, hyopyb
+  - `lsswib`: vrkauw, lsswib
+  - `vmmadd`: vrkauw, vmmadd
+  - `sztvzu`: sztvzu
+  - `ksxdmq`: ksxdmq
+  - `iljvrj`: iljvrj
+  - `nqwtki`: nqwtki
+  - `gppwit`: gppwit
+  - `ufgjhm`: vrkauw, qsuikd, ndhbnd, jwkabt
+  - `jfwsbg`: vrkauw, rgrypt, hbadod, cpnaoo
+  - `jssmqg`: ·
+  - `bhsawv`: ·
+- [ ] `hsfnbp` = `ooprql` — consulta: all_animations_finished, is_gliding, is_in_ui, is_local_player, is_pack_setting_selected, is_sneaking, life_time, state_time
+  - `default`: look_at_target, loinjd
+  - `cbixvs`: ekwgfb, mzllft
+  - `elytik`: look_at_target, loinjd
+  - `zuwmxg`: ·
+  - `yuahkn`: yuahkn
+  - `evrjlf`: evrjlf, ekwgfb, mzllft, cslzxk, kedqbe
+  - `fpsgkf`: fpsgkf, ekwgfb, mzllft, cslzxk, kedqbe
+- [ ] `qvpcyx` = `bpmdpb` — consulta: equipment_count
+  - `default`: ·
+  - `pvflzw`: chtnzc, jsebow, ccuxgq
+- [ ] `chtnzc` = `sfoyqn` — consulta: armor_texture_slot, has_armor_slot
+  - `default`: ·
+  - `ynephu`: nybxxf
+- [ ] `jsebow` = `oiegfy` — consulta: armor_texture_slot, has_armor_slot
+  - `default`: ·
+  - `eikieu`: xunqnt
+- [ ] `ccuxgq` = `jsoljm` — consulta: armor_texture_slot, has_armor_slot
+  - `default`: ·
+  - `rfgprb`: hmvrsb
+- [ ] `dnbwhg` = `cmvjiv` — consulta: 
+  - `default`: ·
+  - `oukaqe`: sfbokk
+- [ ] `ynbhzo` = `nkazxa` — consulta: delta_time, equipped_item_any_tag, get_equipped_item_name, ground_speed, is_local_player, is_riding, is_riding_any_entity_of_type, is_spectator, life_time, main_hand_item_use_duration
+  - `default`: ·
+  - `uwpoku`: ·
+  - `slbpfr`: dnbwhg, yzwcaa, tmxius, rdabcy
+  - `cushion`: dnbwhg, xfltzh, look_at_target, rdabcy, wwcbwj, vsizhk
+  - `boat`: dasjll, hsyyaw, dnbwhg, rdabcy, ctkhoz, oxskiv
+  - `camel`: dnbwhg, lqrdrg, rdabcy, ntpjfg, siavyf, bcwzpi
+  - `happy_ghast`: dnbwhg, lqrdrg, rdabcy, gjpptb, mibxbi, sxhcks
+  - `horse`: rwkkbb, dnbwhg, lqrdrg, rdabcy, hvhkzo, uqvysd
+  - `llama`: dnbwhg, lqrdrg, rdabcy, gqmsqq, igejlx, bygfhn
+  - `minecart`: wycrqr, rdabcy, bpwgts, msevbi
+  - `nautilus`: dnbwhg, wossdg, lqrdrg, rdabcy, uzryff, gruxxr
+  - `pig`: dnbwhg, lqrdrg, rdabcy, fjdvei, ivcqwb, fpjgjw
+  - `strider`: dnbwhg, lqrdrg, rdabcy, fjdvei, nahehe, ztyyck
+- [ ] `dasjll` = `qxikjb` — consulta: cooldown_time_remaining, equipped_item_any_tag, is_item_name_any, main_hand_item_use_duration, state_time
+  - `default`: lehleu
+  - `onctex`: swrqon, ypjzyd, clknvs
+- [ ] `hsyyaw` = `pjrlav` — consulta: all_animations_finished, in_range, state_time
+  - `default`: ·
+  - `rtygto`: afmxrw, attack
+  - `ilvggo`: afmxrw, attack
+- [ ] `rwkkbb` = `unoswe` — consulta: equipped_item_any_tag, main_hand_item_use_duration, state_time
+  - `default`: jlwxeo
+  - `qcpmmh`: cksrrc, jlwxeo
+  - `jylwlo`: uhremp, jlwxeo
+  - `bitvrb`: llnwsb, jlwxeo
+  - `fmriac`: jlwxeo
+  - `yimprx`: jlwxeo
+- [ ] `siavyf` = `spkwxo` — consulta: 
+  - `default`: ·
+  - `hfsquw`: wjyzcn, uxotsx
+- [ ] `uzryff` = `deuxya` — consulta: any_animation_finished, equipped_item_any_tag, is_in_water, is_item_name_any, main_hand_item_use_duration, relative_block_has_any_tag, state_time
+  - `default`: hxgzlv
+  - `gimsyo`: gimsyo
+- [ ] `sfbwvh` = `urjkrm` — consulta: 
+  - `default`: ·
+  - `flakxy`: ·
+  - `xikgvk`: ·
+  - `tefvbn`: ·
+  - `qqlzbo`: ·
+  - `mpmhxv`: ·
+  - `otbusb`: ·
+- [ ] `tbeqwp` = `wrhmwv` — consulta: is_gliding
+  - `default`: ·
+  - `sbhnew`: ·
+  - `hmjzef`: ·
+- [ ] `pjoyta` = `rqzpao` — consulta: delta_time, equipped_item_any_tag, get_equipped_item_name, is_in_ui, main_hand_item_use_duration
+  - `default`: ·
+  - `eofgku`: ·
+- [ ] `sqqhyq` = `iwvtaw` — consulta: in_range, life_time
+  - `ucfece`: ·
+  - `default`: ·
+  - `nxkehx`: ·
+  - `jobanp`: zbpjbj
+  - `bgfhwc`: zbpjbj
+  - `xkdtxd`: zbpjbj
+  - `qimcnv`: zbpjbj
+  - `libkoh`: zbpjbj
+  - `qrooor`: zbpjbj
+  - `czrldx`: zbpjbj
+  - `bkoibh`: zbpjbj
+  - `fesavl`: zbpjbj
+  - `rsvjpk`: zbpjbj
+  - `wocrzl`: zbpjbj
+  - `azjlph`: zbpjbj
+- [ ] `pybruj` = `rdtrjt` — consulta: death_ticks, is_alive, is_on_fire, state_time
+  - `default`: ·
+  - `zrgadw`: ·
+  - `dmaale`: ·
+  - `csgvgi`: ·
+  - `nbelyy`: ·
+  - `bnyqbz`: ·
+- [ ] `zzjchj` = `fqjuhw` — consulta: state_time
+  - `default`: ·
+  - `qerfcw`: ·
+  - `wxwqbn`: ·
+  - `ooyvyz`: ·
+- [ ] `jlpxda` = `zfxucp` — consulta: state_time
+  - `default`: ·
+  - `qerfcw`: ·
+  - `wxwqbn`: ·
+  - `ooyvyz`: ·
+- [ ] `fqpudn` = `plwczo` — consulta: is_local_player
+  - `default`: ·
+  - `xbvlkm`: ·
+  - `zodpsa`: ·
+  - `xzybaw`: ·
+  - `ynxzwy`: ·
+
+## Entradas ativas (`scripts.animate`)
+
+- [ ] `ebevco` (controlador): `sempre`
+- [ ] `bwnfrb` (controlador): `sempre`
+- [ ] `yfwojd` (controlador): `sempre`
+- [ ] `rbxcao` (controlador): `sempre`
+- [ ] `vsndpt` (controlador): `sempre`
+- [ ] `qvpcyx` (controlador): `sempre`
+- [ ] `kgklcq` (animação): `sempre`
+- [ ] `mxkxfp` (animação): `v.dxvpbr`
+- [ ] `hspnai` (controlador): `v.dxvpbr&&(v.tnlxsa>1&&!q.is_in_ui&&!v.is_paperdoll)&&v.wtlyok`
+- [ ] `wlqxdl` (animação): `q.any(v.tnlxsa,3,5,6,9,10)`
+- [ ] `bxaenm` (animação): `v.tnlxsa==1`
+- [ ] `btwfwj` (animação): `!v.is_first_person&&!q.in_range(v.tnlxsa,0,1)`
+- [ ] `pxfdpb` (animação): `!v.is_first_person&&!q.in_range(v.tnlxsa,0,1)`
+- [ ] `gcszro` (animação): `v.is_first_person&&!q.in_range(v.tnlxsa,0,1)`
+- [ ] `kppmnq` (animação): `q.any(v.tnlxsa,2,11,12)`
+- [ ] `reytiv` (animação): `!q.is_in_ui&&!v.is_paperdoll`
+- [ ] `fqpudn` (controlador): `sempre`
+- [ ] `kgklcq` (animação): `sempre`
+- [ ] `uvoylk` (animação): `!q.is_in_ui&&!v.is_paperdoll&&!v.map_face_icon&&v.yqxtkw>0`
+- [ ] `move.arms` (animação): `0.001`
+- [ ] `move.legs` (animação): `0.001`
+- [ ] `bypidi` (controlador): `v.kdqvtc&&!q.is_spectator&&!v.xrtrow&&v.tnlxsa==2`
+- [ ] `ppzqvo` (controlador): `v.kdqvtc&&!q.is_spectator&&!v.xrtrow`
+- [ ] `sqwqbt` (animação): `!q.is_in_ui&&!v.is_paperdoll&&v.evlypi=='jhotdc'&&!q.is_pack_setting_selected('o…`
+- [ ] `zzjchj` (controlador): `!q.is_in_ui&&!v.is_paperdoll`
+- [ ] `jlpxda` (controlador): `!q.is_in_ui&&!v.is_paperdoll`
+- [ ] `pybruj` (controlador): `!q.is_in_ui&&!v.is_paperdoll`
+- [ ] `cjczab` (animação): `v.xoejey`
+- [ ] `zenopf` (animação): `v.xoejey&&v.abkcfg&&!v.is_first_person`
+- [ ] `wqrfcb` (controlador): `!v.is_paperdoll&&q.is_local_player&&!q.is_in_ui&&q.is_alive&&q.is_pack_setting_e…`
+- [ ] `rzytgh` (controlador): `!v.is_paperdoll&&!q.is_in_ui&&!v.is_first_person&&!v.misscd`
+- [ ] `bqtrpv` (controlador): `!v.is_paperdoll&&!q.is_in_ui&&!v.misscd||v.is_first_person`
+- [ ] `hywuox` (controlador): `v.is_first_person`
+- [ ] `buawny` (controlador): `!v.is_paperdoll&&!q.is_in_ui&&!v.misscd`
+- [ ] `mbpzen` (controlador): `v.is_first_person`
+- [ ] `zdumse` (controlador): `v.is_first_person`
+- [ ] `xnocvc` (controlador): `v.is_first_person`
+- [ ] `qjdkxn` (controlador): `v.is_first_person`
+- [ ] `mqmgvu` (controlador): `v.is_first_person`
+- [ ] `xeilsx` (controlador): `v.is_first_person`
+- [ ] `pjoyta` (controlador): `(q.equipped_item_any_tag('slot.weapon.mainhand','oreville:is_spear','minecraft:i…`
+- [ ] `ynbhzo` (controlador): `!v.is_paperdoll`
+- [ ] `owwrcu` (animação): `q.is_riding&&v.tnlxsa!=0&&!v.is_first_person`
+- [ ] `tbeqwp` (controlador): `!q.is_in_ui&&!v.is_paperdoll&&q.is_local_player`
+- [ ] `fxsaqw` (controlador): `!v.is_paperdoll&&!v.is_first_person&&!q.is_spectator`
+- [ ] `rzkmtm` (controlador): `!v.is_paperdoll&&!v.is_first_person&&!q.is_spectator`
+- [ ] `sozufu` (animação): `v.is_first_person&&v.thqhhs`
+- [ ] `chkdiy` (animação): `!v.is_first_person&&!v.is_paperdoll&&v.evlypi!='uowpvm'&&(q.equipped_item_any_ta…`
+- [ ] `cjlqub` (controlador): `!v.is_first_person&&v.tnlxsa==13`
+- [ ] `yvdwwj` (animação): `!v.is_first_person&&v.tnlxsa==13`
+- [ ] `sqqhyq` (controlador): `!v.is_first_person&&v.tnlxsa==13`
+- [ ] `cape` (animação): `v.is_paperdoll`
+- [ ] `fyennh` (animação): `v.kdqvtc&&!q.is_spectator`
+- [ ] `xoqtsu` (animação): `v.kdqvtc&&!q.is_spectator`
+- [ ] `dpoyzc` (animação): `v.kdqvtc&&!q.is_spectator`
+- [ ] `ekbufq` (animação): `v.apeeop&&v.is_first_person`
+- [ ] `kgvxqp` (animação): `v.apeeop&&!v.is_first_person`
+- [ ] `jciuon` (controlador): `v.safcey`
+- [ ] `sxxqrd` (controlador): `sempre`
+- [ ] `plmvav` (controlador): `v.safcey`
+- [ ] `mpzetc` (animação): `v.safcey`
+- [ ] `wqleol` (animação): `sempre`
+- [ ] `gzxwdv` (animação): `sempre`
+- [ ] `gobhef` (animação): `q.is_riding_any_entity_of_type('minecraft:boat','minecraft:chest_boat')`
+- [ ] `zndszf` (controlador): `!q.is_in_ui&&!v.is_paperdoll&&!v.map_face_icon&&v.evlypi!='uowpvm'`
+- [ ] `ejkkyk` (controlador): `!q.is_in_ui&&!v.is_paperdoll&&!v.map_face_icon&&v.evlypi!='uowpvm'`
+- [ ] `fcwepb` (controlador): `!q.is_in_ui&&!v.is_paperdoll&&!v.map_face_icon&&!v.is_first_person&&!q.is_specta…`
+- [ ] `pgyqvq` (controlador): `!q.is_in_ui&&!v.is_paperdoll&&!v.map_face_icon&&!v.is_first_person`
+- [ ] `yabhko` (animação): `!q.is_alive`
+- [ ] `mkgvwy` (animação): `!q.is_alive`

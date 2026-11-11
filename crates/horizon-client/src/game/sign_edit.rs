@@ -108,64 +108,6 @@ impl Game<'_> {
         };
         sign.waxed && sign.can_execute_click_commands(self.facing_sign_front(pos))
     }
-    /// `WallHangingSignBlock.shouldTryToChainAnotherHangingSign` and
-    /// `CeilingHangingSignBlock.shouldTryToChainAnotherHangingSign`: a hanging
-    /// sign item clicked on a hanging sign's free side chains another sign onto
-    /// it, unless the side the player faces carries click commands the click
-    /// runs instead (`canExecuteClickCommands`).
-    pub(super) fn chains_hanging_sign(
-        &self,
-        pos: [i32; 3],
-        face: [i32; 3],
-        held: Option<&ItemStack>,
-    ) -> bool {
-        // `itemStack.getItem() instanceof HangingSignItem`, by the item's class
-        // and not its name.
-        let hanging_sign = held.is_some_and(|s| {
-            self.res
-                .behaviours()
-                .item_binding(&s.item)
-                .is_some_and(|i| i.kind == horizon_world::level::ItemKind::HangingSign)
-        });
-        let key = (pos[0], pos[1], pos[2]);
-        if !hanging_sign {
-            return false;
-        }
-        let state = self.world.block(pos[0], pos[1], pos[2]);
-        let Some(form) = self
-            .res
-            .facts()
-            .get(state)
-            .sign_form()
-            .filter(|f| f.hanging)
-        else {
-            return false;
-        };
-        let free_side = if form.wall {
-            // `isHittingEditableSide`: a wall hanging sign's board lies in its
-            // FACING's plane, so its two faces are the editable text and only
-            // its edges chain.
-            let Some(facing) = self
-                .pack
-                .assets
-                .registry
-                .state(state)
-                .and_then(|s| s.properties.get("facing"))
-            else {
-                return false;
-            };
-            let axis = match &**facing {
-                "east" | "west" => 0,
-                "up" | "down" => 1,
-                _ => 2,
-            };
-            face.iter().position(|c| *c != 0) != Some(axis)
-        } else {
-            // `hitResult.getDirection().equals(Direction.DOWN)`.
-            face == [0, -1, 0]
-        };
-        free_side && !self.sign_can_execute_click_commands(key)
-    }
     /// `SignBlockEntity.createCommandSourceStack`: the acting player runs the
     /// command from the middle of the sign's block, rotation zero, at the
     /// game master level, with `CommandSource.NULL` (no feedback, no failure
@@ -803,9 +745,9 @@ impl Game<'_> {
         let Some(BlockEntity::Sign(sign)) = self.world.block_entities.get(&edit.pos) else {
             return;
         };
-        self.render_transparent_background("sign_editor", batch);
         let atlas = &self.gui.atlas;
         let (w, h) = (batch.width, batch.height);
+        batch.fill(atlas, 0.0, 0.0, w, h, rgba(16, 16, 16, 160));
         let (key, fallback) = if sign.hanging {
             ("hanging_sign.edit", "Edit Hanging Sign Message")
         } else {
@@ -902,11 +844,6 @@ impl Game<'_> {
             horizon_client::preedit::report_caret(caret_x, ly, line_height);
         }
         let (bx, by) = done_button(w, h);
-        horizon_client::widgets::declare_action(
-            horizon_client::widgets::Action::Done,
-            [bx, by, 200.0, 20.0],
-            true,
-        );
         horizon_client::widgets::narratable(|| {
             horizon_client::widgets::Narratable::button(done_label(), [bx, by, 200.0, 20.0], true)
         });

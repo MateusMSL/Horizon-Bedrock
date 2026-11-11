@@ -8,7 +8,7 @@ use std::{collections::BTreeMap, sync::Arc};
 #[derive(Clone)]
 pub struct FluidPredicateBindings {
     table: Arc<FluidStateTable>,
-    tags: BTreeMap<String, crate::fluid::FluidMask>,
+    tags: BTreeMap<String, u8>,
 }
 impl FluidPredicateBindings {
     pub fn new(registry: &BlockRegistry) -> Result<Self, DecodeError> {
@@ -96,7 +96,7 @@ fn fluid(name: &str) -> Result<FluidKind, DecodeError> {
 #[derive(Clone, Debug)]
 pub struct BoundFluidSet {
     table: Arc<FluidStateTable>,
-    mask: crate::fluid::FluidMask,
+    mask: u8,
 }
 impl BoundFluidSet {
     pub fn contains(&self, state: BlockStateId) -> bool {

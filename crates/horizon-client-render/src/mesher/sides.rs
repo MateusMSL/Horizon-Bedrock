@@ -25,7 +25,7 @@
 //! cutout ones, so one pass over all of them draws the runs it drew before.
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use super::{OPAQUE_LAYER, TerrainSource, TerrainVertex};
+use super::{OPAQUE_LAYER, TerrainVertex};
 
 /// The buckets in mesh order: +X, +Z, other, +Y, -Z, -X, -Y. Seen from
 /// above (+Y, the commonest case), each pair of horizontal sides with a
@@ -103,22 +103,6 @@ impl Sides {
         }
     }
 
-    /// A sort with these parts' `ends` and `planes`, for tests.
-    #[cfg(test)]
-    pub(crate) fn from_parts(
-        ends: [u32; 14],
-        grouped: bool,
-        split: bool,
-        planes: [f32; 7],
-    ) -> Self {
-        Self {
-            ends,
-            grouped,
-            split,
-            planes,
-        }
-    }
-
     /// The number of solid quads the buckets hold.
     pub fn quads(&self) -> u32 {
         self.ends[13]
@@ -142,26 +126,6 @@ impl Sides {
             Bucket::Other => true,
         };
         self.runs(seen, part, draw);
-    }
-
-    /// For GPU culling's copy of `visible_from` with every part (`gfx::gpu_culling`),
-    /// which then only compares: where each bucket of a mesh sorted for one pass ends,
-    /// in `BUCKETS` order, and what `visible_from` compares the eye with for each. That
-    /// is the lowest plane less `MARGIN` for a bucket facing a positive direction, the
-    /// highest plus `MARGIN` for one facing a negative direction, and 0 for the other
-    /// bucket, which it never compares. `None` for a mesh sorted for two passes
-    /// (`group_parts`), whose buckets lie in two stretches each.
-    pub fn thresholds(&self) -> Option<([u32; 7], [f32; 7])> {
-        if self.grouped {
-            return None;
-        }
-        let t: [f32; 7] = std::array::from_fn(|i| match BUCKETS[i] {
-            Bucket::Side(_, true) => self.planes[i] - MARGIN,
-            Bucket::Side(_, false) => self.planes[i] + MARGIN,
-            Bucket::Other => 0.0,
-        });
-        // A bucket's cutout quads end it (`slot`).
-        Some((std::array::from_fn(|b| self.ends[b * 2 + 1]), t))
     }
 
     /// The runs of `part`'s quads facing every way.
@@ -247,29 +211,15 @@ fn sort(solid: &mut Vec<TerrainVertex>) -> Sides {
 }
 
 /// `sort`, moving each quad's tint in `tints` (one per quad, or none) with it.
-#[cfg(test)]
 pub fn sort_tinted(solid: &mut Vec<TerrainVertex>, tints: &mut Vec<u32>) -> Sides {
-    sort_sourced(solid, tints, &mut Vec::new())
-}
-
-pub(super) fn sort_sourced(
-    solid: &mut Vec<TerrainVertex>,
-    tints: &mut Vec<u32>,
-    sources: &mut Vec<TerrainSource>,
-) -> Sides {
-    if !sources.is_empty() {
-        sources.resize(solid.len() / 4, TerrainSource::default());
-    }
     let grouped = GROUPED.load(Ordering::Relaxed);
-    SORT_SCRATCH.with_borrow_mut(|scratch| sort_with(solid, tints, sources, grouped, scratch))
+    SORT_SCRATCH.with_borrow_mut(|scratch| sort_with(solid, tints, grouped, scratch))
 }
 
 /// `sort`, with all the opaque parts first when `grouped`.
 #[cfg(test)]
 fn sort_parts(solid: &mut Vec<TerrainVertex>, grouped: bool) -> Sides {
-    SORT_SCRATCH.with_borrow_mut(|scratch| {
-        sort_with(solid, &mut Vec::new(), &mut Vec::new(), grouped, scratch)
-    })
+    SORT_SCRATCH.with_borrow_mut(|scratch| sort_with(solid, &mut Vec::new(), grouped, scratch))
 }
 
 /// `sort`'s buffers, kept by each meshing thread so sorting a mesh allocates
@@ -281,7 +231,6 @@ struct SortScratch {
     keys: Vec<u64>,
     sorted: Vec<[TerrainVertex; 4]>,
     tints: Vec<u32>,
-    sources: Vec<TerrainSource>,
 }
 thread_local! {
     static SORT_SCRATCH: std::cell::RefCell<SortScratch> = Default::default();
@@ -296,7 +245,6 @@ fn total_order_key(v: f32) -> u32 {
 fn sort_with(
     solid: &mut Vec<TerrainVertex>,
     tints: &mut Vec<u32>,
-    sources: &mut Vec<TerrainSource>,
     grouped: bool,
     scratch: &mut SortScratch,
 ) -> Sides {
@@ -369,13 +317,6 @@ fn sort_with(
             sorted_tints.clear();
             sorted_tints.extend(keys.iter().map(|&k| tints[(k & 0xFF_FFFF) as usize]));
             std::mem::swap(tints, sorted_tints);
-        }
-        if sources.len() == quads_len {
-            scratch.sources.clear();
-            scratch
-                .sources
-                .extend(keys.iter().map(|&k| sources[(k & 0xFF_FFFF) as usize]));
-            std::mem::swap(sources, &mut scratch.sources);
         }
     }
     Sides {

@@ -12,7 +12,6 @@
 
 use crate::{backend, mojang, sources};
 use serde::Serialize;
-use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -140,7 +139,7 @@ pub fn runtimes_dir() -> PathBuf {
 
 /// The runtimes in a Mojang `runtime` folder.
 pub fn mojang_runtimes(dir: &Path) -> Vec<Runtime> {
-    horizon_platform::prepare::java::minecraft_runtimes(dir)
+    horizon_prepare::java::minecraft_runtimes(dir)
         .into_iter()
         .filter_map(|home| runtime(home, Source::Mojang))
         .collect()
@@ -152,7 +151,12 @@ pub fn installed() -> Vec<Runtime> {
     let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
     let mut homes: Vec<PathBuf> = var("JAVA_HOME").map(PathBuf::from).into_iter().collect();
     if let Some(path) = var("PATH") {
-        homes.extend(homes_from_path(&path));
+        homes.extend(
+            std::env::split_paths(&path)
+                .filter(|dir| dir.file_name().is_some_and(|n| n == "bin"))
+                .filter_map(|dir| fs::canonicalize(dir.join("java")).ok())
+                .filter_map(|java| Some(java.parent()?.parent()?.to_path_buf())),
+        );
     }
     for parent in parents() {
         for entry in fs::read_dir(parent).into_iter().flatten().flatten() {
@@ -172,26 +176,6 @@ pub fn installed() -> Vec<Runtime> {
         }
     }
     found
-}
-
-/// The Java homes a `PATH` names: each entry that is a `bin` folder holding the `java` program,
-/// taken as the home above it. Windows spells that program `java.exe`, so a plain `java` finds
-/// nothing there and the runtime would be missed.
-fn homes_from_path(path: &OsStr) -> Vec<PathBuf> {
-    std::env::split_paths(path)
-        .filter(|dir| dir.file_name().is_some_and(|n| n == "bin"))
-        .filter_map(|dir| fs::canonicalize(dir.join(java_program())).ok())
-        .filter_map(|java| Some(java.parent()?.parent()?.to_path_buf()))
-        .collect()
-}
-
-/// The program name Java installers put in a home's `bin` on this OS.
-fn java_program() -> &'static str {
-    if cfg!(windows) {
-        "java.exe"
-    } else {
-        "java"
-    }
 }
 
 /// The folders Java installers put homes in, one home per child.

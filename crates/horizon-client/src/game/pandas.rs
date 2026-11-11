@@ -28,8 +28,7 @@ impl Game<'_> {
         let griefing = self.ui.rules.bool("mob_griefing");
         for i in 0..self.mobs.len() {
             let m = &self.mobs[i];
-            if m.species() != Species::Panda || !m.alive() || !self.creatures.ticked.contains(&m.id)
-            {
+            if m.species() != Species::Panda || !m.alive() {
                 continue;
             }
             let id = m.id;
@@ -139,9 +138,7 @@ impl Game<'_> {
         else {
             return;
         };
-        let mut mobs = std::mem::take(&mut self.mobs);
-        let w = self.mob_world_base(&[]);
-        for m in &mut mobs {
+        for m in &mut self.mobs {
             if m.species() == Species::Panda
                 && !m.is_baby()
                 && m.on_ground
@@ -151,13 +148,12 @@ impl Game<'_> {
             {
                 // LivingEntity.jumpFromGround.
                 m.needs_sync = true;
-                let power = f64::from(m.jump_power(&w));
+                let power = f64::from(m.jump_power());
                 if power > 1.0e-5 {
                     m.velocity.y = power.max(m.velocity.y);
                 }
             }
         }
-        self.mobs = mobs;
     }
     /// What a window draws of its pandas: the crumbs of a bite
     /// (`addEatingParticles`) and the sneeze's particle.

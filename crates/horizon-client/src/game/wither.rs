@@ -43,9 +43,10 @@ impl Game<'_> {
             let _ = self.level_set(pos, rose);
             return;
         }
-        self.spawn_item_own(
+        self.spawn_item(
             ItemStack::new("minecraft:wither_rose", 1),
             [m.position.x, m.position.y, m.position.z],
+            super::dispenser::new_item_motion(),
             0,
         );
     }
@@ -191,16 +192,14 @@ impl Game<'_> {
                 self.hit_special(id, amount, by_player, kind, Some(&p.kind));
             }
             Some(Who::Mob(id)) => {
-                let owner_species = owner
-                    .and_then(|o| self.mobs.iter().find(|m| m.id == o))
-                    .map(|m| m.species());
                 let source = Damage {
                     kind,
                     attacker: live_owner,
                     from: skull.from,
-                    attacker_species: owner_species,
                 };
-                let mut survived_hit = false;
+                let owner_species = owner
+                    .and_then(|o| self.mobs.iter().find(|m| m.id == o))
+                    .map(|m| m.species());
                 let killed = match self.mobs.iter_mut().find(|m| m.id == id) {
                     // `WitherBoss.hurtServer`: nothing from a wither friend.
                     Some(m)
@@ -212,28 +211,13 @@ impl Game<'_> {
                     }
                     Some(m) => {
                         let hit = m.damage(amount, source);
-                        survived_hit = hit && m.alive();
+                        if hit && m.alive() && m.species() != Species::Wither && wither_ticks > 0 {
+                            m.add_effect("minecraft:wither", wither_ticks, 1);
+                        }
                         hit && !m.alive()
                     }
                     None => false,
                 };
-                if survived_hit && live_owner.is_some() {
-                    self.mob_post_attack(
-                        id,
-                        live_owner,
-                        Some("minecraft:wither_skull"),
-                        Some("minecraft:wither_skull"),
-                    );
-                }
-                if survived_hit
-                    && wither_ticks > 0
-                    && let Some(m) = self
-                        .mobs
-                        .iter_mut()
-                        .find(|m| m.id == id && m.species() != Species::Wither)
-                {
-                    m.add_effect("minecraft:wither", wither_ticks, 1);
-                }
                 if killed {
                     self.heal_skull_owner(p, live_owner);
                 }
@@ -252,13 +236,7 @@ impl Game<'_> {
         ) {
             self.combat.blast_resistance_cap = Some(0.8);
         }
-        let result = self.with_hive_emptying_blast(|g| {
-            g.explode(
-                at,
-                1.0,
-                super::explosion::ExplosionSource::default().with_silence(g.entity_silent(p.id)),
-            )
-        });
+        let result = self.with_hive_emptying_blast(|g| g.explode(at, 1.0));
         self.combat.blast_resistance_cap = None;
         self.set_blast_by_player(false);
         self.combat.explosion_owner = None;

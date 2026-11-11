@@ -2,7 +2,7 @@
 //! rotation and entity handling, and the reset, save and run actions.
 use super::{
     Game,
-    block_editor::{Editor, Item, Outcome, Pos, cycle, footer_action, on_off},
+    block_editor::{Editor, Item, Outcome, Pos, cycle, on_off},
 };
 use horizon_client::{
     containers::BlockEntity,
@@ -155,7 +155,6 @@ impl Editor for TestInstanceEditor {
             w: bw,
             label: text,
             active,
-            action: footer_action(id, DONE, CANCEL),
         };
         let label = |key: &str, x: f32| Item::Label {
             text: tr(key),

@@ -1,0 +1,11 @@
+<component name="libraryTable">
+  <library name="font">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/.horizon-cache/resourcepacks/e5755abb18c22dbe/assets/minecraft/font/unifont_jp.zip!/" />
+      <root url="jar://$PROJECT_DIR$/.horizon-cache/resourcepacks/e5755abb18c22dbe/assets/minecraft/font/unifont.zip!/" />
+      <root url="jar://$PROJECT_DIR$/.horizon-cache/resourcepacks/e5755abb18c22dbe/assets/minecraft/font/unifont_pua.zip!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

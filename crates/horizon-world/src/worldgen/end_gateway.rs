@@ -109,11 +109,13 @@ impl EndGatewayFeature {
             world
                 .set_block(p, state, 3)
                 .map_err(EndGatewayError::World)?;
-            if center && let Some(exit) = self.exit {
-                // Native code looks up the entity even when the write returned false.
-                world
-                    .configure_end_gateway(p, exit, self.exact)
-                    .map_err(EndGatewayError::Query)?;
+            if center {
+                if let Some(exit) = self.exit {
+                    // Native code looks up the entity even when the write returned false.
+                    world
+                        .configure_end_gateway(p, exit, self.exact)
+                        .map_err(EndGatewayError::Query)?;
+                }
             }
         }
         Ok(true)

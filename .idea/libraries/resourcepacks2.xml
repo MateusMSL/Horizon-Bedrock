@@ -1,0 +1,10 @@
+<component name="libraryTable">
+  <library name="resourcepacks2">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/.horizon-cache/resourcepacks/5aa553857dd058d3/assets/minecraft/resourcepacks/programmer_art.zip!/" />
+      <root url="jar://$PROJECT_DIR$/.horizon-cache/resourcepacks/5aa553857dd058d3/assets/minecraft/resourcepacks/high_contrast.zip!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

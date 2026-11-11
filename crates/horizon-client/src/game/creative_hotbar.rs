@@ -5,11 +5,10 @@ use horizon_client::{hotbar, items::ItemStack, keybinds, text::Text};
 use horizon_world::nbt::Tag;
 
 impl Game<'_> {
-    /// Whether the key bound to `mapping` is held, or the controller button bound to it.
+    /// Whether the key bound to `mapping` is held.
     pub(super) fn mapped_key_down(&self, mapping: &str) -> bool {
         keybinds::key_code(self.settings.keys.get(mapping))
             .is_some_and(|k| self.physical_keys.contains(&k))
-            || self.input_holds(mapping)
     }
 
     /// `CreativeModeInventoryScreen.selectTab` on the HOTBAR tab: each saved

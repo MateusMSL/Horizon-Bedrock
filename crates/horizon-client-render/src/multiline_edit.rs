@@ -498,8 +498,7 @@ impl MultiLineEdit {
             self.x + self.width - 1.0,
             self.y + self.height - 1.0,
         );
-        // Its text scrolls with its caret: not a list for the focus to step through.
-        ui::scrollbar_sprites(
+        ui::scrollbar(
             batch,
             atlas,
             self.x + self.width,

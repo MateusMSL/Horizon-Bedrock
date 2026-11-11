@@ -14,7 +14,6 @@ use horizon_client::{
     containers::BlockEntity,
     items::ItemStack,
     menu::{AnvilCraft, Kind, Menu},
-    stations::AnvilResult,
 };
 use horizon_core::random::RandomSource;
 use horizon_protocol::packets::play::{self, Clientbound as C};
@@ -25,7 +24,7 @@ pub(super) struct GuestStation {
     state: i32,
     pub(super) kind: StationKind,
     pub(super) pos: [i32; 3],
-    pub(super) menu: Box<Menu>,
+    menu: Box<Menu>,
     /// The data slots the client was last sent.
     sent_data: Vec<i32>,
     /// The game time of the menu's last sound (`lastSoundTime`).
@@ -137,14 +136,8 @@ impl Game<'_> {
             };
             let before = result_slot.map(|r| {
                 let slots: Vec<_> = (0..=r).map(|s| gs.menu.slot(s).cloned()).collect();
-                // Only the anvil has a data slot (its cost) and a name; grindstone and
-                // smithing menus have neither. A rename runs createResult even when the
-                // result comes out the same (AnvilMenu.setItemName).
-                (
-                    slots,
-                    gs.menu.data.first().copied(),
-                    gs.menu.anvil.name.clone(),
-                )
+                // Only the anvil has a data slot (its cost); grindstone and smithing menus have none.
+                (slots, gs.menu.data.first().copied())
             });
             let mut undo = None;
             let hook = gs.menu.anvil_hook;
@@ -175,9 +168,8 @@ impl Game<'_> {
             }
             // A cancelled take runs no createResult: the inputs are untouched.
             let recomputed = !cancelled
-                && before.is_some_and(|(slots, cost, item_name)| {
+                && before.is_some_and(|(slots, cost)| {
                     cost != gs.menu.data.first().copied()
-                        || item_name != gs.menu.anvil.name
                         || slots
                             .iter()
                             .enumerate()
@@ -187,21 +179,6 @@ impl Game<'_> {
                 let guest = &host.hub.guests[gi];
                 let (uuid, name) = (guest.uuid, guest.name.clone());
                 let mut result = gs.menu.slot(2).cloned();
-                // NeoForge's AnvilUpdateEvent where createResult ends, before Bukkit's
-                // PrepareAnvilEvent: it is asked only while the left slot holds an item.
-                if let Some(left) = gs.menu.slot(0) {
-                    let mut answer = AnvilResult {
-                        result,
-                        cost: gs.menu.data[0],
-                        repair_item_count_cost: gs.menu.anvil.repair_count,
-                        only_renaming: gs.menu.anvil.only_renaming,
-                    };
-                    let (right, item_name) = (gs.menu.slot(1), gs.menu.anvil.name.as_deref());
-                    self.anvil_update(uuid, &name, left, right, item_name, &mut answer);
-                    result = answer.result;
-                    gs.menu.data[0] = answer.cost;
-                    gs.menu.anvil.repair_count = answer.repair_item_count_cost;
-                }
                 self.native_prepare_anvil(uuid, &name, gs.pos, &mut result, &mut gs.menu.data[0]);
                 let env = self.menu_env();
                 gs.menu.set_slot(&env, 2, result);
@@ -515,9 +492,9 @@ impl Game<'_> {
         }
         gs.last_sound = self.ticks;
         let at = gs.pos.map(|v| f64::from(v) + 0.5);
-        // The menu's `lastSoundTime` lets one sound through per tick, however
-        // many results a shift-click took.
-        self.audio.play(sounds[0], Some(at), 1.0, 1.0);
+        for sound in sounds {
+            self.audio.play(sound, Some(at), 1.0, 1.0);
+        }
     }
 
     /// A click on the guest's station window; false for other windows.

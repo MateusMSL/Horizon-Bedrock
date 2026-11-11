@@ -18,7 +18,7 @@ ClientPacketListener.enableChunkLight	inline	crates/horizon-client-render/src/st
 ClientPacketListener.handleForgetLevelChunk	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	ForgetLevelChunk arm: Streaming::forget, block entities and renderer columns dropped
 ClientPacketListener.queueLightRemoval	inline	crates/horizon-client-render/src/streaming.rs::Streaming::forget_columns	gap: minor: the column's light state is dropped with the column (lit removed); no per-section light clearing
 ClientPacketListener.handleBlockUpdate	port	crates/horizon-client/src/game/remote.rs::Game::server_block	
-ClientPacketListener.handleConfigurationStart	port	crates/horizon-client/src/game/remote_poll.rs::Game::poll_remote	the Reconfiguring arm flushes the held-back chat, acknowledges it, closes dialogs and drops the level, keeping the chat; gap: player: no reconfiguring screen is drawn
+ClientPacketListener.handleConfigurationStart	port	crates/horizon-client/src/game/remote.rs::Game::poll_remote	the Reconfiguring arm flushes the held-back chat, acknowledges it, closes dialogs and drops the level, keeping the chat; gap: player: no reconfiguring screen is drawn
 ClientPacketListener.handleSystemChat	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SystemChat arm: overlay to the action bar, otherwise the chat
 ClientPacketListener.handlePlayerChat	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	PlayerChat arm: the global index (a mismatch disconnects), an unknown sender and the sender's validator; gap: minor: markMessageAsProcessed (no last-seen tracker is kept)
 ClientPacketListener.handleDisguisedChat	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	DisguisedChat arm
@@ -77,7 +77,7 @@ ClientPacketListener.applyPlayerInfoUpdate	inline	crates/horizon-client/src/game
 ClientPacketListener.initializeChatSession	port	crates/horizon-client/src/game/remote.rs::Remote::new_chat_validator	the session each INITIALIZE_CHAT entry carries is kept and checked against the services' profile-key keys when the player's chat is first read
 ClientPacketListener.enforcesSecureChat	inline	crates/horizon-client/src/game/remote.rs::Game::handle_packet	the Login flag is kept as serverEnforcesSecureChat and the fallback message validator enforces it
 ClientPacketListener.handleGameRuleValues	port	crates/horizon-client/src/game/lan_screen.rs::Game::remote_world_options_rules	
-ClientPacketListener.handleSoundEntityEvent	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SoundEntity arm binds the sound to the current entity object, preserving packet category and seed; unknown entities are ignored
+ClientPacketListener.handleSoundEntityEvent	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SoundEntity arm: the sound plays where the tracked entity is
 ClientPacketListener.handleAddObjective	port	crates/horizon-client/src/game/remote.rs::Game::remote_objective	add, remove and update of an objective
 ClientPacketListener.handleSetScore	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SetScore arm
 ClientPacketListener.handleResetScore	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	ResetScore arm

@@ -265,8 +265,7 @@ pub(super) fn add_names_at(stack: &mut Tag, k: super::schema::Key) {
         let found = if k >= key(704, 0) {
             ITEM_TO_BLOCK_ENTITY.iter().find(|(i, _)| *i == item)
         } else {
-            super::tables::tables()
-                .item_to_block_entity_v99
+            super::flat_tables::ITEM_TO_BLOCK_ENTITY_V99
                 .iter()
                 .find(|(i, _)| *i == item)
         };

@@ -11,66 +11,53 @@ use horizon_protocol::text::{literal, translatable};
 use horizon_server_files::user_lists::{BanEntry, NameAndId};
 use horizon_world::nbt::Tag;
 
-/// A moderation reply retains its translation component for each client's language.
+/// One line that `/mute`, `/tempmute`, `/mutelist`, `/unmute` and `/tempban` answer with: Horizon's own words,
+/// or vanilla's message where vanilla has one, which each client shows in its language.
 #[derive(Debug, PartialEq)]
-pub(super) struct Reply(Text);
+pub(super) enum Reply {
+    Line(String),
+    /// A vanilla translation key with no argument.
+    Vanilla(&'static str),
+}
 
 impl Reply {
-    pub(super) fn translated(key: &str, args: &[Text]) -> Self {
-        Self(Self::translation(key, args))
-    }
-
-    /// Vanilla clients lack Horizon's keys, so preserve a readable fallback too.
-    pub(super) fn translation(key: &str, args: &[Text]) -> Text {
-        if key.starts_with("horizon.") {
-            static ENGLISH: std::sync::OnceLock<horizon_client::lang::Language> =
-                std::sync::OnceLock::new();
-            let english =
-                ENGLISH.get_or_init(|| horizon_client::lang::Language::load(&[], "en_us"));
-            Text::translate_with_fallback(key, english.get(key).unwrap_or(key), args)
-        } else {
-            Text::translate(key, args)
-        }
-    }
-
+    /// `EntityArgument.NO_PLAYERS_FOUND`, `argument.entity.notfound.player`: what `/kick` and the other
+    /// player commands answer for a name no player has.
     pub(super) fn no_player() -> Self {
-        Self::translated("argument.entity.notfound.player", &[])
+        Self::Vanilla("argument.entity.notfound.player")
     }
 
+    /// `BanPlayerCommands.ERROR_ALREADY_BANNED`: `commands.ban.failed`.
     pub(super) fn already_banned() -> Self {
-        Self::translated("commands.ban.failed", &[])
+        Self::Vanilla("commands.ban.failed")
     }
 
-    pub(super) fn duration(millis: i64) -> Text {
-        use horizon_server_files::duration::{DurationUnit, duration_parts};
-        let (count, unit) = duration_parts(millis);
-        let key = match (unit, count == 1) {
-            (DurationUnit::Minute, true) => "horizon.moderation.duration.minute",
-            (DurationUnit::Minute, false) => "horizon.moderation.duration.minutes",
-            (DurationUnit::Hour, true) => "horizon.moderation.duration.hour",
-            (DurationUnit::Hour, false) => "horizon.moderation.duration.hours",
-            (DurationUnit::Day, true) => "horizon.moderation.duration.day",
-            (DurationUnit::Day, false) => "horizon.moderation.duration.days",
-        };
-        Self::translation(key, &[Text::literal(count.to_string())])
-    }
-
-    pub(super) fn with_reason(self, reason: Option<&str>) -> Self {
-        match reason {
-            Some(reason) => Self::translated(
-                "horizon.moderation.reason",
-                &[self.0, Text::literal(reason)],
-            ),
-            None => self,
+    /// The chat component a player is sent.
+    pub(super) fn tag(&self) -> Tag {
+        match self {
+            Self::Line(line) => literal(line),
+            Self::Vanilla(key) => translatable(key, &[]),
         }
     }
 
-    pub(super) fn tag(&self) -> Tag {
-        horizon_client::lan::data::component_nbt(&self.0.component())
-    }
-
+    /// The text the console prints.
     pub(super) fn text(&self) -> Text {
-        self.0.clone()
+        match self {
+            Self::Line(line) => Text::literal(line.clone()),
+            Self::Vanilla(key) => Text::translate(key, &[]),
+        }
+    }
+}
+
+impl From<String> for Reply {
+    fn from(line: String) -> Self {
+        Self::Line(line)
+    }
+}
+
+impl From<&str> for Reply {
+    fn from(line: &str) -> Self {
+        Self::Line(line.to_owned())
     }
 }
 
@@ -79,26 +66,6 @@ const MUTE_LEVEL: u8 = 3;
 
 /// The commands of `mute_command`.
 pub(super) const MUTE_COMMANDS: [&str; 4] = ["mute", "tempmute", "mutelist", "unmute"];
-
-/// The mute commands as operators' clients get them in the command tree (`command_tree`'s usages).
-pub(super) const MUTE_USAGES: [&str; 4] = [
-    "mute <player:player> [duration_and_reason:text]",
-    "tempmute <player:player> <duration:word> [reason:text]",
-    "mutelist",
-    "unmute <player:player>",
-];
-
-/// `/mute <player> [duration] [reason]` (`words`, the command first): how long, when the word after
-/// the name is a duration (`10m`, `2h`, `1d`; none: until `/unmute`), and the index the reason starts at.
-fn mute_time(words: &[&str]) -> (Option<i64>, usize) {
-    match words
-        .get(2)
-        .and_then(|w| horizon_server_files::duration::parse_duration(w))
-    {
-        Some(ms) => (Some(ms), 3),
-        None => (None, 2),
-    }
-}
 
 /// The reason a temporary ban gives at login.
 const BAN_REASON: &str = "Hate speech in chat (Horizon chat filter)";
@@ -133,7 +100,7 @@ impl Game<'_> {
         count: u32,
         action: Action,
     ) {
-        let now = horizon_server_files::duration::now_millis();
+        let now = horizon_chat_filter::now_millis();
         let summary = format!(
             "[chat-filter] Refused {name}'s {} (hit {count}: {})",
             place.name(),
@@ -281,57 +248,36 @@ impl Game<'_> {
         let reason = |from: usize| (words.len() > from).then(|| words[from..].join(" "));
         match words {
             ["mutelist"] => {
-                let now = horizon_server_files::duration::now_millis();
+                let now = horizon_chat_filter::now_millis();
                 let mutes = host.hub.mutes();
                 if mutes.is_empty() {
-                    return vec![Reply::translated("horizon.moderation.mutelist.empty", &[])];
+                    return vec!["There are no mutes".into()];
                 }
-                let mut lines = vec![Reply::translated(
-                    "horizon.moderation.mutelist.count",
-                    &[Text::literal(mutes.len().to_string())],
-                )];
+                let mut lines = vec![format!("There are {} mute(s):", mutes.len())];
                 for m in mutes {
-                    let by = m.by.as_deref().map_or_else(
-                        || Reply::translation("horizon.moderation.chat_filter", &[]),
-                        Text::literal,
-                    );
+                    let by = m.by.as_deref().unwrap_or("the chat filter");
                     let until = m.until.map_or_else(
-                        || Reply::translation("horizon.moderation.until_unmuted", &[]),
+                        || "until unmuted".into(),
                         |u| {
-                            Reply::translation(
-                                "horizon.moderation.remaining",
-                                &[Reply::duration(u - now)],
-                            )
+                            let left = horizon_chat_filter::duration_text(u - now);
+                            format!("for {}", left.replacen(' ', " more ", 1))
                         },
                     );
-                    lines.push(
-                        Reply::translated(
-                            "horizon.moderation.mutelist.entry",
-                            &[Text::literal(m.name), by, until],
-                        )
-                        .with_reason(m.reason.as_deref()),
-                    );
+                    let why = m.reason.map(|r| format!(": {r}")).unwrap_or_default();
+                    lines.push(format!("{} was muted by {by} {until}{why}", m.name));
                 }
-                lines
+                lines.into_iter().map(Reply::from).collect()
             }
-            ["unmute", name] => vec![self.unmute(host, name, by)],
-            ["mute", name, ..] => {
-                let (time, from) = mute_time(words);
-                vec![self.mute(host, name, time, reason(from), by)]
-            }
-            ["tempmute", name, time, ..] => {
-                match horizon_server_files::duration::parse_duration(time) {
-                    Some(ms) => vec![self.mute(host, name, Some(ms), reason(3), by)],
-                    None => vec![Reply::translated(
-                        "horizon.moderation.invalid_duration",
-                        &[Text::literal(*time)],
-                    )],
-                }
-            }
-            ["mute", ..] => vec![Reply::translated("horizon.moderation.usage.mute", &[])],
-            ["tempmute", ..] => vec![Reply::translated("horizon.moderation.usage.tempmute", &[])],
-            ["unmute", ..] => vec![Reply::translated("horizon.moderation.usage.unmute", &[])],
-            _ => vec![Reply::translated("horizon.moderation.usage.mutelist", &[])],
+            ["unmute", name] => vec![self.unmute(host, name, by).into()],
+            ["mute", name, ..] => vec![self.mute(host, name, None, reason(2), by)],
+            ["tempmute", name, time, ..] => match horizon_chat_filter::parse_duration(time) {
+                Some(ms) => vec![self.mute(host, name, Some(ms), reason(3), by)],
+                None => vec![format!("{time} isn't a duration: 10m, 2h, 1d").into()],
+            },
+            ["mute", ..] => vec!["/mute <player> [reason]".into()],
+            ["tempmute", ..] => vec!["/tempmute <player> <duration> [reason]".into()],
+            ["unmute", ..] => vec!["/unmute <player>".into()],
+            _ => vec!["/mutelist".into()],
         }
     }
 
@@ -355,40 +301,35 @@ impl Game<'_> {
         let Some((uuid, name)) = user else {
             return Reply::no_player();
         };
-        let until = time.map(|ms| horizon_server_files::duration::now_millis() + ms);
+        let until = time.map(|ms| horizon_chat_filter::now_millis() + ms);
         let what = time.map_or_else(
             || "until unmuted".into(),
-            |ms| format!("for {}", horizon_server_files::duration::duration_text(ms)),
+            |ms| format!("for {}", horizon_chat_filter::duration_text(ms)),
         );
         let why = reason
             .as_deref()
             .map(|r| format!(": {r}"))
             .unwrap_or_default();
-        host.hub.mute(uuid, &name, until, by, reason.clone());
+        host.hub.mute(uuid, &name, until, by, reason);
         if self.options.dedicated.is_some() {
             dedicated::log(
                 "INFO",
                 &format!("[chat-filter] {by} muted {name} {what}{why}"),
             );
         }
-        let until = time.map_or_else(
-            || Reply::translation("horizon.moderation.until_unmuted", &[]),
-            |ms| Reply::translation("horizon.moderation.for_duration", &[Reply::duration(ms)]),
-        );
-        Reply::translated("horizon.moderation.muted", &[Text::literal(name), until])
-            .with_reason(reason.as_deref())
+        format!("Muted {name} {what}{why}").into()
     }
 
     /// Lifts `name`'s mute, logged; what to answer.
-    pub(super) fn unmute(&mut self, host: &mut LanHost, name: &str, by: &str) -> Reply {
+    pub(super) fn unmute(&mut self, host: &mut LanHost, name: &str, by: &str) -> String {
         match host.hub.unmute(name) {
             Some(name) => {
                 if self.options.dedicated.is_some() {
                     dedicated::log("INFO", &format!("[chat-filter] {by} unmuted {name}"));
                 }
-                Reply::translated("horizon.moderation.unmuted", &[Text::literal(name)])
+                format!("Unmuted {name}")
             }
-            None => Reply::translated("horizon.moderation.not_muted", &[Text::literal(name)]),
+            None => format!("{name} isn't muted"),
         }
     }
 }
@@ -409,131 +350,10 @@ mod tests {
     }
 
     #[test]
-    fn horizons_replies_keep_nested_translation_components() {
-        let reply = Reply::translated(
-            "horizon.moderation.muted",
-            &[
-                Text::literal("Steve"),
-                Reply::translation(
-                    "horizon.moderation.for_duration",
-                    &[Reply::duration(61_000)],
-                ),
-            ],
-        )
-        .with_reason(Some("literal reason"));
-        let component = reply.text().component();
-        assert_eq!(component["translate"], "horizon.moderation.reason");
-        assert_eq!(
-            component["with"][0]["translate"],
-            "horizon.moderation.muted"
-        );
-        assert_eq!(
-            component["with"][0]["with"][1]["with"][0]["translate"],
-            "horizon.moderation.duration.minutes"
-        );
-        assert_eq!(component["with"][1]["text"], "literal reason");
-        assert_eq!(
-            reply.tag(),
-            horizon_client::lan::data::component_nbt(&component)
-        );
-    }
-
-    #[test]
-    fn clients_can_translate_nested_replies_or_use_the_fallback() {
-        use horizon_client::lang::{self, Language};
-        lang::scoped(Language::load(&[], "en_us"), || {
-            let reply = Reply::translated(
-                "horizon.moderation.muted",
-                &[
-                    Text::literal("Steve"),
-                    Reply::translation(
-                        "horizon.moderation.for_duration",
-                        &[Reply::duration(61_000)],
-                    ),
-                ],
-            )
-            .with_reason(Some("reason %s"));
-            let wire = reply.tag();
-            assert_eq!(
-                horizon_protocol::text::plain(&wire, &Default::default()),
-                "Muted Steve for 2 minutes: reason %s"
-            );
-            let language = [
-                (
-                    "horizon.moderation.reason".to_owned(),
-                    "%1$s (%2$s)".to_owned(),
-                ),
-                (
-                    "horizon.moderation.muted".to_owned(),
-                    "M %2$s %1$s".to_owned(),
-                ),
-                (
-                    "horizon.moderation.for_duration".to_owned(),
-                    "D %s".to_owned(),
-                ),
-                (
-                    "horizon.moderation.duration.minutes".to_owned(),
-                    "%s min_local".to_owned(),
-                ),
-            ]
-            .into_iter()
-            .collect();
-            assert_eq!(
-                horizon_protocol::text::plain(&wire, &language),
-                "M D 2 min_local Steve (reason %s)"
-            );
-        });
-    }
-
-    #[test]
-    fn bundled_languages_resolve_the_reply_on_the_receiving_client() {
-        use horizon_client::lang::{self, Language};
-        lang::scoped(Language::load(&[], "en_us"), || {
-            let reply = Reply::translated(
-                "horizon.moderation.muted",
-                &[
-                    Text::literal("Steve"),
-                    Reply::translation(
-                        "horizon.moderation.for_duration",
-                        &[Reply::duration(61_000)],
-                    ),
-                ],
-            )
-            .with_reason(Some("reason %s"));
-            for (code, expected) in [
-                (
-                    "fr_fr",
-                    "Steve a été réduit au silence pour 2 minutes : reason %s",
-                ),
-                (
-                    "de_de",
-                    "Steve wurde für 2 Minuten stummgeschaltet: reason %s",
-                ),
-                (
-                    "es_es",
-                    "Se ha silenciado a Steve durante 2 minutos: reason %s",
-                ),
-            ] {
-                let language = Language::load(&[], code);
-                assert_eq!(
-                    horizon_protocol::text::plain(&reply.tag(), language.map()),
-                    expected,
-                    "{code}"
-                );
-            }
-        });
-    }
-
-    #[test]
-    fn mute_takes_a_duration_after_the_name_or_mutes_until_unmuted() {
-        assert_eq!(mute_time(&["mute", "Steve"]), (None, 2));
-        assert_eq!(mute_time(&["mute", "Steve", "spamming", "chat"]), (None, 2));
-        assert_eq!(
-            mute_time(&["mute", "Steve", "1h", "spam"]),
-            (Some(3_600_000), 3)
-        );
-        assert_eq!(mute_time(&["mute", "Steve", "30m"]), (Some(1_800_000), 3));
-        // Not a duration: the word starts the reason.
-        assert_eq!(mute_time(&["mute", "Steve", "0m", "spam"]), (None, 2));
+    fn horizons_own_lines_stay_literal() {
+        let reply = Reply::from("Muted Steve until unmuted");
+        assert_eq!(reply.tag(), literal("Muted Steve until unmuted"));
+        assert_eq!(reply.text().translation_key(), None);
+        assert_eq!(reply.text().plain(), "Muted Steve until unmuted");
     }
 }

@@ -162,14 +162,25 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
 
     // ---- moving piston block entities ----
     pub(crate) fn moving_piston(&self, pos: BlockPos) -> Option<MovingPiston> {
-        let slot = self.ticks.moving_piston_slot(pos)?;
-        Some(self.ticks.moving_pistons[slot].1)
+        self.ticks
+            .moving_pistons
+            .iter()
+            .find(|(p, _)| *p == pos)
+            .map(|(_, m)| *m)
     }
-    fn set_moving_piston(&mut self, pos: BlockPos, piston: MovingPiston) {
-        self.ticks.add_moving_piston(pos, piston);
+    fn set_moving_piston(&mut self, pos: BlockPos, mut piston: MovingPiston) {
+        self.ticks.moving_pistons.retain(|(p, _)| *p != pos);
+        self.ticks.next_block_entity_id += 1;
+        piston.id = self.ticks.next_block_entity_id;
+        self.ticks.moving_pistons.push((pos, piston));
     }
     pub(crate) fn remove_moving_piston(&mut self, pos: BlockPos) -> Option<MovingPiston> {
-        self.ticks.take_moving_piston(pos)
+        let index = self
+            .ticks
+            .moving_pistons
+            .iter()
+            .position(|(p, _)| *p == pos)?;
+        Some(self.ticks.moving_pistons.remove(index).1)
     }
     /// `PistonMovingBlockEntity.finalTick`.
     fn moving_piston_final_tick(&mut self, pos: BlockPos) {
@@ -210,8 +221,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 // The client's copy waits for the server's state before
                 // placing the block itself (deathTicks < 5).
                 piston.death_ticks += 1;
-                if let Some(slot) = self.ticks.moving_piston_slot(pos) {
-                    self.ticks.moving_pistons[slot].1 = piston;
+                if let Some(entry) = self
+                    .ticks
+                    .moving_pistons
+                    .iter_mut()
+                    .find(|(p, _)| *p == pos)
+                {
+                    entry.1 = piston;
                 }
                 return;
             }
@@ -244,9 +260,14 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             // so the push carries the piston as it was before the advance.
             let old = piston;
             let new_progress = (old.progress + 0.5).min(1.0);
-            if let Some(slot) = self.ticks.moving_piston_slot(pos) {
+            let current = self
+                .ticks
+                .moving_pistons
+                .iter_mut()
+                .find(|(p, _)| *p == pos);
+            if let Some(entry) = current {
                 piston.progress = new_progress;
-                self.ticks.moving_pistons[slot].1 = piston;
+                entry.1 = piston;
                 self.ticks.piston_pushes.push((pos, old, new_progress));
             }
         }
@@ -290,15 +311,16 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             let pushed_pos = rel_n(pos, direction, 2);
             let pushed = self.state(pushed_pos);
             let mut event = 1;
-            if b.is_block(pushed, b.named.moving_piston)
-                && b.facing(pushed) == direction
-                && let Some(piston) = self.moving_piston(pushed_pos)
-                && piston.extending
-                && (piston.progress_o < 0.5
-                    || self.level.game_time() == piston.last_ticked
-                    || self.ticks.handling_tick)
-            {
-                event = 2;
+            if b.is_block(pushed, b.named.moving_piston) && b.facing(pushed) == direction {
+                if let Some(piston) = self.moving_piston(pushed_pos) {
+                    if piston.extending
+                        && (piston.progress_o < 0.5
+                            || self.level.game_time() == piston.last_ticked
+                            || self.ticks.handling_tick)
+                    {
+                        event = 2;
+                    }
+                }
             }
             self.block_event(pos, block, event, direction as i32);
         }
@@ -314,7 +336,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     ) -> bool {
         let b = self.b;
         let (min_y, max_y) = (self.level.min_y(), self.level.max_y() - 1);
-        if pos.y < min_y || pos.y > max_y || !self.level.within_world_border(pos) {
+        if pos.y < min_y || pos.y > max_y {
             return false;
         }
         if b.is_air(state) {
@@ -342,7 +364,6 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             return false;
         }
         !b.has_flag(state, super::data::state_flags::BLOCK_ENTITY)
-            && !self.level.has_native_block_entity(state)
             && !self.level.has_mod_block_entity(pos)
     }
     fn is_slime_or_honey(&self, state: BlockStateId) -> bool {
@@ -731,13 +752,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 let two = rel_n(pos, direction, 2);
                 let moving_state = self.state(two);
                 let mut piston_piece = false;
-                if b.is_block(moving_state, b.named.moving_piston)
-                    && let Some(entity) = self.moving_piston(two)
-                    && entity.direction == direction
-                    && entity.extending
-                {
-                    self.moving_piston_final_tick(two);
-                    piston_piece = true;
+                if b.is_block(moving_state, b.named.moving_piston) {
+                    if let Some(entity) = self.moving_piston(two) {
+                        if entity.direction == direction && entity.extending {
+                            self.moving_piston_final_tick(two);
+                            piston_piece = true;
+                        }
+                    }
                 }
                 if !piston_piece {
                     let is_piston = b.is_block(moving_state, b.named.piston)
@@ -802,7 +823,7 @@ impl Behaviours {
         let mut reschedule = Vec::new();
         while !ticks.block_events.is_empty() {
             let event = ticks.block_events.remove(0);
-            if !level.should_tick_blocks_at(event.pos.chunk()) {
+            if !level.is_ticking_chunk(event.pos.chunk()) {
                 reschedule.push(event);
                 continue;
             }
@@ -838,7 +859,12 @@ impl Behaviours {
             .map(|(p, m)| (*p, m.id))
             .collect();
         for (pos, id) in tickers {
-            if !level.is_ticking_chunk(pos.chunk()) || !ticks.moving_piston_has(pos, id) {
+            if !level.is_ticking_chunk(pos.chunk())
+                || !ticks
+                    .moving_pistons
+                    .iter()
+                    .any(|(p, m)| *p == pos && m.id == id)
+            {
                 continue;
             }
             self.sim(level, ticks).moving_piston_tick(pos);
@@ -886,7 +912,11 @@ impl Behaviours {
             .map(|(p, m)| (*p, m.id))
             .collect();
         for (pos, id) in tickers {
-            if !ticks.moving_piston_has(pos, id) {
+            if !ticks
+                .moving_pistons
+                .iter()
+                .any(|(p, m)| *p == pos && m.id == id)
+            {
                 continue;
             }
             {

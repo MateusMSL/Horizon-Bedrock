@@ -320,11 +320,204 @@ pub enum Action {
     OpenFolder,
     /// The Done button (`onClose`: commit).
     Done,
-    /// Horizon's own: the options button on the card of this pack, which has Polytone options.
-    Options(String),
     /// Horizon's own: a Modrinth hit the player picked, to download into the
     /// packs folder. The screen does not know where that is.
     BrowsePick(usize),
+}
+
+/// The width of the settings button a Bedrock pack's row carries.
+const ADDON_BUTTON: i32 = 70;
+/// The settings screen: row width, row pitch, top and bottom margins.
+const ROW_W: i32 = 310;
+const ROW_STEP: i32 = 24;
+const VIEW_TOP: i32 = 32;
+const VIEW_BOTTOM: i32 = 36;
+
+/// A Bedrock pack with options: its subpacks and the settings its manifest offers (Bedrock's
+/// gear).
+#[derive(Clone, Debug)]
+struct Addon {
+    /// The `resourcepacks` folder and the pack's file name in it.
+    dir: std::path::PathBuf,
+    file: String,
+    subpacks: Vec<crate::packs::bedrock::Subpack>,
+    /// The folder of the subpack chosen; none is the base pack alone.
+    chosen: Option<String>,
+    defs: Vec<horizon_bedrock::settings::Def>,
+    /// The value of each setting (the default until the player chose).
+    values: HashMap<String, horizon_bedrock::settings::Choice>,
+}
+impl Addon {
+    /// The subpack row's label: the subpack's name, or the base's.
+    fn label(&self) -> Text {
+        let name = self
+            .chosen
+            .as_ref()
+            .and_then(|c| self.subpacks.iter().find(|s| &s.folder == c))
+            .map_or_else(
+                || tr("horizon.pack.subpack.base"),
+                |s| Text::literal(s.name.clone()),
+            );
+        Text::translate("horizon.pack.subpack", &[name])
+    }
+    /// The next choice after the current one: base, each subpack in turn, base again.
+    fn next(&self) -> Option<String> {
+        let at = self
+            .chosen
+            .as_ref()
+            .and_then(|c| self.subpacks.iter().position(|s| &s.folder == c));
+        match at {
+            None if self.chosen.is_none() => self.subpacks.first().map(|s| s.folder.clone()),
+            Some(i) => self.subpacks.get(i + 1).map(|s| s.folder.clone()),
+            None => None,
+        }
+    }
+    fn value(&self, i: usize) -> horizon_bedrock::settings::Choice {
+        let d = &self.defs[i];
+        self.values
+            .get(&d.name)
+            .cloned()
+            .unwrap_or_else(|| d.default.clone())
+    }
+    /// The rows of the settings screen.
+    fn rows(&self) -> Vec<SettingRow> {
+        use horizon_bedrock::settings::Kind;
+        let mut rows = Vec::new();
+        if !self.subpacks.is_empty() {
+            rows.push(SettingRow::Mode);
+        }
+        for (i, d) in self.defs.iter().enumerate() {
+            rows.push(SettingRow::Setting(i));
+            if d.kind == Kind::Multiselect {
+                rows.extend((0..d.options.len()).map(|o| SettingRow::Option(i, o)));
+            }
+        }
+        rows
+    }
+    /// The text of a row.
+    fn row_label(&self, row: SettingRow) -> Text {
+        use horizon_bedrock::settings::{Choice, Kind, title_of};
+        let on_off = |v: bool| tr(if v { "options.on" } else { "options.off" });
+        let pair = |title: &str, value: Text| {
+            Text::translate(
+                "options.generic_value",
+                &[Text::literal(title.to_owned()), value],
+            )
+        };
+        match row {
+            SettingRow::Mode => self.label(),
+            SettingRow::Setting(i) => {
+                let d = &self.defs[i];
+                let title = d.title();
+                match (d.kind, self.value(i)) {
+                    (Kind::Toggle, Choice::Flag(v)) => pair(title, on_off(v)),
+                    (Kind::Dropdown, Choice::One(o)) => {
+                        let label = d
+                            .options
+                            .iter()
+                            .find(|x| x.0 == o)
+                            .map_or(o.as_str(), |x| title_of(&x.1));
+                        pair(title, Text::literal(label.to_owned()))
+                    }
+                    (Kind::Slider, Choice::Number(n)) => pair(title, Text::literal(format!("{n}"))),
+                    _ => Text::literal(title.to_owned()),
+                }
+            }
+            SettingRow::Option(i, o) => {
+                let d = &self.defs[i];
+                let (name, label) = &d.options[o];
+                let on = matches!(self.value(i), Choice::Many(v) if v.contains(name));
+                pair(&format!("  {}", title_of(label)), on_off(on))
+            }
+        }
+    }
+    /// A row pressed: the Mode row steps the subpack, a setting its value.
+    fn press(&mut self, row: SettingRow) {
+        use horizon_bedrock::settings::Kind;
+        let saved = match row {
+            SettingRow::Mode => {
+                let next = self.next();
+                crate::packs::bedrock::choose_subpack(&self.dir, &self.file, next.as_deref())
+                    .map(|()| self.chosen = next)
+            }
+            SettingRow::Setting(i) | SettingRow::Option(i, _) => {
+                let d = self.defs[i].clone();
+                let now = self.value(i);
+                let next = match row {
+                    SettingRow::Option(_, o) => d.flip(&now, &d.options[o].0),
+                    _ if d.kind == Kind::Multiselect => return,
+                    _ => d.press(&now),
+                };
+                crate::packs::bedrock::choose_setting(&self.dir, &self.file, &d.name, &next).map(
+                    |()| {
+                        self.values.insert(d.name, next);
+                    },
+                )
+            }
+        };
+        let _ = saved;
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SettingRow {
+    Mode,
+    Setting(usize),
+    Option(usize, usize),
+}
+
+/// The open settings screen of a Bedrock pack.
+#[derive(Clone, Debug)]
+struct SettingsView {
+    id: String,
+    scroll: f64,
+}
+
+/// The Bedrock packs among `packs` that offer options, with their saved choices.
+fn addons_of(packs: &[PackInfo]) -> HashMap<String, Addon> {
+    let game = std::env::current_dir().unwrap_or_default();
+    packs
+        .iter()
+        .filter_map(|p| {
+            // Bedrock packs are in `addons/`; `resourcepacks/` keeps the choices it had.
+            let (folder, file) = match p.id.strip_prefix("addon/") {
+                Some(file) => ("addons", file),
+                None => ("resourcepacks", p.id.strip_prefix("file/")?),
+            };
+            let dir = game.join(folder);
+            let path = dir.join(file);
+            if !(crate::packs::bedrock::is_bedrock_file(file)
+                || path.join("manifest.json").is_file())
+            {
+                return None;
+            }
+            let subpacks = crate::packs::bedrock::subpacks(&path);
+            let defs = crate::packs::bedrock::settings(&path);
+            if subpacks.is_empty() && defs.is_empty() {
+                return None;
+            }
+            let values = defs
+                .iter()
+                .filter_map(|d| {
+                    Some((
+                        d.name.clone(),
+                        crate::packs::bedrock::chosen_setting(&dir, file, &d.name)?,
+                    ))
+                })
+                .collect();
+            Some((
+                p.id.clone(),
+                Addon {
+                    chosen: crate::packs::bedrock::chosen_subpack(&dir, file),
+                    dir: dir.clone(),
+                    file: file.to_owned(),
+                    subpacks,
+                    defs,
+                    values,
+                },
+            ))
+        })
+        .collect()
 }
 
 /// The pack screen and its state.
@@ -361,64 +554,15 @@ pub struct PackScreen {
     browser_icons: Vec<String>,
     /// Whether that button is drawn at all.
     pub browsing_allowed: bool,
-    /// The packs with Polytone options (#11486): their cards carry an options button.
-    pub with_options: std::collections::BTreeSet<String>,
     /// The browser's own search box, separate from the one that filters the
     /// player's installed packs.
     browser_search: TextField,
     /// The browser's search box has the keyboard.
     browser_focus: bool,
-    /// Which atlas slot holds which icon, kept from one frame to the next
-    /// ([`PackScreen::bind_icons`]).
-    icon_slots: std::cell::RefCell<IconSlots>,
-}
-
-/// The atlas's pack icon slots and the icon each holds. The atlas keeps what is
-/// written into a slot, so an icon is sent once, when it takes a slot, and not
-/// again every frame it is drawn.
-#[derive(Clone, Debug, Default)]
-struct IconSlots {
-    /// The atlas the pixels went into ([`HudAtlas::revision`]); a new atlas holds none of them.
-    revision: u64,
-    /// Frames bound so far: an icon drawn in this one keeps its slot.
-    frame: u64,
-    /// Least recently drawn first: the icon's texture key, its slot, its pixels, and the
-    /// frame it was last drawn in.
-    held: Vec<(String, usize, Arc<[u8]>, u64)>,
-}
-
-impl IconSlots {
-    /// Starts a frame on `atlas`; an atlas that is not the one the slots were filled in empties them.
-    fn begin(&mut self, atlas: &HudAtlas) {
-        if self.revision != atlas.revision {
-            self.held.clear();
-            self.revision = atlas.revision;
-        }
-        self.frame += 1;
-    }
-
-    /// The slot for the icon drawn under `texture`, and whether its pixels have to be sent. A new
-    /// icon takes a free slot, else the slot of the icon drawn longest ago; none when every slot
-    /// holds an icon drawn in this frame, and that icon keeps `unknown_pack`.
-    fn slot_for(&mut self, texture: &str, icon: &Arc<[u8]>) -> Option<(usize, bool)> {
-        if let Some(at) = self.held.iter().position(|h| h.0 == texture) {
-            let mut kept = self.held.remove(at);
-            let same = Arc::ptr_eq(&kept.2, icon);
-            kept.2 = icon.clone();
-            kept.3 = self.frame;
-            let slot = kept.1;
-            self.held.push(kept);
-            return Some((slot, !same));
-        }
-        let slot = match (0..PACK_ICON_SLOTS).find(|i| !self.held.iter().any(|h| h.1 == *i)) {
-            Some(free) => free,
-            None if self.held.first().is_some_and(|h| h.3 < self.frame) => self.held.remove(0).1,
-            None => return None,
-        };
-        self.held
-            .push((texture.to_owned(), slot, icon.clone(), self.frame));
-        Some((slot, true))
-    }
+    /// The Bedrock packs with options, by pack id.
+    addons: HashMap<String, Addon>,
+    /// The settings screen of one of them, when open.
+    settings: Option<SettingsView>,
 }
 
 fn tr(key: &str) -> Text {
@@ -429,8 +573,6 @@ fn tr(key: &str) -> Text {
 /// height of 20; drawn shorter, neither it nor its label sits right, so the
 /// button keeps that height and is centred on the shorter search box.
 const ADD_SIZE: i32 = 20;
-/// The options button on a pack's card.
-const OPTIONS_SIZE: i32 = 16;
 /// A card in the grid: its icon beside its name, author and description.
 const ROW_H: i32 = 74;
 /// The air around a card's contents.
@@ -483,11 +625,14 @@ impl PackScreen {
             .iter()
             .filter_map(|p| Some((icon_texture(&p.id), p.icon.clone()?)))
             .collect();
+        let addons = addons_of(&packs);
         let mut s = Self {
             title,
             width,
             height,
             in_world,
+            addons,
+            settings: None,
             packs,
             icons,
             model,
@@ -497,7 +642,6 @@ impl PackScreen {
             confirm: None,
             browser: None,
             browsing_allowed: false,
-            with_options: Default::default(),
             backdrop: Backdrop::None,
             browser_icons: Vec::new(),
             browser_search: {
@@ -510,13 +654,76 @@ impl PackScreen {
                 field
             },
             browser_focus: false,
-            icon_slots: Default::default(),
             changed: false,
         };
         s.reposition(m);
         s.populate(None);
         s.set_focus(Focus::Search);
         s
+    }
+    /// The subpack button of the pack row `i` of `side`: x, y, width, height.
+    fn addon_button(&self, side: usize, i: usize) -> Option<(i32, i32, i32, i32)> {
+        let l = &self.lists[side];
+        let Row::Pack(id) = &l.entries.get(i)?.row else {
+            return None;
+        };
+        self.addons.get(id)?;
+        let narrow = if l.scrollable() { 6 } else { 0 };
+        let (cx, cy) = (l.row_left() + 2, l.entries[i].y + 2);
+        Some((cx + 34 + 157 - narrow - ADDON_BUTTON, cy, ADDON_BUTTON, 12))
+    }
+    /// The gear of a Bedrock pack was pressed: its settings screen opens.
+    fn addon_click(&mut self, id: &str) {
+        if self.addons.contains_key(id) {
+            self.settings = Some(SettingsView {
+                id: id.to_owned(),
+                scroll: 0.0,
+            });
+            self.set_focus(Focus::None);
+        }
+    }
+    /// The settings screen's rows as buttons (x, y, row) in the visible band, and the Done
+    /// button's position.
+    fn settings_layout(&self, v: &SettingsView) -> (Vec<(i32, i32, SettingRow)>, (i32, i32)) {
+        let x = self.width / 2 - ROW_W / 2;
+        let rows = self
+            .addons
+            .get(&v.id)
+            .map(Addon::rows)
+            .unwrap_or_default()
+            .into_iter()
+            .enumerate()
+            .map(|(i, r)| (x, VIEW_TOP + 4 + i as i32 * ROW_STEP - v.scroll as i32, r))
+            .filter(|(_, y, _)| *y + 20 > VIEW_TOP && *y < self.height - VIEW_BOTTOM)
+            .collect();
+        (rows, (self.width / 2 - 100, self.height - 28))
+    }
+    fn settings_max_scroll(&self, v: &SettingsView) -> f64 {
+        let n = self.addons.get(&v.id).map_or(0, |a| a.rows().len()) as i32;
+        f64::from((n * ROW_STEP + 8 - (self.height - VIEW_TOP - VIEW_BOTTOM)).max(0))
+    }
+    fn settings_click(&mut self, x: f64, y: f64) -> Action {
+        let Some(v) = self.settings.clone() else {
+            return Action::None;
+        };
+        let (rows, (dx, dy)) = self.settings_layout(&v);
+        if x >= dx as f64 && y >= dy as f64 && x < (dx + 200) as f64 && y < (dy + 20) as f64 {
+            self.settings = None;
+            return Action::None;
+        }
+        if y < VIEW_TOP as f64 || y >= (self.height - VIEW_BOTTOM) as f64 {
+            return Action::None;
+        }
+        for (bx, by, row) in rows {
+            if x >= bx as f64 && y >= by as f64 && x < (bx + ROW_W) as f64 && y < (by + 20) as f64 {
+                if let Some(a) = self.addons.get_mut(&v.id) {
+                    a.press(row);
+                }
+                self.changed = true;
+                break;
+            }
+        }
+        Action::None
     }
     fn info(&self, id: &str) -> Option<&PackInfo> {
         self.packs.iter().find(|p| p.id == id)
@@ -668,6 +875,9 @@ impl PackScreen {
         if let Some(action) = self.browser_click(m, x, y) {
             return action;
         }
+        if self.settings.is_some() {
+            return self.settings_click(x, y);
+        }
         if self.search.contains(x, y) {
             self.search.click(m, x, false);
             self.set_focus(Focus::Search);
@@ -691,15 +901,20 @@ impl PackScreen {
             }
             let l = &self.lists[side];
             let hit = l.entry_at(x as i32, y as i32);
-            if let Some(i) = hit
-                && let Some((id, bx, by)) = self.options_button(side, i)
-                && d::inside((x as i32, y as i32), bx, by, OPTIONS_SIZE, OPTIONS_SIZE)
-            {
-                return Action::Options(id);
-            }
             let mut took = false;
             if let Some(i) = hit {
                 took = true;
+                if let (Some((bx, by, bw, bh)), Row::Pack(id)) =
+                    (self.addon_button(side, i), l.entries[i].row.clone())
+                    && x >= bx as f64
+                    && y >= by as f64
+                    && x < (bx + bw) as f64
+                    && y < (by + bh) as f64
+                {
+                    self.addon_click(&id);
+                    self.set_focus(Focus::List(side));
+                    return Action::None;
+                }
                 match l.entries[i].row.clone() {
                     Row::Header => {
                         let l = &mut self.lists[side];
@@ -864,10 +1079,14 @@ impl PackScreen {
     }
     /// Whether the confirmation screen is shown.
     pub fn confirming(&self) -> bool {
-        self.confirm.is_some()
+        self.confirm.is_some() || self.settings.is_some()
     }
-    /// Escape on the confirmation screen answers no.
+    /// Escape on the confirmation screen answers no; on a settings screen it closes it.
     pub fn cancel_confirm(&mut self, m: &Measure) -> bool {
+        if self.settings.take().is_some() {
+            self.reposition(m);
+            return true;
+        }
         if self.confirm.take().is_some() {
             self.reposition(m);
             return true;
@@ -888,6 +1107,13 @@ impl PackScreen {
         }
     }
     pub fn scroll(&mut self, x: f64, y: f64, amount: f64) {
+        if let Some(v) = self.settings.clone() {
+            let max = self.settings_max_scroll(&v);
+            if let Some(v) = &mut self.settings {
+                v.scroll = (v.scroll - amount * 18.0).clamp(0.0, max);
+            }
+            return;
+        }
         if self.confirm.is_some() || self.search.contains(x, y) {
             return;
         }
@@ -983,13 +1209,10 @@ impl PackScreen {
         self.model.commit()
     }
     /// Points the icon blits of `draws` at the atlas's pack icon slots and
-    /// writes the icons into them (vanilla registers a texture per pack). An
-    /// icon keeps its slot from one frame to the next and is sent when it takes
-    /// the slot, not every frame; the slot of the icon drawn longest ago is
-    /// taken first. Icons past the last slot in one frame keep `unknown_pack`.
+    /// writes the icons into them, one slot per icon drawn (vanilla registers a
+    /// texture per pack). Icons past the last slot keep `unknown_pack`.
     pub fn bind_icons(&self, draws: &mut [Draw], atlas: &HudAtlas, patches: &mut Vec<Patch>) {
-        let mut slots = self.icon_slots.borrow_mut();
-        slots.begin(atlas);
+        let mut slots = 0..PACK_ICON_SLOTS;
         for draw in draws {
             let Draw::Blit { texture, .. } = draw else {
                 continue;
@@ -997,23 +1220,20 @@ impl PackScreen {
             let Some(icon) = self.icons.get(texture.as_str()) else {
                 continue;
             };
-            let Some((slot, send)) = slots.slot_for(texture, icon) else {
-                continue;
+            let Some(slot) = slots.next() else {
+                return;
             };
             let sprite = format!("horizon/pack-icon{slot}");
             let Some(rect) = atlas.sprites.get(&sprite) else {
-                slots.held.pop();
                 return;
             };
-            if send {
-                patches.push(Patch {
-                    x: (rect.u0 * atlas.width as f32).round() as u32,
-                    y: (rect.v0 * atlas.height as f32).round() as u32,
-                    width: PACK_ICON_SIZE,
-                    height: PACK_ICON_SIZE,
-                    rgba: icon.to_vec(),
-                });
-            }
+            patches.push(Patch {
+                x: (rect.u0 * atlas.width as f32).round() as u32,
+                y: (rect.v0 * atlas.height as f32).round() as u32,
+                width: PACK_ICON_SIZE,
+                height: PACK_ICON_SIZE,
+                rgba: icon.to_vec(),
+            });
             *texture = sprite;
         }
     }
@@ -1029,8 +1249,15 @@ impl PackScreen {
                 "packs/confirm",
                 crate::widgets::join_for_narration(&[&c.title.plain(), &c.message.plain()]),
             ),
+            None if self.settings.is_some() => {
+                crate::widgets::ScreenInfo::new("packs/settings", self.title.plain())
+            }
             None => crate::widgets::ScreenInfo::new("packs", self.title.plain()),
         });
+        if let Some(v) = &self.settings {
+            self.draw_settings(&mut out, m, v, mouse, now_ms);
+            return out;
+        }
         if let Some(c) = &self.confirm {
             let ((tx, ty), (lines, mx, my), buttons) = self.confirm_layout(m, c);
             d::string_widget(&mut out, m, &c.title, tx, ty, 0);
@@ -1054,7 +1281,7 @@ impl PackScreen {
         );
         self.search.draw(&mut out, m, blink_ms, None);
         for side in 0..2 {
-            self.draw_list(&mut out, m, side, mouse);
+            self.draw_list(&mut out, m, side, mouse, now_ms);
         }
         self.draw_footer(
             &mut out,
@@ -1232,11 +1459,6 @@ impl PackScreen {
         d::fill(out, 0, 0, self.width, TOPBAR_H, SIDEBAR_BG);
         let (bx, by) = self.back_button();
         let back_hover = d::inside(mouse, bx, by, BACK_W, BACK_H);
-        crate::widgets::declare_action(
-            crate::widgets::Action::Back,
-            [bx as f32, by as f32, BACK_W as f32, BACK_H as f32],
-            true,
-        );
         d::button(
             out,
             m,
@@ -1433,50 +1655,79 @@ impl PackScreen {
             );
         }
     }
-    /// The options button on the card of row `i` of list `side`, when its pack has
-    /// Polytone options: the pack and the button's corner, at the card's right edge.
-    fn options_button(&self, side: usize, i: usize) -> Option<(String, i32, i32)> {
-        let l = &self.lists[side];
-        let e = l.entries.get(i)?;
-        let Row::Pack(id) = &e.row else { return None };
-        if !self.with_options.contains(id) {
-            return None;
-        }
-        let x = l.row_left() + l.entry_width() - OPTIONS_SIZE - 2;
-        let y = e.y + (e.height - OPTIONS_SIZE) / 2;
-        Some((id.clone(), x, y))
-    }
-    /// The options button of a card: a small button with a sliders glyph.
-    fn draw_options_button(out: &mut Vec<Draw>, x: i32, y: i32, hover: bool) {
-        crate::widgets::narratable(|| {
-            crate::widgets::Narratable::button(
-                tr("horizon.pack.options").plain(),
-                [x as f32, y as f32, OPTIONS_SIZE as f32, OPTIONS_SIZE as f32],
-                true,
-            )
-        });
-        let sprite = if hover {
-            "widget/button_highlighted"
-        } else {
-            "widget/button"
-        };
-        d::sprite(out, sprite, x, y, OPTIONS_SIZE, OPTIONS_SIZE);
-        let (line, knob) = if hover {
-            (0xFF_C6_C6_C6u32 as i32, -1)
-        } else {
-            (0xFF_A0_A0_A0u32 as i32, 0xFF_E0_E0_E0u32 as i32)
-        };
-        // Three sliders, their knobs at different places.
-        for (row, at) in [(4, 8), (8, 4), (12, 9)] {
-            d::fill(out, x + 3, y + row, x + 13, y + row + 1, line);
-            d::fill(out, x + at, y + row - 1, x + at + 2, y + row + 2, knob);
-        }
-    }
     /// The Add button, just right of the search box.
     fn add_button(&self, m: &Measure) -> (i32, i32) {
         let (sx, sy) = self.header(m)[2];
         // The search box is 15 tall: centre the taller button on it.
         (sx + 204, sy - (ADD_SIZE - 15) / 2)
+    }
+
+    /// The settings screen of a Bedrock pack: its title, the rows in a scrolling band, Done.
+    fn draw_settings(
+        &self,
+        out: &mut Vec<Draw>,
+        m: &Measure,
+        v: &SettingsView,
+        mouse: (i32, i32),
+        now_ms: i64,
+    ) {
+        let Some(addon) = self.addons.get(&v.id) else {
+            return;
+        };
+        let title = self
+            .info(&v.id)
+            .map_or_else(|| Text::literal(v.id.clone()), |p| p.title.clone());
+        let tw = m.width(&title);
+        d::string_widget(out, m, &title, self.width / 2 - tw / 2, 12, 0);
+        d::fill(
+            out,
+            0,
+            VIEW_TOP,
+            self.width,
+            self.height - VIEW_BOTTOM,
+            -1072689136,
+        );
+        out.push(Draw::Scissor {
+            x0: 0,
+            y0: VIEW_TOP,
+            x1: self.width,
+            y1: self.height - VIEW_BOTTOM,
+        });
+        let (rows, (dx, dy)) = self.settings_layout(v);
+        for (x, y, row) in rows {
+            let hover = d::inside(mouse, x, y, ROW_W, 20)
+                && mouse.1 >= VIEW_TOP
+                && mouse.1 < self.height - VIEW_BOTTOM;
+            let header = matches!(row, SettingRow::Setting(i)
+                if addon.defs[i].kind == horizon_bedrock::settings::Kind::Multiselect);
+            d::button(
+                out,
+                m,
+                &addon.row_label(row),
+                x,
+                y,
+                ROW_W,
+                20,
+                !header,
+                hover && !header,
+                now_ms,
+            );
+        }
+        out.push(Draw::NoScissor);
+        let hover = d::inside(mouse, dx, dy, 200, 20);
+        crate::widgets::widget_cursor(hover, true);
+        d::button(
+            out,
+            m,
+            &tr("gui.done"),
+            dx,
+            dy,
+            200,
+            20,
+            true,
+            hover,
+            now_ms,
+        );
     }
     /// The footer's two buttons, "Open Pack Folder" and "Done", over their
     /// labels; a label wider than its button scrolls with the clock.
@@ -1492,13 +1743,6 @@ impl PackScreen {
             let hover = d::inside(mouse, bx, by, 150, 20);
             // The cursor follows the mouse; the highlight also keyboard focus.
             crate::widgets::widget_cursor(hover, true);
-            if i == 1 && self.browser.is_none() {
-                crate::widgets::declare_action(
-                    crate::widgets::Action::Done,
-                    [bx as f32, by as f32, 150.0, 20.0],
-                    true,
-                );
-            }
             d::button(
                 out,
                 m,
@@ -1521,7 +1765,14 @@ impl PackScreen {
             }
         }
     }
-    fn draw_list(&self, out: &mut Vec<Draw>, m: &Measure, side: usize, mouse: (i32, i32)) {
+    fn draw_list(
+        &self,
+        out: &mut Vec<Draw>,
+        m: &Measure,
+        side: usize,
+        mouse: (i32, i32),
+        now_ms: i64,
+    ) {
         let l = &self.lists[side];
         let hovered = if l.is_over(mouse.0 as f64, mouse.1 as f64) {
             l.entry_at(mouse.0, mouse.1)
@@ -1580,7 +1831,6 @@ impl PackScreen {
         });
         let (left, w) = (l.row_left(), l.entry_width());
         let narrow = if l.scrollable() { 6 } else { 0 };
-        let mut tooltip = None;
         for (i, e) in l.entries.iter().enumerate() {
             if e.y + e.height < l.y || e.y > l.bottom() {
                 continue;
@@ -1671,32 +1921,35 @@ impl PackScreen {
                             }
                         }
                     }
-                    let mut max = 157 - narrow;
-                    if let Some((_, bx, by)) = self.options_button(side, i) {
-                        let hover = hovered == Some(i)
-                            && d::inside(mouse, bx, by, OPTIONS_SIZE, OPTIONS_SIZE);
-                        Self::draw_options_button(out, bx, by, hover);
-                        // A control for a pad's crosshair to glide onto and its D-pad to hop to,
-                        // while the list shows it whole.
-                        let mark = crate::widgets::targets_mark();
-                        let size = OPTIONS_SIZE as f32;
-                        crate::widgets::target([bx as f32, by as f32, size, size]);
-                        crate::widgets::clip_targets(mark, l.y as f32, l.bottom() as f32);
-                        if hover {
-                            tooltip = Some(tr("horizon.pack.optionsInfo"));
-                        }
-                        max -= OPTIONS_SIZE + 2;
+                    let max = 157 - narrow;
+                    let gear = self.addon_button(side, i).zip(self.addons.get(id));
+                    let name_max = if gear.is_some() {
+                        max - ADDON_BUTTON - 2
+                    } else {
+                        max
+                    };
+                    d::string_widget(out, m, &name, cx + 34, cy + 1, name_max);
+                    if let Some(((bx, by, bw, bh), _)) = gear {
+                        let hover = d::inside(mouse, bx, by, bw, bh);
+                        d::button(
+                            out,
+                            m,
+                            &tr("horizon.pack.settings"),
+                            bx,
+                            by,
+                            bw,
+                            bh,
+                            true,
+                            hover,
+                            now_ms,
+                        );
                     }
-                    d::string_widget(out, m, &name, cx + 34, cy + 1, max);
                     let lines = d::label_lines(m, &desc, max, 2, &desc_style);
                     d::label(out, &lines, cx + 34, cy + 12, max, false);
                 }
             }
         }
         out.push(Draw::NoScissor);
-        if let Some(t) = tooltip {
-            d::tooltip(out, m, &t, mouse);
-        }
         d::blit(
             out,
             &format!("textures/gui/{prefix}header_separator.png"),
@@ -1749,6 +2002,28 @@ mod icon_tests {
             .unwrap();
         out
     }
+    #[test]
+    fn a_bedrock_pack_steps_through_its_subpacks_and_back_to_the_base() {
+        let sub = |f: &str| crate::packs::bedrock::Subpack {
+            folder: f.into(),
+            name: f.into(),
+        };
+        let mut a = Addon {
+            dir: std::path::PathBuf::new(),
+            file: String::new(),
+            subpacks: vec![sub("1_e"), sub("0_e")],
+            chosen: None,
+            defs: Vec::new(),
+            values: HashMap::new(),
+        };
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            a.chosen = a.next();
+            seen.push(a.chosen.clone());
+        }
+        assert_eq!(seen, [Some("1_e".into()), Some("0_e".into()), None]);
+    }
+
     fn pack(id: &str, icon: Option<Arc<[u8]>>) -> PackInfo {
         PackInfo {
             id: id.into(),
@@ -1779,50 +2054,6 @@ mod icon_tests {
             (&blue[..], &blue[..])
         );
         assert!(load_icon(b"not a png").is_none());
-    }
-
-    /// A pack with Polytone options carries an options button on its card, which opens
-    /// that pack's options and nothing else; a pack without options has none.
-    #[test]
-    fn a_card_with_options_opens_its_own_pack_options() {
-        let atlas =
-            crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
-                .unwrap();
-        let m = Measure(&atlas.font);
-        let packs = vec![pack("file/Configurable", None), pack("file/Plain", None)];
-        let mut screen = PackScreen::new(&m, tr("resourcePack.title"), 480, 320, false, packs, &[]);
-        screen.with_options.insert("file/Configurable".into());
-        let row = |screen: &PackScreen, id: &str| {
-            screen.lists[0]
-                .entries
-                .iter()
-                .position(|e| e.row == Row::Pack(id.into()))
-                .unwrap()
-        };
-        assert!(
-            screen
-                .options_button(0, row(&screen, "file/Plain"))
-                .is_none()
-        );
-        let (id, bx, by) = screen
-            .options_button(0, row(&screen, "file/Configurable"))
-            .unwrap();
-        assert_eq!(id, "file/Configurable");
-        let (cx, cy) = (bx + OPTIONS_SIZE / 2, by + OPTIONS_SIZE / 2);
-        // Hovered, it explains itself; a pad's crosshair reaches it as a control.
-        let draws = screen.draw(&m, (cx, cy), 0, 0);
-        assert!(draws.iter().any(|d| matches!(d, Draw::Tooltip { .. })));
-        crate::widgets::end_frame(crate::widgets::generation() + 1);
-        let size = OPTIONS_SIZE as f32;
-        let button = [bx as f32, by as f32, size, size];
-        let targets = crate::widgets::last_targets();
-        assert!(targets.iter().any(|t| t.rect == button), "{targets:?}");
-        assert_eq!(
-            screen.click(&m, cx as f64, cy as f64),
-            Action::Options("file/Configurable".into())
-        );
-        // The press opened the options, it did not move the pack.
-        assert!(screen.commit().is_empty());
     }
 
     /// Programmer Art and High Contrast draw their own `pack.png`; a pack
@@ -2137,179 +2368,5 @@ mod footer_label_tests {
             assert!(scrolling.contains(&code), "{code} not in {scrolling:?}");
         }
         assert_eq!(lang::code(), before, "the global language was left alone");
-    }
-}
-
-#[cfg(test)]
-mod icon_slot_tests {
-    use super::*;
-
-    fn atlas() -> HudAtlas {
-        HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap()
-    }
-
-    /// `count` packs with an icon each, the pixels of icon `i` all `i`.
-    fn packs(count: usize) -> Vec<PackInfo> {
-        let side = PACK_ICON_SIZE as usize;
-        (0..count)
-            .map(|i| PackInfo {
-                id: format!("file/pack{i:03}"),
-                title: Text::literal(format!("pack{i:03}")),
-                description: Text::literal(""),
-                description_style: Style::default(),
-                source: Source::BuiltIn,
-                compat: Compat::Compatible,
-                icon: Some(vec![i as u8; side * side * 4].into()),
-                required: false,
-                position: Position::Top,
-                fixed: false,
-            })
-            .collect()
-    }
-
-    /// One frame as `options_ui` draws it: the calls, then the icons bound. The icons drawn
-    /// (their texture keys before binding), the textures after, and the patches sent.
-    fn frame(screen: &PackScreen, atlas: &HudAtlas) -> (Vec<String>, Vec<String>, Vec<Patch>) {
-        let m = Measure(&atlas.font);
-        let mut draws = screen.draw(&m, (0, 0), 0, 0);
-        let drawn: Vec<String> = draws
-            .iter()
-            .filter_map(|d| match d {
-                Draw::Blit { texture, .. } if screen.icons.contains_key(texture) => {
-                    Some(texture.clone())
-                }
-                _ => None,
-            })
-            .collect();
-        let mut patches = Vec::new();
-        screen.bind_icons(&mut draws, atlas, &mut patches);
-        let bound = draws
-            .iter()
-            .filter_map(|d| match d {
-                Draw::Blit { texture, .. } if texture.contains("pack-icon") => {
-                    Some(texture.clone())
-                }
-                _ => None,
-            })
-            .collect();
-        (drawn, bound, patches)
-    }
-
-    /// Only the available list has packs: one row of 36 for each of `count` icons fits in a
-    /// window `height` high.
-    fn screen(m: &Measure, count: usize, height: i32) -> PackScreen {
-        PackScreen::new(
-            m,
-            tr("resourcePack.title"),
-            480,
-            height,
-            false,
-            packs(count),
-            &[],
-        )
-    }
-
-    /// Every frame sent every drawn icon again (a 128 by 128 RGBA copy each) into the same
-    /// atlas, which keeps what it is given: an icon is sent when it takes a slot, once.
-    #[test]
-    fn an_icon_is_sent_once_and_not_every_frame() {
-        let atlas = atlas();
-        let screen = screen(&Measure(&atlas.font), 5, 400);
-        let (drawn, bound, patches) = frame(&screen, &atlas);
-        assert_eq!((drawn.len(), bound.len(), patches.len()), (5, 5, 5));
-        for again in 0..3 {
-            let (_, rebound, resent) = frame(&screen, &atlas);
-            assert_eq!(rebound, bound, "frame {again}");
-            assert_eq!(resent.len(), 0, "frame {again}");
-        }
-    }
-
-    /// More icons drawn in one frame than there are slots: the first 64 get one, the rest keep
-    /// `unknown_pack`, and the next frame does not move them or send anything.
-    #[test]
-    fn past_the_slots_in_one_frame_the_rest_keep_unknown_pack() {
-        let atlas = atlas();
-        let screen = screen(&Measure(&atlas.font), PACK_ICON_SLOTS + 6, 4000);
-        let (drawn, bound, patches) = frame(&screen, &atlas);
-        assert_eq!(
-            drawn.len(),
-            PACK_ICON_SLOTS + 6,
-            "the window shows every row"
-        );
-        assert_eq!(
-            (bound.len(), patches.len()),
-            (PACK_ICON_SLOTS, PACK_ICON_SLOTS)
-        );
-        let (_, rebound, resent) = frame(&screen, &atlas);
-        assert_eq!((rebound, resent.len()), (bound, 0));
-    }
-
-    /// Scrolling through more packs than slots: every icon drawn gets a slot, each one is sent
-    /// once on the way down, and a frame that draws what the last one drew sends nothing.
-    #[test]
-    fn scrolling_sends_only_the_icons_that_come_into_view() {
-        let atlas = atlas();
-        let m = Measure(&atlas.font);
-        let mut screen = screen(&m, 70, 330);
-        let mut seen = std::collections::HashSet::new();
-        let mut sent = 0;
-        // 150 wheel steps of 18 are more than the 2520 high list.
-        for step in 0..150 {
-            let (drawn, bound, patches) = frame(&screen, &atlas);
-            assert_eq!(bound.len(), drawn.len(), "step {step}: none falls back");
-            let new = drawn.iter().filter(|t| seen.insert((*t).clone())).count();
-            assert_eq!(patches.len(), new, "step {step}");
-            sent += patches.len();
-            assert_eq!(frame(&screen, &atlas).2.len(), 0, "step {step}: same view");
-            screen.scroll(100.0, 200.0, -1.0);
-        }
-        assert_eq!((seen.len(), sent), (70, 70));
-    }
-
-    /// The slot of the icon drawn longest ago is the one taken, and the icon that left it is
-    /// sent again when it comes back.
-    #[test]
-    fn the_icon_drawn_longest_ago_gives_up_its_slot() {
-        let icons: Vec<Arc<[u8]>> = packs(PACK_ICON_SLOTS + 1)
-            .into_iter()
-            .map(|p| p.icon.unwrap())
-            .collect();
-        let mut slots = IconSlots::default();
-        let key = |i: usize| format!("k{i}");
-        slots.begin(&atlas());
-        for i in 0..PACK_ICON_SLOTS {
-            assert_eq!(slots.slot_for(&key(i), &icons[i]), Some((i, true)));
-        }
-        // The next frame draws icon 0 first, then a new one: slot 1, the oldest left, is taken.
-        slots.frame += 1;
-        assert_eq!(slots.slot_for(&key(0), &icons[0]), Some((0, false)));
-        assert_eq!(
-            slots.slot_for("new", &icons[PACK_ICON_SLOTS]),
-            Some((1, true))
-        );
-        // Icon 1 comes back: it is sent again, into the slot of the next oldest.
-        assert_eq!(slots.slot_for(&key(1), &icons[1]), Some((2, true)));
-    }
-
-    /// New pixels under the same key take the same slot and are sent; a new atlas holds none
-    /// of the icons, so all are sent again.
-    #[test]
-    fn changed_pixels_and_a_new_atlas_send_again() {
-        let atlas = atlas();
-        let mut screen = screen(&Measure(&atlas.font), 3, 400);
-        let (_, bound, patches) = frame(&screen, &atlas);
-        assert_eq!(patches.len(), 3);
-        let key = icon_texture("file/pack001");
-        screen
-            .icons
-            .insert(key, vec![200; patches[1].rgba.len()].into());
-        let (_, rebound, resent) = frame(&screen, &atlas);
-        assert_eq!(rebound, bound);
-        assert_eq!(resent.len(), 1);
-        assert_eq!((resent[0].x, resent[0].y), (patches[1].x, patches[1].y));
-        assert_eq!(resent[0].rgba[0], 200);
-        let other = self::atlas();
-        assert_ne!(other.revision, atlas.revision);
-        assert_eq!(frame(&screen, &other).2.len(), 3);
     }
 }

@@ -3,6 +3,7 @@
 //! and High Contrast packs, `pack.mcmeta` metadata and format compatibility,
 //! and an overlay resource root that layers the enabled packs over the
 //! vanilla resources (later packs win), so every loader sees one tree.
+pub mod bedrock;
 mod cache;
 use crate::text::Style;
 use crate::{text::Text, zip::Zip};
@@ -34,11 +35,8 @@ pub struct Pack {
     pub description_style: Style,
     pub compatible: bool,
     pub compatibility: crate::pack_screen::Compat,
-    /// Overlay directories active for this game version, in `pack.mcmeta` order: also those a
-    /// Polytone `polytone_condition` turns on.
+    /// Overlay directories active for this game version, in `pack.mcmeta` order.
     pub overlays: Vec<String>,
-    /// The values of the pack's Polytone config entries.
-    pub polytone_configs: horizon_polytone::pack::Configs,
     /// `filter.block` entries (namespace and path patterns) hiding resources
     /// of the packs below this one.
     pub filter: Vec<Filter>,
@@ -419,12 +417,12 @@ fn overlay_applies(entry: &serde_json::Value) -> bool {
         _ => false,
     }
 }
-fn overlays_of(meta: &serde_json::Value, configs: &horizon_polytone::pack::Configs) -> Vec<String> {
+fn overlays_of(meta: &serde_json::Value) -> Vec<String> {
     meta["overlays"]["entries"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|e| horizon_polytone::pack::overlay_active(e, configs, overlay_applies(e)))
+        .filter(|e| overlay_applies(e))
         .filter_map(|e| e["directory"].as_str().map(str::to_owned))
         // OverlayMetadataSection's DIR_VALIDATOR: one folder of the pack, `[-_a-zA-Z0-9.]+`.
         .filter(|d| {
@@ -465,148 +463,11 @@ fn read_meta(source: &Source) -> Option<serde_json::Value> {
 /// The first JSON value of a `pack.mcmeta`: what follows it is ignored, as some packs sign the
 /// file with a comment after the closing brace. Gson reads past a UTF-8 byte order mark;
 /// serde_json rejects it.
-pub(crate) fn parse_meta(bytes: &[u8]) -> Option<serde_json::Value> {
-    first_json(bytes)
-}
-
-/// Reads the first JSON value from resource metadata, matching Gson's
-/// `JsonReader` (which ignores a trailing signature or comment). Resource
-/// packs commonly append such text to texture metadata as well as pack.mcmeta.
-pub(crate) fn first_json(bytes: &[u8]) -> Option<serde_json::Value> {
+fn parse_meta(bytes: &[u8]) -> Option<serde_json::Value> {
     serde_json::Deserializer::from_slice(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes))
         .into_iter()
         .next()?
         .ok()
-}
-/// A pack's Polytone config entries (`assets/<namespace>/polytone/config_entries/<name>.json`,
-/// in the pack's base, not its overlays) at their default values.
-pub fn polytone_configs(source: &Source) -> horizon_polytone::pack::Configs {
-    let mut configs = horizon_polytone::pack::Configs::default();
-    let id_of = |name: &str| -> Option<String> {
-        let rest = name.strip_prefix("assets/")?;
-        let (namespace, rest) = rest.split_once('/')?;
-        let entry = rest
-            .strip_prefix("polytone/config_entries/")?
-            .strip_suffix(".json")?;
-        Some(format!("{namespace}:{entry}"))
-    };
-    match source {
-        Source::Dir(d) => {
-            let Ok(namespaces) = fs::read_dir(d.join("assets")) else {
-                return configs;
-            };
-            for namespace in namespaces.flatten() {
-                let folder = namespace.path().join("polytone/config_entries");
-                for file in fs::read_dir(&folder).into_iter().flatten().flatten() {
-                    let name = format!(
-                        "assets/{}/polytone/config_entries/{}",
-                        namespace.file_name().to_string_lossy(),
-                        file.file_name().to_string_lossy()
-                    );
-                    if let (Some(id), Ok(bytes)) = (id_of(&name), fs::read(file.path()))
-                        && let Ok(json) = serde_json::from_slice(&bytes)
-                    {
-                        configs.add_entry(id, &json);
-                    }
-                }
-            }
-        }
-        Source::Zip(z) => {
-            let Ok(zip) = Zip::open(z) else {
-                return configs;
-            };
-            let names: Vec<String> = zip
-                .names()
-                .filter(|n| id_of(n).is_some())
-                .map(str::to_owned)
-                .collect();
-            for name in names {
-                if let (Some(id), Ok(bytes)) = (id_of(&name), zip.read(&name))
-                    && let Ok(json) = serde_json::from_slice(&bytes)
-                {
-                    configs.add_entry(id, &json);
-                }
-            }
-        }
-    }
-    for (id, value) in polytone_choices() {
-        if configs.entries().contains_key(&id) {
-            configs.set(&id, value);
-        }
-    }
-    configs
-}
-
-/// A pack's Polytone config entries and one's value, for the game's Pack Options.
-pub use horizon_polytone::pack::{ConfigValue, Configs};
-
-/// The player's Polytone config choices (#11486): what they changed from the packs' defaults,
-/// by entry id, for every pack. `polytone_configs` lays them over each pack's defaults.
-static POLYTONE_CHOICES: std::sync::RwLock<BTreeMap<String, horizon_polytone::pack::ConfigValue>> =
-    std::sync::RwLock::new(BTreeMap::new());
-
-pub fn polytone_choices() -> BTreeMap<String, horizon_polytone::pack::ConfigValue> {
-    POLYTONE_CHOICES
-        .read()
-        .map(|c| c.clone())
-        .unwrap_or_default()
-}
-
-/// Replaces the player's Polytone config choices (packs read them when they load again).
-pub fn set_polytone_choices(choices: BTreeMap<String, horizon_polytone::pack::ConfigValue>) {
-    if let Ok(mut c) = POLYTONE_CHOICES.write() {
-        *c = choices;
-    }
-}
-
-/// Where the choices are kept: `polytone-configs.json` beside `options.txt`.
-pub fn polytone_choices_file() -> std::path::PathBuf {
-    crate::logging::player_dir().join("polytone-configs.json")
-}
-
-/// Reads the choices from `path` (none when it is missing or broken).
-pub fn load_polytone_choices(path: &Path) -> BTreeMap<String, horizon_polytone::pack::ConfigValue> {
-    use horizon_polytone::pack::ConfigValue;
-    let Ok(bytes) = fs::read(path) else {
-        return BTreeMap::new();
-    };
-    let Ok(serde_json::Value::Object(map)) = serde_json::from_slice(&bytes) else {
-        log::warn!("{}: not a JSON object", path.display());
-        return BTreeMap::new();
-    };
-    map.into_iter()
-        .filter_map(|(id, v)| {
-            let value = match v {
-                serde_json::Value::Number(n) => ConfigValue::Number(n.as_f64()?),
-                serde_json::Value::String(s) => ConfigValue::Text(s),
-                serde_json::Value::Bool(b) => ConfigValue::Bool(b),
-                _ => return None,
-            };
-            Some((id, value))
-        })
-        .collect()
-}
-
-/// Writes the choices to `path`.
-pub fn save_polytone_choices(
-    path: &Path,
-    choices: &BTreeMap<String, horizon_polytone::pack::ConfigValue>,
-) -> std::io::Result<()> {
-    use horizon_polytone::pack::ConfigValue;
-    let map: serde_json::Map<String, serde_json::Value> = choices
-        .iter()
-        .map(|(id, v)| {
-            let json = match v {
-                ConfigValue::Number(n) => serde_json::json!(n),
-                ConfigValue::Text(s) => serde_json::json!(s),
-                ConfigValue::Bool(b) => serde_json::json!(b),
-            };
-            (id.clone(), json)
-        })
-        .collect();
-    let text = serde_json::to_string_pretty(&serde_json::Value::Object(map))
-        .map_err(std::io::Error::other)?;
-    fs::write(path, text)
 }
 fn pack(id: String, title: Text, source: Source) -> Option<Pack> {
     pack_for(id, title, source, RESOURCE_FORMAT)
@@ -614,7 +475,6 @@ fn pack(id: String, title: Text, source: Source) -> Option<Pack> {
 /// A pack whose compatibility is against `format`.
 fn pack_for(id: String, title: Text, source: Source, format: (i64, i64)) -> Option<Pack> {
     let meta = read_meta(&source)?;
-    let polytone_configs = polytone_configs(&source);
     let (raw_description, description_style) = component_root(&meta["pack"]["description"]);
     Some(Pack {
         id,
@@ -624,8 +484,7 @@ fn pack_for(id: String, title: Text, source: Source, format: (i64, i64)) -> Opti
         description_style,
         compatible: compatible(&meta),
         compatibility: compatibility_for(&meta, format),
-        overlays: overlays_of(&meta, &polytone_configs),
-        polytone_configs,
+        overlays: overlays_of(&meta),
         filter: filter_of(&meta),
         source,
     })
@@ -648,9 +507,56 @@ pub fn discover(resources: &Path, packs_dir: &Path) -> Vec<Pack> {
     out.extend(folder(packs_dir, RESOURCE_FORMAT));
     out
 }
+/// The id prefix of the packs in `addons/`: they sit in the same `resourcePacks` list as the
+/// `file/` ones, above them, and the Addons screen lists only these.
+pub const ADDON_PREFIX: &str = "addon/";
+
+/// Whether `id` names a pack of the `addons/` folder.
+pub fn is_addon_id(id: &str) -> bool {
+    id.starts_with(ADDON_PREFIX)
+}
+
+/// The packs of the `addons/` folder (Bedrock add-ons first, Java packs too), as `addon/<name>`.
+pub fn addons(dir: &Path) -> Vec<Pack> {
+    let mut out = folder_with(dir, RESOURCE_FORMAT, true);
+    for p in &mut out {
+        if let Some(name) = p.id.strip_prefix("file/") {
+            p.id = format!("{ADDON_PREFIX}{name}");
+        }
+    }
+    out
+}
+
+/// [`discover`] and the `addons/` folder's packs.
+pub fn discover_all(resources: &Path, packs_dir: &Path, addons_dir: &Path) -> Vec<Pack> {
+    let mut out = discover(resources, packs_dir);
+    out.extend(addons(addons_dir));
+    out
+}
+
+/// A `resourcePacks` list after one of the two screens committed `chosen`: the screen's own
+/// kind is replaced and the other kind stays; addons go above the resource packs.
+pub fn merge_selection(current: &[String], chosen: Vec<String>, addons_screen: bool) -> Vec<String> {
+    let kept = current
+        .iter()
+        .filter(|id| is_addon_id(id) != addons_screen)
+        .cloned();
+    let (below, above): (Vec<String>, Vec<String>) = if addons_screen {
+        (kept.collect(), chosen)
+    } else {
+        (chosen, kept.collect())
+    };
+    below.into_iter().chain(above).collect()
+}
+
 /// The packs (folders and zips) in `dir`, by name, as `FolderRepositorySource`
 /// finds them; their compatibility is against `format`.
 pub fn folder(dir: &Path, format: (i64, i64)) -> Vec<Pack> {
+    folder_with(dir, format, false)
+}
+/// [`folder`], with Bedrock's packs (`.mcpack`, `.mcaddon`, a folder or zip with a
+/// `manifest.json`) listed too when `bedrock`: only the `addons/` folder takes them.
+pub fn folder_with(dir: &Path, format: (i64, i64), bedrock: bool) -> Vec<Pack> {
     let mut user: Vec<Pack> = fs::read_dir(dir)
         .into_iter()
         .flatten()
@@ -659,17 +565,43 @@ pub fn folder(dir: &Path, format: (i64, i64)) -> Vec<Pack> {
             let path = e.path();
             let name = e.file_name().to_string_lossy().into_owned();
             let source = if path.is_dir() {
-                Source::Dir(path)
+                Source::Dir(path.clone())
             } else if name.ends_with(".zip") {
-                Source::Zip(path)
+                Source::Zip(path.clone())
+            } else if bedrock::is_bedrock_file(&name) {
+                // `.mcpack` and `.mcaddon` are Bedrock's: converted below.
+                return bedrock.then(|| bedrock_pack(dir, &path, name, format))?;
             } else {
                 return None;
             };
-            pack_for(format!("file/{name}"), Text::literal(name), source, format)
+            pack_for(
+                format!("file/{name}"),
+                Text::literal(name.clone()),
+                source,
+                format,
+            )
+            .or_else(|| bedrock.then(|| bedrock_pack(dir, &path, name, format))?)
         })
         .collect();
     user.sort_by(|a, b| a.id.cmp(&b.id));
     user
+}
+/// A Bedrock resource pack (a folder or zip with a `manifest.json` and no `pack.mcmeta`, a
+/// `.mcpack` or a `.mcaddon`) as the Java pack [`bedrock::convert`] makes of it, kept in
+/// `.horizon-cache/bedrock/` beside `dir` and made again only when the file changes.
+fn bedrock_pack(dir: &Path, path: &Path, name: String, format: (i64, i64)) -> Option<Pack> {
+    let cache = dir
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(".horizon-cache/bedrock");
+    let subpack = bedrock::chosen_subpack(dir, &name);
+    let converted = bedrock::convert(path, &cache, format, subpack.as_deref())?;
+    pack_for(
+        format!("file/{name}"),
+        Text::literal(name),
+        Source::Dir(converted),
+        format,
+    )
 }
 /// A file a pack provides: its path (folder packs) and its name inside the pack.
 type Provided = (Option<PathBuf>, String);
@@ -857,18 +789,6 @@ fn build_overlay_uncached(
                     .and_then(Option::as_ref)
                     .and_then(|z| z.read(inner).ok()),
             };
-            // Polytone: a pack's sound entries whose `polytone_condition` doesn't hold.
-            let bytes = match (bytes, merge_kind(name)) {
-                (Some(b), Some(Merge::Sounds)) => Some(
-                    packs
-                        .get(*owner)
-                        .and_then(|p| {
-                            horizon_polytone::pack::sounds_without_unmet(&b, &p.polytone_configs)
-                        })
-                        .unwrap_or(b),
-                ),
-                (b, _) => b,
-            };
             layers.extend(bytes);
         }
         if let Some(kind) = merge_kind(name)
@@ -991,55 +911,63 @@ fn build_overlay_uncached(
         dependencies,
         &mut extract,
     )?;
-    // What the zips may unpack to, all threads together: a server's pack is a download the
-    // player only accepts, and a gigabyte of zeros deflates to a megabyte, so without it a pack
-    // at the download limit wrote hundreds of gigabytes here. Vanilla never unpacks a pack.
-    let budget = std::sync::atomic::AtomicU64::new(unpack_budget(packs));
+    write_bedrock_order(&files, out)?;
     // Inflating and writing a big pack's files one by one was most of a cold build; its
     // folders all exist by now.
-    let extracted: io::Result<()> = crate::par::par_map(&extract, |(owner, inner, target)| {
+    crate::par::par_map(&extract, |(owner, inner, target)| {
         let Some(Some(z)) = zips.get(*owner) else {
             return Ok(());
         };
-        let copied = fs::File::create(target).and_then(|file| {
-            let mut file = io::BufWriter::new(file);
-            z.copy_to(inner, &mut file, &budget)?;
-            io::Write::flush(&mut file)
-        });
-        match copied {
-            Ok(()) => Ok(()),
-            // Past the budget the build fails, and the reload drops the server packs.
-            Err(e) if e.kind() == io::ErrorKind::FileTooLarge => Err(e),
-            // One unreadable entry costs that file, not the pack: an error here
-            // failed the build and the reload dropped every server pack in the stack.
+        // One unreadable entry costs that file, not the pack: an error here
+        // failed the build and the reload dropped every server pack in the stack.
+        match z.read(inner) {
+            Ok(bytes) => fs::write(target, bytes),
             Err(e) => {
                 log::warn!("Horizon: skipping unreadable pack entry {inner}: {e}");
-                let _ = fs::remove_file(target);
                 Ok(())
             }
         }
     })
     .into_iter()
-    .collect();
-    if extracted.is_err() {
-        // What was unpacked before the budget ran out goes too, not only the marker.
-        let _ = fs::remove_dir_all(out);
-    }
-    extracted
+    .collect()
 }
-/// The most the zip packs in `packs` may unpack to in one overlay: 16 times their size on disk
-/// (real packs are mostly PNGs and JSON, a few times smaller zipped at most), at least 64 MiB
-/// for a small pack of text, and never past 8 GiB.
-fn unpack_budget(packs: &[Pack]) -> u64 {
-    packs
-        .iter()
-        .filter_map(|p| match &p.source {
-            Source::Zip(z) => fs::metadata(z).ok().map(|m| m.len()),
-            Source::Dir(_) => None,
-        })
-        .sum::<u64>()
-        .saturating_mul(16)
-        .clamp(64 << 20, 8 << 30)
+/// `assets/horizon_bedrock/order.txt`: the converted Bedrock packs' folders, the lowest pack of
+/// the stack first, which is how [`horizon_bedrock::bundle::Bundle`] lets a pack above another
+/// win an identifier both define (the files themselves never collide: each pack has a folder).
+fn write_bedrock_order(files: &BTreeMap<String, (usize, Provided)>, out: &Path) -> io::Result<()> {
+    const DATA: [&str; 9] = [
+        "entity",
+        "attachables",
+        "animations",
+        "animation_controllers",
+        "render_controllers",
+        "models",
+        "particles",
+        "materials",
+        "sounds",
+    ];
+    let prefix = "assets/horizon_bedrock/";
+    let mut folders: BTreeMap<&str, usize> = BTreeMap::new();
+    for (name, (owner, _)) in files.range(prefix.to_owned()..) {
+        let Some(rest) = name.strip_prefix(prefix) else {
+            break;
+        };
+        if let Some((folder, _)) = rest.split_once('/')
+            && !DATA.contains(&folder)
+        {
+            let slot = folders.entry(folder).or_insert(*owner);
+            *slot = (*slot).max(*owner);
+        }
+    }
+    if folders.is_empty() {
+        return Ok(());
+    }
+    let mut order: Vec<(&str, usize)> = folders.into_iter().collect();
+    order.sort_by_key(|(folder, owner)| (*owner, *folder));
+    let text: String = order.iter().map(|(f, _)| format!("{f}\n")).collect();
+    let dir = out.join("assets/horizon_bedrock");
+    fs::create_dir_all(&dir)?;
+    fs::write(dir.join("order.txt"), text)
 }
 /// Files vanilla loads from every pack in turn (`getResourceStack`) rather
 /// than from the top pack only.
@@ -1084,24 +1012,9 @@ fn merge(kind: Merge, layers: &[Vec<u8>]) -> Option<Vec<u8>> {
         .iter()
         // SoundManager skips a sounds.json Gson rejects, whole.
         .filter(|b| kind != Merge::Sounds || crate::sound_events::is_valid_file(b))
-        .filter_map(|b| {
-            match serde_json::from_slice(b) {
-                Ok(Value::Object(m)) => Some(m),
-                // `Language.loadFromJson` reads with Gson's lenient reader, so
-                // a lang file with `#` comments still counts; a file that
-                // strict JSON accepts keeps its bytes as they are.
-                _ if kind == Merge::Lang => {
-                    let mut strings = std::collections::HashMap::new();
-                    horizon_client_core::lang::read_lang_file(b, &mut strings);
-                    Some(
-                        strings
-                            .into_iter()
-                            .map(|(k, v)| (k, Value::String(v)))
-                            .collect(),
-                    )
-                }
-                _ => None,
-            }
+        .filter_map(|b| match serde_json::from_slice(b) {
+            Ok(Value::Object(m)) => Some(m),
+            _ => None,
         })
         .collect();
     let list = |key: &str, layers: &mut dyn Iterator<Item = &Map<String, Value>>| {
@@ -1185,10 +1098,7 @@ pub fn resource_root(vanilla: &Path, packs: &[Pack], cache: &Path) -> io::Result
         (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3)
     });
     let out = cache.join(format!("{hash:016x}"));
-    cache::hold(&out)?;
     build_overlay(vanilla, packs, &out)?;
-    // Old selections' overlays would otherwise stay for good, each a whole unpacked copy.
-    cache::prune(cache);
     Ok(out)
 }
 
@@ -1396,6 +1306,61 @@ impl SelectionModel {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn each_screen_replaces_its_own_kind_and_addons_stay_above() {
+        let list = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let current = list(&["file/a.zip", "addon/x", "file/b.zip", "addon/y"]);
+        assert_eq!(
+            super::merge_selection(&current, list(&["file/c.zip"]), false),
+            list(&["file/c.zip", "addon/x", "addon/y"])
+        );
+        assert_eq!(
+            super::merge_selection(&current, list(&["addon/z"]), true),
+            list(&["file/a.zip", "file/b.zip", "addon/z"])
+        );
+    }
+
+    #[test]
+    fn resourcepacks_ignore_bedrock_files() {
+        let dir = std::env::temp_dir().join(format!("horizon-nobedrock-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        for name in ["a.mcpack", "b.mcaddon"] {
+            fs::write(dir.join(name), b"x").unwrap();
+        }
+        let none = super::folder(&dir, RESOURCE_FORMAT);
+        let _ = fs::remove_dir_all(&dir);
+        assert!(none.is_empty());
+    }
+
+    #[test]
+    fn addon_folders_list_as_addon_ids() {
+        let dir = std::env::temp_dir().join(format!("horizon-addons-{}", std::process::id()));
+        let pack = dir.join("Look");
+        fs::create_dir_all(&pack).unwrap();
+        fs::write(pack.join("pack.mcmeta"), br#"{"pack":{"pack_format":1,"description":"x"}}"#)
+            .unwrap();
+        let found = super::addons(&dir);
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, "addon/Look");
+        assert!(super::is_addon_id(&found[0].id));
+    }
+    #[test]
+    fn converted_bedrock_packs_are_listed_lowest_first() {
+        let out = std::env::temp_dir().join(format!("horizon-bedrock-order-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&out);
+        let provided: Provided = (None, String::new());
+        let mut files = BTreeMap::new();
+        files.insert("assets/horizon_bedrock/top/materials/entity.material".to_owned(), (2, provided.clone()));
+        files.insert("assets/horizon_bedrock/low/materials/entity.material".to_owned(), (0, provided.clone()));
+        files.insert("assets/horizon_bedrock/low/entity/a.json".to_owned(), (0, provided.clone()));
+        files.insert("assets/horizon_bedrock/entity/legacy.json".to_owned(), (1, provided));
+        write_bedrock_order(&files, &out).unwrap();
+        let text = fs::read_to_string(out.join("assets/horizon_bedrock/order.txt")).unwrap();
+        assert_eq!(text, "low\ntop\n");
+        let _ = fs::remove_dir_all(&out);
+    }
+
     use super::*;
 
     /// `DownloadedPackSource.DOWNLOADED_PACK_SELECTION`: the pack is selected,
@@ -1612,49 +1577,6 @@ mod tests {
         );
     }
     #[test]
-    fn a_sound_entry_whose_polytone_condition_fails_is_left_out() {
-        let base =
-            std::env::temp_dir().join(format!("horizon-packs-sound-cond-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&base);
-        let (vanilla, dir, out) = (base.join("vanilla"), base.join("pack"), base.join("out"));
-        fs::create_dir_all(vanilla.join("assets/minecraft")).unwrap();
-        fs::write(
-            vanilla.join("assets/minecraft/sounds.json"),
-            r#"{"block.anvil.land":{"sounds":["vanilla"]}}"#,
-        )
-        .unwrap();
-        let configs = dir.join("assets/mypack/polytone/config_entries");
-        fs::create_dir_all(&configs).unwrap();
-        fs::create_dir_all(dir.join("assets/minecraft")).unwrap();
-        fs::write(configs.join("quiet.json"), r#"{"default_value": "OFF"}"#).unwrap();
-        fs::write(
-            dir.join("pack.mcmeta"),
-            r#"{"pack":{"description":"p","pack_format":97}}"#,
-        )
-        .unwrap();
-        fs::write(
-            dir.join("assets/minecraft/sounds.json"),
-            r#"{"block.anvil.land":{"replace":true,"polytone_condition":"config('mypack:quiet') == 'ON'","sounds":["soft"]},
-                "block.anvil.use":{"sounds":["kept"]}}"#,
-        )
-        .unwrap();
-        let pack = pack("file/p".into(), Text::literal("p"), Source::Dir(dir)).unwrap();
-        build_overlay(&vanilla, &[pack], &out).unwrap();
-        let merged: serde_json::Value =
-            serde_json::from_slice(&fs::read(out.join("assets/minecraft/sounds.json")).unwrap())
-                .unwrap();
-        // The condition is false: the pack's entry doesn't replace vanilla's.
-        assert_eq!(
-            merged["block.anvil.land"]["sounds"],
-            serde_json::json!(["vanilla"])
-        );
-        assert_eq!(
-            merged["block.anvil.use"]["sounds"],
-            serde_json::json!(["kept"])
-        );
-        let _ = fs::remove_dir_all(base);
-    }
-    #[test]
     fn stacked_resources_merge_like_vanilla() {
         let json = |v: &str| v.as_bytes().to_vec();
         let parse = |b: Vec<u8>| serde_json::from_slice::<serde_json::Value>(&b).unwrap();
@@ -1669,18 +1591,6 @@ mod tests {
         assert_eq!(
             parse(lang.unwrap()),
             serde_json::json!({"a":"vanilla a","b":"pack b"})
-        );
-        // A layer with `#` comments is read leniently, not dropped.
-        let lenient = merge(
-            Merge::Lang,
-            &[
-                json(r#"{"a":"vanilla a"}"#),
-                json("# a pack comment\n{\"b\":\"pack b\", # trailing\n\"a\":\"pack a\"}"),
-            ],
-        );
-        assert_eq!(
-            parse(lenient.unwrap()),
-            serde_json::json!({"a":"pack a","b":"pack b"})
         );
         // SoundManager: sounds add up; `replace` starts the event over.
         let sounds = merge(
@@ -1967,77 +1877,6 @@ mod tests {
         let _ = fs::remove_dir_all(base);
     }
     #[test]
-    fn a_pack_that_unpacks_past_its_budget_fails_and_leaves_nothing() {
-        use std::io::Write as _;
-        let base = std::env::temp_dir().join(format!("horizon-pack-bomb-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&base);
-        let vanilla = base.join("vanilla");
-        fs::create_dir_all(vanilla.join("assets/minecraft/textures/block")).unwrap();
-        fs::write(
-            vanilla.join("assets/minecraft/textures/block/stone.png"),
-            b"vanilla",
-        )
-        .unwrap();
-        fs::create_dir_all(base.join("packs")).unwrap();
-        let pack = |name: &str, files: &[(&str, usize)]| {
-            let path = base.join("packs").join(name);
-            let mut zip = zip::ZipWriter::new(fs::File::create(&path).unwrap());
-            let deflated = zip::write::SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Deflated);
-            zip.start_file("pack.mcmeta", deflated).unwrap();
-            zip.write_all(br#"{"pack":{"description":"d","pack_format":97}}"#)
-                .unwrap();
-            let zeros = vec![0u8; 1 << 20];
-            for (file, mib) in files {
-                zip.start_file(*file, deflated).unwrap();
-                for _ in 0..*mib {
-                    zip.write_all(&zeros).unwrap();
-                }
-            }
-            zip.finish().unwrap();
-            fs::metadata(&path).unwrap().len()
-        };
-        // Four 24 MiB files of zeros: well under the per-file limit, 96 MiB in all from a zip of
-        // a few hundred KiB, past the 64 MiB a small pack may unpack to.
-        let size = pack(
-            "bomb.zip",
-            &[
-                ("assets/minecraft/textures/block/a.png", 24),
-                ("assets/minecraft/textures/block/b.png", 24),
-                ("assets/minecraft/textures/block/c.png", 24),
-                ("assets/minecraft/textures/block/d.png", 24),
-            ],
-        );
-        assert!(size < 1 << 20, "the bomb is small: {size} bytes");
-        let packs = discover(&vanilla, &base.join("packs"));
-        assert_eq!(packs.len(), 1);
-        let out = base.join("overlay");
-        let error = build_overlay(&vanilla, &packs, &out).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::FileTooLarge, "{error}");
-        assert!(
-            !out.exists(),
-            "what was unpacked before the budget ran out stays"
-        );
-        // The same files within the budget unpack whole.
-        fs::remove_file(base.join("packs/bomb.zip")).unwrap();
-        pack(
-            "fine.zip",
-            &[
-                ("assets/minecraft/textures/block/a.png", 24),
-                ("assets/minecraft/textures/block/b.png", 24),
-            ],
-        );
-        let packs = discover(&vanilla, &base.join("packs"));
-        build_overlay(&vanilla, &packs, &out).unwrap();
-        assert_eq!(
-            fs::metadata(out.join("assets/minecraft/textures/block/b.png"))
-                .unwrap()
-                .len(),
-            24 << 20
-        );
-        let _ = fs::remove_dir_all(&base);
-    }
-    #[test]
     fn zip_entries_never_leave_the_overlay() {
         use std::io::Write as _;
         let base = std::env::temp_dir().join(format!("horizon-pack-escape-{}", std::process::id()));
@@ -2127,36 +1966,6 @@ mod tests {
         let _ = fs::remove_dir_all(base);
     }
     #[test]
-    fn polytone_conditions_turn_overlays_on_from_the_packs_configs() {
-        let dir =
-            std::env::temp_dir().join(format!("horizon-packs-polytone-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        let configs = dir.join("assets/mypack/polytone/config_entries");
-        fs::create_dir_all(&configs).unwrap();
-        fs::write(configs.join("fog.json"), r#"{"default_value": "ON"}"#).unwrap();
-        fs::write(
-            configs.join("birds.json"),
-            r#"{"default_value": 0, "max": 300}"#,
-        )
-        .unwrap();
-        fs::write(
-            dir.join("pack.mcmeta"),
-            r#"{"pack":{"description":"p","pack_format":97},"overlays":{"entries":[
-                {"directory":"opt_fog","formats":[0,0],"polytone_condition":"config('mypack:fog') == 'ON'"},
-                {"directory":"opt_birds","formats":[0,0],"polytone_condition":"config('mypack:birds') > 0"},
-                {"directory":"opt_plain","formats":[0,0]}]}}"#,
-        )
-        .unwrap();
-        let pack = pack(
-            "file/p".into(),
-            Text::literal("p"),
-            Source::Dir(dir.clone()),
-        )
-        .unwrap();
-        assert_eq!(pack.overlays, ["opt_fog"]);
-        let _ = fs::remove_dir_all(dir);
-    }
-    #[test]
     fn overlays_and_filters() {
         let v = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
         let meta = v(r#"{"overlays":{"entries":[
@@ -2164,7 +1973,7 @@ mod tests {
             {"formats":{"min_inclusive":97,"max_inclusive":97},"directory":"new"},
             {"min_format":97,"max_format":[97,5],"directory":"also"},
             {"formats":50,"directory":"no"}]}}"#);
-        assert_eq!(overlays_of(&meta, &Default::default()), ["new", "also"]);
+        assert_eq!(overlays_of(&meta), ["new", "also"]);
         // Only one plain folder of the pack, as vanilla's DIR_VALIDATOR has it.
         let meta = v(r#"{"overlays":{"entries":[
             {"formats":97,"directory":".."},
@@ -2173,7 +1982,7 @@ mod tests {
             {"formats":97,"directory":"a/b"},
             {"formats":97,"directory":"C:"},
             {"formats":97,"directory":"ok_1.21-x"}]}}"#);
-        assert_eq!(overlays_of(&meta, &Default::default()), ["ok_1.21-x"]);
+        assert_eq!(overlays_of(&meta), ["ok_1.21-x"]);
         let base = std::env::temp_dir().join(format!("horizon-packs-ov-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         let vanilla = base.join("vanilla");

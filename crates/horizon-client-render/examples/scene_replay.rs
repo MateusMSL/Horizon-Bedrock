@@ -190,9 +190,8 @@ fn replay(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
     }
     let one = [255u8; 4];
     let zero = [0u8; 4];
-    let pixels = render.pixels.get();
     let prepared = PreparedTextures::new(
-        &pixels,
+        &render.pixels,
         render.sprite_size,
         render.texture_layers,
         &render.sprite_mips,
@@ -207,7 +206,7 @@ fn replay(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
     let mut renderer = pollster::block_on(Renderer::new(
         window,
         true,
-        &pixels,
+        &render.pixels,
         render.sprite_size,
         render.sprite_minimum_size,
         render.texture_layers,
@@ -223,13 +222,8 @@ fn replay(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         settings.graphics_api(),
         settings.translucent_batching,
         false,
-        // HDR off, as the replays draw.
-        &horizon_client_render::graphics::Graphics::default(),
-        Default::default(),
-        Default::default(),
+        false,
     ))?;
-    drop(pixels);
-    render.pixels.pack();
     let state = &scene.renderer;
     let [width, height] = o.size.unwrap_or(state.size);
     renderer.resize(width, height);
@@ -246,7 +240,6 @@ fn replay(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         settings.fxaa,
         settings.taa,
         settings.upscale,
-        0.85,
     );
     let mut notes = Vec::new();
     let mut note = |what: &str, result: horizon_client_render::Result<()>| {
@@ -386,7 +379,6 @@ fn replay(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
                 path: path.clone(),
                 size: None,
                 scaled: false,
-                background: false,
             });
             for _ in 0..32 {
                 draw(&mut renderer)?;
@@ -653,7 +645,6 @@ fn remesh(
                         nether_shading: false,
                         shader_pack_lighting: false,
                         separate_ao: false,
-                        shader_pack: false,
                         assets,
                         render,
                         tables: &tables,
@@ -663,7 +654,6 @@ fn remesh(
                         blend_radius,
                         smooth_lighting,
                         cutout_leaves,
-                        opaque_ice: false,
                         translucent_layers: &[],
                         leaf_culling,
                     };

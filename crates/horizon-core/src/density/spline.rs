@@ -289,9 +289,6 @@ impl SplineSampler {
     }
 }
 impl DensitySampler for SplineSampler {
-    fn pointwise_inputs(&self) -> Option<Vec<&Arc<dyn DensitySampler>>> {
-        Some(self.coordinates.iter().collect())
-    }
     fn sample_value(
         &self,
         context: &mut SamplerContext,

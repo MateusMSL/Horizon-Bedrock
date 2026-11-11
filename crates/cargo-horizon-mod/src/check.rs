@@ -90,11 +90,10 @@ impl Report {
 /// The kind a file's extension says.
 pub fn kind_of(path: &Path) -> Option<Kind> {
     match path.extension()?.to_str()? {
-        "hmod" if horizon_mods::index::native::holds(path) => Some(Kind::NativeMod),
         "hmod" => Some(Kind::Mod),
         "hnmod" => Some(Kind::NativeMod),
         "hpack" => Some(Kind::Modpack),
-        "zip" => Some(horizon_mods::index::zip_kind(path)),
+        "zip" => Some(Kind::ResourcePack),
         "hshader" => Some(Kind::Shader),
         _ => None,
     }

@@ -10,7 +10,8 @@ use std::{
 };
 
 /// Where the troubleshooting lives (shown to hosts nobody can reach).
-pub const HELP_URL: &str = horizon_addresses::FRIENDS_HELP;
+pub const HELP_URL: &str =
+    "https://github.com/horizon-rust/horizon/blob/main/docs/play-with-friends.md#troubleshooting";
 
 #[derive(Clone, Debug)]
 pub struct Options {

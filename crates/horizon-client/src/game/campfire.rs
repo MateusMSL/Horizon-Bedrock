@@ -5,8 +5,8 @@
 use super::Game;
 use horizon_assets::item_model::DisplayContext;
 use horizon_client::{
-    Result, actions::Action, block_entities::Pos, block_entity_render::vertex_light,
-    containers::BlockEntity, items::ItemStack, mesher::Vertex, mobs::Who,
+    Result, block_entities::Pos, block_entity_render::vertex_light, containers::BlockEntity,
+    items::ItemStack, mesher::Vertex, mobs::Who,
 };
 use horizon_core::position::BlockPos;
 
@@ -25,13 +25,6 @@ impl Game<'_> {
     /// to the server. Whether the food went in; None when this isn't a
     /// campfire use, so the item's own use runs.
     pub(super) fn use_on_campfire(&mut self, pos: [i32; 3]) -> Result<Option<bool>> {
-        // `ServerPlayerGameMode.useItemOn`'s `suppressUsingBlock`: sneaking
-        // with a stack in either hand never reaches the block's `useItemOn`,
-        // so the food stays in the hand and the item's own use (eating)
-        // runs instead.
-        if self.keys.held(Action::Sneak) {
-            return Ok(None);
-        }
         let state = self.world.block(pos[0], pos[1], pos[2]);
         if !is_campfire(&self.res.facts().get(state).name) {
             return Ok(None);
@@ -67,11 +60,6 @@ impl Game<'_> {
             );
             self.mark_block_entity_updated(key);
         }
-        // `ServerPlayerGameMode.useItemOn` triggers ITEM_USED_ON_BLOCK with
-        // the stack before the use once `useItemOn` consumed the click, both
-        // when the food went in (SUCCESS_SERVER) and on a full campfire
-        // (CONSUME).
-        self.trigger_block("minecraft:item_used_on_block", pos, &held);
         Ok(Some(placed))
     }
 
@@ -103,7 +91,6 @@ impl Game<'_> {
             self.world.modified.insert((pos.0 >> 4, pos.2 >> 4));
         }
         if !lit {
-            self.sleep_idle_campfire(pos, false);
             return Ok(());
         }
         let Some(BlockEntity::Campfire(c)) = self.world.block_entities.get_mut(&pos) else {
@@ -111,8 +98,9 @@ impl Game<'_> {
         };
         let done = c.cook_tick();
         for (_, item) in done {
-            // The world's table, as placing the item (`self.recipes()`) asked.
-            let result = world_recipes!(self)
+            let result = self
+                .res
+                .recipes()
                 .cook(KIND, &item)
                 .map_or_else(|| item.clone(), |r| r.result.clone());
             self.native_block_cook([pos.0, pos.1, pos.2], &item.item, &result.item);
@@ -125,15 +113,7 @@ impl Game<'_> {
                 Some(state),
             );
         }
-        self.sleep_idle_campfire(pos, true);
         Ok(())
-    }
-
-    fn sleep_idle_campfire(&mut self, pos: Pos, lit: bool) {
-        if matches!(self.world.block_entities.get(&pos), Some(BlockEntity::Campfire(c)) if c.idle(lit))
-        {
-            self.world.block_entities.sleep(pos);
-        }
     }
 
     /// `CampfireRenderer`: each cooking item lies on the fire, slot `i`
@@ -210,7 +190,3 @@ impl Game<'_> {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "campfire_tests.rs"]
-mod campfire_tests;

@@ -85,7 +85,6 @@ NAME = 'dedicated-server-parity'
 SEED = 12345
 PLAYER = 'Tester'
 PROPERTIES = {
-    'server-ip': '127.0.0.1',
     'online-mode': 'false',
     'white-list': 'false',
     'level-seed': str(SEED),

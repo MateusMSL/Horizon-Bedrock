@@ -115,33 +115,19 @@ pub trait HurtWorld {
         blocked: bool,
     ) -> Result<(), Self::Error>;
 }
-/// Outer-hit values retained while equipment services run with their owner.
-pub struct PreparedHurt<I> {
-    pub damage: f32,
-    original: f32,
-    item: I,
-    blocked_amount: f32,
-}
-/// The cooldown decision is made before inner equipment wear and retained even
-/// if a durability callback changes the player's cooldown.
-pub struct PendingHurt<I> {
-    pub damage: f32,
-    prepared: PreparedHurt<I>,
-    fresh: bool,
-}
-pub fn prepare_hurt_server<W: HurtWorld>(
+pub fn hurt_server<W: HurtWorld>(
     s: &mut HurtState<W::Source>,
     w: &mut W,
     mut damage: f32,
-) -> Result<Option<PreparedHurt<W::UseItem>>, W::Error> {
+) -> Result<bool, W::Error> {
     if w.invulnerable(s)? || w.dead_or_dying(s)? {
-        return Ok(None);
+        return Ok(false);
     }
     if w.tag(s, HurtTag::Fire)? && w.fire_resistance(s)? {
-        return Ok(None);
+        return Ok(false);
     }
     if w.hurt_start(s, &mut damage)? {
-        return Ok(None);
+        return Ok(false);
     }
     if w.sleeping(s)? {
         w.stop_sleeping(s)?;
@@ -154,74 +140,32 @@ pub fn prepare_hurt_server<W: HurtWorld>(
     let item = w.use_item(s)?;
     let blocked_amount = w.apply_blocking(s, damage)?;
     damage -= blocked_amount;
+    let blocked = blocked_amount > 0.0;
     if w.tag(s, HurtTag::Freezing)? && w.freeze_hurts_extra(s)? {
         damage *= 5.0;
     }
-    Ok(Some(PreparedHurt {
-        damage,
-        original,
-        item,
-        blocked_amount,
-    }))
-}
-pub fn hurt_helmet<W: HurtWorld>(
-    s: &mut HurtState<W::Source>,
-    w: &mut W,
-    prepared: &mut PreparedHurt<W::UseItem>,
-) -> Result<(), W::Error> {
     if w.tag(s, HurtTag::DamagesHelmet)? && !w.helmet_empty(s)? {
-        w.hurt_helmet(s, prepared.damage)?;
-        prepared.damage *= 0.75;
+        w.hurt_helmet(s, damage)?;
+        damage *= 0.75;
     }
-    Ok(())
-}
-pub fn select_hurt_server<W: HurtWorld>(
-    s: &mut HurtState<W::Source>,
-    w: &mut W,
-    mut prepared: PreparedHurt<W::UseItem>,
-) -> Result<Option<PendingHurt<W::UseItem>>, W::Error> {
-    if !prepared.damage.is_finite() {
-        prepared.damage = f32::MAX;
+    if !damage.is_finite() {
+        damage = f32::MAX;
     }
-    let fresh = !(s.cooldown as f32 > 10.0 && !w.tag(s, HurtTag::BypassesCooldown)?);
-    let damage = if fresh {
-        s.last_hurt = prepared.damage;
-        s.cooldown = 20;
-        prepared.damage
-    } else {
-        if prepared.damage <= s.last_hurt {
-            return Ok(None);
+    let fresh = if s.cooldown as f32 > 10.0 && !w.tag(s, HurtTag::BypassesCooldown)? {
+        if damage <= s.last_hurt {
+            return Ok(false);
         }
-        prepared.damage - s.last_hurt
-    };
-    Ok(Some(PendingHurt {
-        damage,
-        prepared,
-        fresh,
-    }))
-}
-/// Complete an outer hit after its selected inner hit has run.
-pub fn finish_hurt_server<W: HurtWorld>(
-    s: &mut HurtState<W::Source>,
-    w: &mut W,
-    pending: PendingHurt<W::UseItem>,
-) -> Result<bool, W::Error> {
-    let PendingHurt {
-        prepared, fresh, ..
-    } = pending;
-    let PreparedHurt {
-        damage,
-        original,
-        item,
-        blocked_amount,
-    } = prepared;
-    let blocked = blocked_amount > 0.0;
-    if fresh {
-        s.hurt_duration = 10;
-        s.hurt_time = s.hurt_duration;
+        w.actually_hurt(s, damage - s.last_hurt)?;
+        s.last_hurt = damage;
+        false
     } else {
         s.last_hurt = damage;
-    }
+        s.cooldown = 20;
+        w.actually_hurt(s, damage)?;
+        s.hurt_duration = 10;
+        s.hurt_time = s.hurt_duration;
+        true
+    };
     w.resolve_mob(s)?;
     w.resolve_player(s)?;
     if fresh {
@@ -266,20 +210,4 @@ pub fn finish_hurt_server<W: HurtWorld>(
     }
     w.attacker_criterion(s, original, damage, blocked)?;
     Ok(accepted)
-}
-
-pub fn hurt_server<W: HurtWorld>(
-    s: &mut HurtState<W::Source>,
-    w: &mut W,
-    damage: f32,
-) -> Result<bool, W::Error> {
-    let Some(mut prepared) = prepare_hurt_server(s, w, damage)? else {
-        return Ok(false);
-    };
-    hurt_helmet(s, w, &mut prepared)?;
-    let Some(pending) = select_hurt_server(s, w, prepared)? else {
-        return Ok(false);
-    };
-    w.actually_hurt(s, pending.damage)?;
-    finish_hurt_server(s, w, pending)
 }

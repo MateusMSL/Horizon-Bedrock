@@ -459,9 +459,10 @@ impl BlockStateProvider {
                     if predicate
                         .test(world, position)
                         .map_err(StateProviderError::Query)?
-                        && let Some(state) = provider.get_optional_state(world, random, position)?
                     {
-                        return Ok(Some(state));
+                        if let Some(state) = provider.get_optional_state(world, random, position)? {
+                            return Ok(Some(state));
+                        }
                     }
                 }
                 match fallback {

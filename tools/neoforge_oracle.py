@@ -25,37 +25,13 @@ SOURCE = ROOT / 'mods' / 'horizon' / 'src' / 'neoforge-oracle'
 # ATM10 8.x: Minecraft 1.21.1 on NeoForge 21.1.259 (docs/modpacks.md).
 NEOFORGE = os.environ.get('HORIZON_NEOFORGE', '21.1.259')
 MAVEN = 'https://maven.neoforged.net/releases/net/neoforged/neoforge'
-WINDOWS = os.name == 'nt'
-
-
-def args_file(home):
-    """The installer's JVM argument file: `win_args.txt` on Windows (`unix_args.txt` has a `:` classpath
-    separator the JVM rejects there), `unix_args.txt` elsewhere."""
-    name = 'win_args.txt' if WINDOWS else 'unix_args.txt'
-    return home / f'libraries/net/neoforged/neoforge/{NEOFORGE}/{name}'
-
-
-def link(link_path, target):
-    """Makes `link_path` show `target`: a symlink; on Windows, where symlinks need a privilege ordinary users
-    lack (WinError 1314), a junction for a folder and a hard link for a file, a copy when those fail."""
-    link_path, target = Path(link_path), Path(target)
-    if not WINDOWS:
-        link_path.symlink_to(target)
-    elif target.is_dir():
-        made = subprocess.run(['cmd', '/c', 'mklink', '/J', str(link_path), str(target)], capture_output=True)
-        if made.returncode:
-            shutil.copytree(target, link_path)
-    else:
-        try:
-            os.link(target, link_path)
-        except OSError:
-            shutil.copy2(target, link_path)
 
 
 def install():
     """The NeoForge server, installed once per version."""
     home = LOCAL / NEOFORGE
-    if args_file(home).exists():
+    args = home / f'libraries/net/neoforged/neoforge/{NEOFORGE}/unix_args.txt'
+    if args.exists():
         return home
     home.mkdir(parents=True, exist_ok=True)
     installer = LOCAL / f'neoforge-{NEOFORGE}-installer.jar'
@@ -198,17 +174,18 @@ def instance(name, jars, extra=()):
     run = LOCAL / 'runs' / name
     shutil.rmtree(run, ignore_errors=True)
     (run / 'mods').mkdir(parents=True)
-    link(run / 'libraries', home / 'libraries')
+    (run / 'libraries').symlink_to(home / 'libraries')
     (run / 'eula.txt').write_text('eula=true\n')
     (run / 'server.properties').write_text(SERVER_PROPERTIES)
     for jar in [*jars, *extra]:
-        link(run / 'mods' / Path(jar).name, Path(jar).resolve())
+        (run / 'mods' / Path(jar).name).symlink_to(Path(jar).resolve())
     return home, run
 
 
 def start(home, run, props, log_name='server.log', timeout=900):
     """Runs the server to its end; returns (seconds, the log)."""
-    command = ['java', '-Xmx4G', *[f'-D{k}={v}' for k, v in props.items()], f'@{args_file(home)}', 'nogui']
+    args = home / f'libraries/net/neoforged/neoforge/{NEOFORGE}/unix_args.txt'
+    command = ['java', '-Xmx4G', *[f'-D{k}={v}' for k, v in props.items()], f'@{args}', 'nogui']
     began = time.monotonic()
     with (run / log_name).open('w') as log:
         subprocess.run(command, cwd=run, stdin=subprocess.DEVNULL, stdout=log,

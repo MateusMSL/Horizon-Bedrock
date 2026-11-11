@@ -289,15 +289,6 @@ impl Game<'_> {
             })
         };
         let m = &mut self.mobs[index];
-        let id = m.id;
-        let pos = m.position;
-        let saddle_off = m.extra.saddled && saddle.is_none();
-        let body_off = body
-            .as_ref()
-            .is_some_and(|b| b.is_none() && m.extra.body.is_some());
-        let body_on = body
-            .as_ref()
-            .is_some_and(|b| b.is_some() && m.extra.body.is_none());
         m.set_saddle(saddle);
         if let Some(body) = body {
             m.extra.body = body.map(|a| a.item);
@@ -309,12 +300,7 @@ impl Game<'_> {
         let (x, z) = (at[0].floor() as i32 >> 4, at[2].floor() as i32 >> 4);
         self.world.modified.insert((x, z));
         if let Some(sound) = sound {
-            self.audio.play(&sound, Some(at), 1.0, 1.0);
-        }
-        if saddle_put_on || body_on {
-            self.mob_equip_event(id, [pos.x, pos.y, pos.z], true);
-        } else if saddle_off || body_off {
-            self.mob_equip_event(id, [pos.x, pos.y, pos.z], false);
+            self.audio.play(&sound, Some(at), 0.5, 1.0);
         }
     }
     pub(super) fn mount_slots(&self) -> Option<Vec<usize>> {

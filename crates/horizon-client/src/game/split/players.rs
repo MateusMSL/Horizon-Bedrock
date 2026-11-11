@@ -1,11 +1,7 @@
 //! Players coming and going: joining (P1's world through memory, or P1's server) as a profile
 //! it picks (`split_profiles`), dropping out.
 use super::*;
-use horizon_client::{
-    controller_notice::{Notice, NoticeId, Priority},
-    gamepad::PadState,
-    options_ui::Page,
-};
+use horizon_client::{gamepad::PadState, options_ui::Page};
 
 /// Whether `game` shows its profile page now.
 fn on_profiles(game: &Game<'_>) -> bool {
@@ -126,17 +122,8 @@ impl Split<'_> {
         // Until it has a profile, a scratch options file: never P1's.
         let options = Self::folder()?.join(".joining/options.txt");
         OPTIONS.set(Some(options.clone()));
-        horizon_hooks::engine::set_seat(seat - 1);
-        let mut settings = self.host.settings.clone();
-        if pad.is_some() {
-            // The Controller setting is P1's own: a player who pressed a pad to join plays
-            // with it even when P1 turned controllers off, or its pad would be dead on the
-            // profile screen it joins into.
-            settings.controller.enabled = true;
-        }
-        let game = self.start_guest(seat, &options, settings);
+        let game = self.start_guest(seat, &options, self.host.settings.clone());
         OPTIONS.set(None);
-        horizon_hooks::engine::set_seat(0);
         let mut game = game?;
         if let Some(pad) = pad {
             // The press that joined it doesn't act in its game.
@@ -301,33 +288,13 @@ impl Split<'_> {
         }
         let profile = profiles.join(&name);
         let options = profile.join("options.txt");
-        let made = if options.exists() {
-            None
+        let mut settings = if options.exists() {
+            horizon_client::settings::Settings::load(&options)
         } else {
             std::fs::create_dir_all(&profile)?;
-            let mut new = self.host.settings.clone();
-            // The Controller setting is P1's, as on the profile page (`join`).
-            new.controller.enabled |= self.guests[i].pad.is_some();
-            // On P1's seat, so the crates' settings stores write P1's values too.
-            let turn = horizon_hooks::seat();
-            horizon_hooks::engine::set_seat(0);
-            new.save(&options);
-            horizon_hooks::engine::set_seat(turn);
-            Some(new)
+            self.host.settings.save(&options);
+            self.host.settings.clone()
         };
-        // The crates' stores load into the guest's seat, before its turn starts below.
-        let turn = horizon_hooks::seat();
-        horizon_hooks::engine::set_seat(self.guests[i].seat - 1);
-        let mut settings = match made {
-            Some(new) => {
-                horizon_client::settings::Settings::load_stores(&options);
-                new
-            }
-            None => horizon_client::settings::Settings::load(&options),
-        };
-        horizon_hooks::engine::set_seat(turn);
-        // A profile an earlier join saved with P1's off, or the player's pad would be dead.
-        settings.controller.enabled |= self.guests[i].pad.is_some();
         // P1's own world through memory (`Ok`), else P1's server over the network (`Err`).
         let via = match &self.host.integrated {
             Some(server) => Ok(server
@@ -357,15 +324,6 @@ impl Split<'_> {
                 server.leave_split(&name);
             }
             return Err(e);
-        }
-        // The seat plays P1's world, so mods keep its data with P1's.
-        let save = self
-            .host
-            .remote
-            .as_ref()
-            .and_then(|r| r.save_folder.clone());
-        if let Some(r) = self.guests[i].game.remote.as_mut() {
-            r.save_folder = save;
         }
         self.guests[i].name = Some(name);
         self.guests[i].entered = false;
@@ -485,14 +443,12 @@ impl Split<'_> {
         });
         let mut settings = settings;
         settings.extras.agent_control &= options.control.is_some();
-        // `options.resources` is P1's overlay when a pack is on: never the vanilla root, as a
-        // reload would rebuild that overlay out of itself.
-        let vanilla_root = host.vanilla_root();
-        let gui = UiResources::load(&options.resources, &vanilla_root)?;
+        let gui = UiResources::load(&options.resources, &options.resources)?;
         // P1's output, heard from this player's camera too (`Audio::share`).
         let audio = host.audio.share(seat as u8);
         let window = host.window.clone().ok_or("no window")?;
         let pack = host.pack.clone();
+        let resources = host.options.resources.clone();
         let mut guest = boxed(|| {
             start_game(
                 res,
@@ -501,11 +457,10 @@ impl Split<'_> {
                 options,
                 None,
                 audio,
-                vanilla_root,
+                resources,
                 Instant::now(),
                 None,
                 Some(settings),
-                None,
                 None,
             )
         })?;
@@ -518,13 +473,9 @@ impl Split<'_> {
             None,
             host.settings.horizon.api,
             host.settings.horizon.translucent_batching,
-            &host.settings.horizon,
+            host.settings.horizon.wide_frame(),
             // The pack its own game loads, from its profile.
-            crate::game::shader_packs::picked_pack_shape(&guest.settings),
-            host.renderer
-                .as_ref()
-                .map(|r| r.display_reading())
-                .unwrap_or_default(),
+            crate::game::shader_packs::picked_pack_draws_flat(&guest.settings),
             (
                 guest.settings.file.int("textureFiltering"),
                 guest.settings.file.int("maxAnisotropyBit"),
@@ -550,7 +501,7 @@ impl Split<'_> {
             || (self.host.integrated.is_none() && self.host.remote.is_none());
         let before = self.guests.len();
         if p1_left {
-            self.host.split_hud.notice.clear();
+            self.host.split_hud.notice = None;
         }
         for k in (0..self.guests.len()).rev() {
             let g = &mut self.guests[k];
@@ -568,12 +519,8 @@ impl Split<'_> {
                 .then(|| turned_away(&g.game))
                 .flatten();
             if let (true, Some(name), Some(why)) = (g.entered, &g.name, &why) {
-                self.host.split_hud.notice.raise(Notice::new(
-                    NoticeId::PlayerLeft,
-                    Priority::Attention,
-                    format!("{name} could not stay"),
-                    why.clone(),
-                ));
+                self.host.split_hud.notice =
+                    Some(Notice::new(format!("{name} could not stay"), why.clone()));
             } else if let Some(why) = why {
                 let old = self.guests[k].name.take();
                 if let (Some(server), Some(old)) = (&self.host.integrated, &old) {

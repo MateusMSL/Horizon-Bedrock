@@ -14,9 +14,7 @@ impl Game<'_> {
         if self.dialog_open() {
             return self.dialog_has_text_field();
         }
-        if self.title_input_active()
-            && let Some(title) = self.title.as_mut()
-        {
+        if let Some(title) = self.title.as_mut() {
             // A caret field, an append-only one (`focused_field`), or a game
             // rule's box (`has_caret_field` asks the rules screen itself, and
             // `title_edit` types into it).
@@ -35,7 +33,7 @@ impl Game<'_> {
             // screen's search (OptionsUi::typing).
             Screen::Options => self.ui.options.typing(),
             Screen::WorldOptions => self.world_options_typing(),
-            Screen::Creative => self.mod_browser_typing() || self.creative_screen.tab().search,
+            Screen::Creative => self.creative_screen.tab().search,
             Screen::BlockEditor => self.block_editor.as_ref().is_some_and(|s| s.text_focused()),
             Screen::Inventory => {
                 self.mod_browser_typing() || self.recipe_search_focused() || self.station_typing()
@@ -56,7 +54,7 @@ impl Game<'_> {
             // and the candidate window's place belong to the old one.
             self.ime_area = None;
             if !want {
-                preedit::reset();
+                preedit::set_preedit(None);
             }
         }
     }
@@ -64,15 +62,11 @@ impl Game<'_> {
     /// `WindowEvent::Ime(Preedit)`: `KeyboardHandler.textEditing`. The text
     /// still being composed is shown under the focused field's caret.
     pub(super) fn ime_preedit(&mut self, text: &str, cursor: Option<(usize, usize)>) {
-        if !self.text_field_focused() {
-            preedit::reset();
-            return;
-        }
-        if text.is_empty() {
-            preedit::set_preedit(None);
-            return;
-        }
-        preedit::set_preedit(PreeditEvent::from_winit(text, cursor));
+        preedit::set_preedit(
+            self.text_field_focused()
+                .then(|| PreeditEvent::from_winit(text, cursor))
+                .flatten(),
+        );
     }
 
     /// With the frame's GUI built: draw the composition over it and move the
@@ -105,21 +99,8 @@ impl Game<'_> {
 
     /// Text the input method committed (`WindowEvent::Ime(Commit)`).
     pub(super) fn ime_commit(&mut self, text: &str) {
-        preedit::mark_committed();
-        if text.is_empty() {
-            return;
-        }
-        // Dialogs have their own fields; the other topmost prompts take no text.
-        if self.prompt_open() && !self.dialog_open() {
-            return;
-        }
+        preedit::set_preedit(None);
         let text: String = text.chars().filter(|c| !c.is_control()).collect();
-        if let Some(result) = self.type_text_field_input(&text) {
-            if let Err(error) = result {
-                log::warn!("Horizon: text input: {error}");
-            }
-            return;
-        }
         // ScreenEvent.CharacterTyped.Pre: the input method's committed text
         // reaches a text box by characters, as a key's own text does, so the
         // open screen hears of each of them first and a cancelled one never
@@ -133,7 +114,7 @@ impl Game<'_> {
         if self.dialog_type(&text) {
             return;
         }
-        if self.title_input_active() {
+        if self.title.is_some() {
             self.title_edit(Some(&text), false);
         } else if self.book.is_some() {
             self.book_input(None, Some(&text));
@@ -147,11 +128,11 @@ impl Game<'_> {
                 Screen::DebugOptions => self.debug_options_type(&text),
                 Screen::Options => self.ui.options.type_text(&self.gui.atlas, &text),
                 Screen::WorldOptions => self.world_options_text(Some(&text)),
+                Screen::Creative => self.creative_search_edit(Some(&text)),
                 Screen::BlockEditor => self.block_editor_type(&text),
-                Screen::Inventory | Screen::Creative if self.mod_browser_typing() => {
+                Screen::Inventory if self.mod_browser_typing() => {
                     self.mod_browser_text(Some(&text), false)
                 }
-                Screen::Creative => self.creative_search_edit(Some(&text)),
                 Screen::Inventory if self.recipe_search_focused() => {
                     self.recipe_text(Some(&text), false)
                 }

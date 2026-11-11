@@ -9,7 +9,6 @@ use crate::{
     text::Text,
     ui,
 };
-use std::time::{Duration, Instant};
 
 pub const TITLE: &str = "gui.socialInteractions.title";
 /// `SocialInteractionsScreen`'s page.
@@ -90,11 +89,6 @@ pub fn sort_entries(entries: &mut [Entry]) {
 pub fn max_scroll(h: f32, rows: usize) -> f32 {
     // `AbstractSelectionList.contentHeight`: the rows and 4px.
     (rows as f32 * ITEM_HEIGHT + 4.0 - (list_end(h) - LIST_START)).max(0.0)
-}
-/// `AbstractSelectionList.scrollBarX`: the scrollbar's column, six pixels
-/// right of the rows and two more (`getRowRight + scrollbarWidth + 2`).
-pub fn scrollbar_x(w: f32) -> f32 {
-    row_left(w) + ROW_WIDTH + 6.0 + 2.0
 }
 fn tabs(w: f32) -> [(f32, Page); 3] {
     let width = (ROW_WIDTH / 3.0).floor();
@@ -191,35 +185,8 @@ pub fn click(size: (f32, f32), cursor: (f32, f32), view: &SocialView) -> Option<
     }
     None
 }
-/// `PlayerEntry.TOOLTIP_DELAY`: a row button's tooltip shows once the cursor
-/// has rested on that same button for half a second.
-pub const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
-
-/// The row button whose tooltip the cursor is over.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Tip {
-    Report(u128),
-    Toggle { id: u128, hidden: bool },
-}
-
-impl Tip {
-    fn text(self) -> Text {
-        match self {
-            Tip::Report(_) => {
-                Text::translate("gui.socialInteractions.tooltip.report.disabled", &[])
-            }
-            Tip::Toggle { hidden: true, .. } => {
-                Text::translate("gui.socialInteractions.tooltip.show", &[])
-            }
-            Tip::Toggle { hidden: false, .. } => {
-                Text::translate("gui.socialInteractions.tooltip.hide", &[])
-            }
-        }
-    }
-}
-
-/// The tooltip of what the cursor is over: the row button it names.
-fn tip_at(size: (f32, f32), cursor: (f32, f32), view: &SocialView) -> Option<Tip> {
+/// The tooltip of what the cursor is over.
+fn tooltip(size: (f32, f32), cursor: (f32, f32), view: &SocialView) -> Option<Text> {
     let (w, h) = size;
     if cursor.1 < LIST_START || cursor.1 >= list_end(h) {
         return None;
@@ -231,41 +198,21 @@ fn tip_at(size: (f32, f32), cursor: (f32, f32), view: &SocialView) -> Option<Tip
         }
         let (hide, report) = row_buttons(w, y);
         if ui::hovered(cursor, hide[0], hide[1], 20.0, 20.0) {
-            return Some(Tip::Toggle {
-                id: e.id,
-                hidden: e.hidden,
-            });
+            let key = if e.hidden {
+                "gui.socialInteractions.tooltip.show"
+            } else {
+                "gui.socialInteractions.tooltip.hide"
+            };
+            return Some(Text::translate(key, &[]));
         }
         if ui::hovered(cursor, report[0], report[1], 20.0, 20.0) {
-            return Some(Tip::Report(e.id));
+            return Some(Text::translate(
+                "gui.socialInteractions.tooltip.report.disabled",
+                &[],
+            ));
         }
     }
     None
-}
-
-/// `WidgetTooltipHolder`'s delay: the tooltip of the control the cursor has
-/// rested on for `TOOLTIP_DELAY`, and nothing while it moves between them.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct TooltipDelay {
-    hovered: Option<(Tip, Instant)>,
-}
-
-impl TooltipDelay {
-    /// The tip to draw at `now`, starting the wait when the cursor reaches a
-    /// new button (vanilla's `displayStartTime`).
-    pub fn shown(&mut self, hovered: Option<Tip>, now: Instant) -> Option<Tip> {
-        let Some(tip) = hovered else {
-            self.hovered = None;
-            return None;
-        };
-        match self.hovered {
-            Some((t, at)) if t == tip => (now.duration_since(at) > TOOLTIP_DELAY).then_some(tip),
-            _ => {
-                self.hovered = Some((tip, now));
-                None
-            }
-        }
-    }
 }
 pub fn draw(
     batch: &mut HudBatch,
@@ -273,7 +220,6 @@ pub fn draw(
     cursor: (f32, f32),
     view: &SocialView,
     search: &mut ui::EditBox,
-    tooltip: &mut TooltipDelay,
     in_world: bool,
 ) {
     let (w, h) = (batch.width, batch.height);
@@ -322,10 +268,6 @@ pub fn draw(
             true,
             ui::hovered(cursor, x, 45.0, (ROW_WIDTH / 3.0).floor(), 20.0),
         );
-        crate::widgets::target_as(
-            [x, 45.0, (ROW_WIDTH / 3.0).floor(), 20.0],
-            crate::widgets::Kind::Tab(view.page == page),
-        );
     }
     // The search box: an `EditBox` with the focus from the start (`setInitialFocus`), so its
     // hint, shown only while unfocused, never shows.
@@ -335,15 +277,7 @@ pub fn draw(
     search.text_color = WHITE;
     search.focused = true;
     search.draw(batch, atlas, None);
-    // The rows, clipped to the list; a focus step still walks them.
-    let max = max_scroll(h, view.entries.len());
-    if max > 0.0 {
-        crate::widgets::scroll_area(
-            [0.0, LIST_START + 4.0, w, list_end(h) - LIST_START - 4.0],
-            view.scroll,
-            max,
-        );
-    }
+    // The rows, clipped to the list.
     let start = batch.vertices.len();
     let mut faces = Vec::new();
     for (i, y) in visible(view, h) {
@@ -434,26 +368,11 @@ pub fn draw(
     hud_layout::paint(batch, atlas, &faces);
     // `enableScissor`: from 4px below the list's top.
     batch.clip_since(start, 0.0, LIST_START + 4.0, w, list_end(h));
-    // `AbstractSelectionList.extractScrollbar`: the rows' scrollbar, right of
-    // them, when they overflow the list.
-    let content = view.entries.len() as f32 * ITEM_HEIGHT + 4.0;
-    if content > list_end(h) - LIST_START {
-        ui::scrollbar(
-            batch,
-            atlas,
-            scrollbar_x(w),
-            LIST_START,
-            list_end(h),
-            content,
-            view.scroll,
-        );
-    }
     // `Done`.
     let [dx, dy, dw, dh] = done(w, h);
-    ui::action_button(
+    ui::button(
         batch,
         atlas,
-        crate::widgets::Action::Done,
         dx,
         dy,
         dw,
@@ -487,8 +406,8 @@ pub fn draw(
             );
         }
     }
-    if let Some(tip) = tooltip.shown(tip_at((w, h), cursor, view), Instant::now()) {
-        ui::tooltip(batch, atlas, &[tip.text()], cursor);
+    if let Some(text) = tooltip((w, h), cursor, view) {
+        ui::tooltip(batch, atlas, &[text], cursor);
     }
 }
 
@@ -584,47 +503,5 @@ mod tests {
         sort_entries(&mut rows);
         let names: Vec<_> = rows.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, ["me", "_x", "Alpha", "zed", "§odd"]);
-    }
-
-    /// `PlayerEntry.TOOLTIP_DELAY` (500 ms): the row buttons' tooltips wait
-    /// while container item tooltips do not. Moving to another button, or
-    /// away and back, starts the wait again.
-    #[test]
-    fn a_row_buttons_tooltip_waits_half_a_second() {
-        let start = Instant::now();
-        let at = |ms| start + Duration::from_millis(ms);
-        let mut delay = TooltipDelay::default();
-        let tip = Tip::Toggle {
-            id: 7,
-            hidden: false,
-        };
-        assert_eq!(delay.shown(Some(tip), at(0)), None);
-        assert_eq!(delay.shown(Some(tip), at(499)), None);
-        assert_eq!(delay.shown(Some(tip), at(500)), None, "500 ms is not > 500");
-        assert_eq!(delay.shown(Some(tip), at(501)), Some(tip));
-        // Another row button is another widget: its own wait.
-        let other = Tip::Toggle {
-            id: 8,
-            hidden: true,
-        };
-        assert_eq!(delay.shown(Some(other), at(502)), None);
-        assert_eq!(delay.shown(Some(other), at(1002)), None);
-        assert_eq!(delay.shown(Some(other), at(1003)), Some(other));
-        // Leaving hides it at once; coming back starts over.
-        assert_eq!(delay.shown(None, at(1004)), None);
-        assert_eq!(delay.shown(Some(tip), at(1005)), None);
-        assert_eq!(delay.shown(Some(tip), at(1505)), None);
-        assert_eq!(delay.shown(Some(tip), at(1506)), Some(tip));
-    }
-
-    /// `AbstractSelectionList.scrollBarX`: the bar's column is the rows' right
-    /// edge (220 wide, centred) plus `scrollbarWidth` (6) and 2. It shows only
-    /// when the content overflows the list's height.
-    #[test]
-    fn the_list_scrollbar_sits_right_of_the_rows() {
-        assert_eq!(scrollbar_x(427.0), 331.0);
-        assert_eq!(scrollbar_x(854.0), 545.0);
-        assert!(max_scroll(240.0, 10) > 0.0);
-        assert_eq!(max_scroll(1000.0, 2), 0.0);
     }
 }

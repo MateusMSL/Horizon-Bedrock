@@ -8,6 +8,7 @@ use horizon_client::items::ItemStack;
 use horizon_core::geometry::Direction;
 
 /// A slot of a container as a side reaches it (`native_container_slots`).
+#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct NativeContainerSlot {
     /// Its number, for `native_extract_item`.
@@ -25,7 +26,7 @@ fn takes_from(view: &View) -> bool {
 }
 
 // Native mods use these; nothing in Horizon does.
-#[allow(dead_code, reason = "native mod API (docs/native-mods.md)")]
+#[allow(dead_code)]
 impl Game<'_> {
     /// The level in place (`minecraft:overworld`), for a hook that isn't told
     /// which it runs in. API 48.
@@ -64,7 +65,7 @@ impl Game<'_> {
         let mut rest = Some(one);
         for &slot in slots {
             let Some(one) = rest.take() else { break };
-            rest = self.move_in_item(None, view, one, slot, Some(face)).0;
+            rest = self.move_in_item(None, view, one, slot).0;
         }
         rest
     }

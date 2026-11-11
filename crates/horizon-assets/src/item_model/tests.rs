@@ -1,5 +1,4 @@
 use super::*;
-use serde_json::json;
 
 #[test]
 fn identifier_adds_default_namespace() {
@@ -114,47 +113,47 @@ fn custom_condition_validates_its_name_and_both_branches() {
 }
 
 #[test]
-fn a_patched_stack_reads_its_patch_over_its_items_defaults() {
+fn a_potion_contents_select_matches_the_bare_and_the_object_form() {
+    let definition = ClientItem::from_json(
+        r#"{"model":{
+        "type":"minecraft:select", "property":"minecraft:component",
+        "component":"minecraft:potion_contents",
+        "cases":[{"when":["minecraft:swiftness","minecraft:long_swiftness"],
+                  "model":{"type":"minecraft:model","model":"minecraft:item/fast"}}],
+        "fallback":{"type":"minecraft:model","model":"minecraft:item/plain"}
+    }}"#,
+    )
+    .unwrap();
     let mut models = ItemModels::default();
+    models.definitions.insert("minecraft:potion".into(), definition);
     models.prototypes.insert(
-        "minecraft:diamond_sword".into(),
-        Components::from_iter([
-            (
-                "minecraft:item_model".into(),
-                json!("minecraft:diamond_sword"),
-            ),
-            ("minecraft:max_damage".into(), json!(1561)),
-            ("minecraft:rarity".into(), json!("common")),
-        ]),
+        "minecraft:potion".into(),
+        BTreeMap::from([(
+            "minecraft:item_model".into(),
+            Value::String("minecraft:potion".into()),
+        )]),
     );
-    let mut stack = StackView::new("minecraft:diamond_sword", 1);
-    stack.patch.insert(
-        "minecraft:enchantments".into(),
-        Some(json!({"minecraft:sharpness": 5})),
-    );
-    stack
-        .patch
-        .insert("minecraft:rarity".into(), Some(json!("rare")));
-    stack.patch.insert("minecraft:max_damage".into(), None);
-    let view = models.components_view(&stack);
-    assert_eq!(view.get("minecraft:rarity"), Some(&json!("rare")));
-    assert_eq!(view.get("minecraft:max_damage"), None, "a removed default");
+    let context = Context {
+        display: DisplayContext::Gui,
+        owner: None,
+        level: None,
+        seed: 0,
+    };
+    let chosen = |contents: Value| {
+        let mut stack = StackView::new("minecraft:potion", 1);
+        stack
+            .patch
+            .insert("minecraft:potion_contents".into(), Some(contents));
+        let resolved = models.resolve(&stack, &context, &NoEnv);
+        let LayerContent::Model { model } = &resolved.layers[0].content else {
+            panic!("expected model leaf")
+        };
+        model.clone()
+    };
+    assert_eq!(chosen(serde_json::json!("minecraft:long_swiftness")), "minecraft:item/fast");
     assert_eq!(
-        view.get("minecraft:item_model"),
-        Some(&json!("minecraft:diamond_sword"))
+        chosen(serde_json::json!({"potion": "minecraft:swiftness"})),
+        "minecraft:item/fast"
     );
-    assert!(view.contains_key("minecraft:enchantments"));
-    assert!(!view.contains_key("minecraft:custom_name"));
-    // Every key reads as the merged map has it.
-    let merged = models.components(&stack);
-    for key in [
-        "minecraft:rarity",
-        "minecraft:max_damage",
-        "minecraft:item_model",
-        "minecraft:enchantments",
-        "minecraft:custom_name",
-    ] {
-        assert_eq!(view.get(key), merged.get(key), "{key}");
-    }
-    assert_eq!(view.to_map(), *merged);
+    assert_eq!(chosen(serde_json::json!("minecraft:poison")), "minecraft:item/plain");
 }

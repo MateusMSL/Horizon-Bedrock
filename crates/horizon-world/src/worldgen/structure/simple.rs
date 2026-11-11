@@ -82,7 +82,7 @@ impl LegacyPiece for BuriedTreasurePiece {
 pub const IGLOO_TOP: &str = "minecraft:igloo/top";
 const IGLOO_MIDDLE: &str = "minecraft:igloo/middle";
 const IGLOO_BOTTOM: &str = "minecraft:igloo/bottom";
-pub(super) fn igloo_pivot(name: &str) -> [i32; 3] {
+fn igloo_pivot(name: &str) -> [i32; 3] {
     match name {
         IGLOO_TOP => [3, 5, 5],
         IGLOO_MIDDLE => [1, 3, 1],
@@ -227,7 +227,7 @@ impl TemplatePiece {
             self.type_name,
             self.bounding_box.moved([0, dy, 0]),
             Some(Direction::North),
-            self.gen_depth,
+            0,
         );
         // Mansion and End City pieces keep the name inside their folder.
         let name = self

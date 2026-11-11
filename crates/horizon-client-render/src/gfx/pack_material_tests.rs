@@ -122,7 +122,6 @@ void main() {
     let post = horizon_shaders::load_post(&pack, "", &properties, &macros, &inputs);
     assert!(post.terrain.is_some(), "{:?}", post.notes);
     let world = World {
-        sprite_rects: &[],
         atlas: Some((atlases[2].view.clone(), atlases[2].size())),
         material_maps: Some([atlases[1].view.clone(), atlases[0].view.clone()]),
         lightmap: atlases[2].view.clone(),
@@ -149,9 +148,7 @@ void main() {
         post,
         wgpu::TextureFormat::Rgba8Unorm,
         world,
-        &Default::default(),
-    )
-    .expect("the pack runs");
+    );
     let mut pass = post
         .terrain
         .take()

@@ -93,16 +93,6 @@ Run a dedicated server here; type commands into its console.
 
 MCP: `server`, `server_command`, `server_log`, `server_stop`.
 
-## `horizon-launcher native-cache`
-
-Show the native compilation cache's size and limit as JSON. Installed games and saves are never removed; builds must be idle.
-
-    horizon-launcher native-cache
-
-- `--clear`: Clear only fast/release compiler outputs. The next changed build recompiles
-
-MCP: `native_cache`.
-
 ## `horizon-launcher native-build`
 
 Native mods (docs/native-mods.md): compile mixin bundles on the Horizon revision they pin, else the one the instance plays, with the launcher's own Rust, as the version the instance then plays. Not sandboxed: the mods' code runs with your rights.
@@ -115,7 +105,6 @@ Native mods (docs/native-mods.md): compile mixin bundles on the Horizon revision
 - `--update`: Move to the newest installed release or Nightly instead of the Horizon the instance plays (a full rebuild)
 - `--trust-native-code`: You read the mods' source and trust it with full access to this computer
 - `--allow-version-mismatch`: Build mods made for different Horizon versions together anyway, on the newest of them
-- `--ignore-pins`: Build every mod on the commit of the version the build starts from, even the mods that pin another Horizon commit (they may not apply or compile there)
 - `--profile` (performance, dev, release): The build profile: performance (the default: incremental, quick to rebuild), dev (quickest to rebuild a mod, slow game) or release (thin LTO: slowest to build, slightly faster game). Default: the native-profile setting
 
 MCP: none: the player's switch.
@@ -188,7 +177,7 @@ MCP: `account_sign_out`, needs `confirm: true`.
 
 ## `horizon-launcher account select`
 
-Play as this account.
+Play as this account, or as one of your offline names.
 
     horizon-launcher account select <WHO>
 
@@ -196,13 +185,48 @@ Play as this account.
 
 MCP: `account_select`.
 
+## `horizon-launcher account offline`
+
+Play offline (LAN, offline-mode servers) beside a signed-in account that owns the game: as NAME (kept to switch back to; 3 to 16 letters, digits or _), or as the name the game made up.
+
+    horizon-launcher account offline [NAME]
+
+- `NAME`
+
+MCP: `account_offline`.
+
+## `horizon-launcher account forget-offline`
+
+Forget one of your offline names; its skin and cape go with it.
+
+    horizon-launcher account forget-offline <NAME>
+
+- `NAME`
+
+MCP: `account_forget_offline`.
+
+## `horizon-launcher account skin`
+
+Show or set an offline name's skin and cape: a 64x64 (or 64x32) skin PNG, a 64x32 cape PNG, the model. Kept by the launcher and given to the game when that name plays.
+
+    horizon-launcher account skin <NAME> [FILE]
+
+- `NAME`
+- `FILE`: The skin's PNG
+- `--model`: classic or slim arms
+- `--cape`: The cape's PNG
+- `--no-skin`: Back to the default skin
+- `--no-cape`: Take the cape off
+
+MCP: `account_skin`.
+
 ## `horizon-launcher settings`
 
-Show the launcher's settings, or set one (the Settings page): selected-version TAG, game-architecture auto|x64|arm64, minecraft-dir PATH, server-dir PATH ("default" resets a folder), install-new-versions on|off, prune-old-versions on|off (delete old versions after an install, keeping the selected one, the ones instances use and the newest few), keep-versions N (how many of the newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port|socks5://host:port ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent violet|blue|teal|green|amber|red|pink|#rrggbb|DEGREES (a named accent, any colour, or any hue), background PATH (a picture behind Home; "default" shows Horizon's landscape), native-cache-gib N (combined native compilation cache limit in GiB, default 30; 0 disables automatic cleanup), native-profile performance|dev|release (the profile native mods build with: performance is incremental, dev rebuilds a mod quickest for a slow game, release is slowest to build and slightly faster to play).
+Show the launcher's settings, or set one (the Settings page): selected-version TAG, minecraft-dir PATH, server-dir PATH ("default" resets a folder), install-new-versions on|off, prune-old-versions on|off (delete old versions after an install, keeping the selected one, the ones instances use and the newest few), keep-versions N (how many of the newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent violet|blue|teal|green|amber|red|pink|#rrggbb|DEGREES (a named accent, any colour, or any hue), background PATH (a picture behind Home; "default" shows Horizon's landscape), native-profile performance|dev|release (the profile native mods build with: performance is incremental, dev rebuilds a mod quickest for a slow game, release is slowest to build and slightly faster to play).
 
     horizon-launcher settings [KEY] [VALUE]
 
-- `KEY` (selected-version, minecraft-dir, server-dir, install-new-versions, prune-old-versions, keep-versions, opening-animation, game-architecture, proxy, while-playing, language, accent, background, native-profile, native-cache-gib)
+- `KEY` (selected-version, minecraft-dir, server-dir, install-new-versions, prune-old-versions, keep-versions, opening-animation, proxy, while-playing, language, accent, background, native-profile)
 - `VALUE`: The new value (with KEY)
 
 MCP: `settings`.
@@ -515,7 +539,6 @@ Import what a file is, as dropping it on the window does: a shared instance (a .
 
 - `FILE`
 - `--instance`: The instance a pack goes into
-- `--java`: A .mrpack becomes a Minecraft: Java Edition instance with its Minecraft version, mod loader, mods and overrides, instead of a Horizon instance or a Modpacks import
 
 MCP: `instance_import`.
 
@@ -525,7 +548,7 @@ List the instances other launchers keep (Prism Launcher, MultiMC, the official l
 
     horizon-launcher instance others
 
-- `--folder`: Look in this folder instead: a launcher's folder, a folder of instances (its instances/, the CurseForge app's Instances) or one instance
+- `--folder`: Look in this folder instead: a launcher's folder, its instances/ or one instance
 
 MCP: `instance_others`.
 
@@ -536,7 +559,7 @@ Copy another launcher's instance into a new Java instance: its Minecraft version
     horizon-launcher instance copy-from <NAME>
 
 - `NAME`: Its name, as `instance others` lists it
-- `--folder`: Look in this folder instead: a launcher's folder, a folder of instances (its instances/, the CurseForge app's Instances) or one instance
+- `--folder`: Look in this folder instead: a launcher's folder, its instances/ or one instance
 - `--as`: The new instance's name (default: the same)
 - `--minecraft`: The Minecraft version it plays, when its launcher doesn't say (the CurseForge app, the Modrinth App)
 

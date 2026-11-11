@@ -1,7 +1,7 @@
 //! `net.minecraft.util.worldupdate.WorldUpgrader` and `RegionStorageUpgrader`:
-//! Optimize World. Worker threads, one region file each at a time, read every
-//! chunk of each dimension's `entities`, `poi` and `region` folders, bring it
-//! to the current DataVersion and write it back, reporting its counts through an [`UpgradeProgress`] the
+//! Optimize World. A worker thread reads every chunk of each dimension's
+//! `entities`, `poi` and `region` folders, brings it to the current DataVersion
+//! and writes it back, reporting its counts through an [`UpgradeProgress`] the
 //! screen reads. Unlike [`super::files::upgrade_world`] (the converter that
 //! runs when an older world opens) it works on a world that is already at the
 //! current layout and decides per chunk whether anything changed.
@@ -18,8 +18,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 
 const NEW_DIRECTORY_PREFIX: &str = "new_";
@@ -130,8 +129,6 @@ struct Builder {
     /// The `__context` of a chunk: the dimension and generator type.
     context: Option<(String, Option<String>)>,
     tag_modifiers: BTreeMap<i32, Arc<TagModifier>>,
-    /// Region files upgraded at the same time.
-    threads: usize,
 }
 
 impl Builder {
@@ -147,7 +144,6 @@ impl Builder {
             recreate_region_files: recreate,
             context: None,
             tag_modifiers: BTreeMap::new(),
-            threads: worker_threads(),
         }
     }
     /// `addTagModifier`: at most one per data version.
@@ -168,21 +164,11 @@ struct RegionStorageUpgrader {
     dimension: String,
     region_folder: PathBuf,
     files: Vec<FileToUpgrade>,
-}
-
-/// The files one worker has open: the one chunks are read from, and the one
-/// they are written to (the source file itself, or the new one of
-/// `recreate_region_files`).
-#[derive(Default)]
-struct OpenFiles {
+    /// The open file chunks are written to (the source file itself, or the
+    /// new one of `recreate_region_files`).
     writer: Option<(PathBuf, RegionFile)>,
+    /// The open file chunks are read from.
     reader: Option<(PathBuf, RegionFile)>,
-}
-
-/// Region files are independent, so they are upgraded on all cores but one
-/// (the game keeps that one).
-pub fn worker_threads() -> usize {
-    std::thread::available_parallelism().map_or(1, |n| n.get().saturating_sub(1).max(1))
 }
 
 impl RegionStorageUpgrader {
@@ -205,6 +191,8 @@ impl RegionStorageUpgrader {
             dimension: dimension.to_owned(),
             region_folder,
             files,
+            writer: None,
+            reader: None,
         }
     }
 
@@ -212,9 +200,7 @@ impl RegionStorageUpgrader {
         self.files.len() as i32
     }
 
-    /// `upgrade`: the region files are handed out in order to `threads`
-    /// workers; a file is upgraded by one worker alone, so its bytes do not
-    /// depend on the thread count.
+    /// `upgrade`.
     fn upgrade(&mut self) {
         if self.files.is_empty() {
             return;
@@ -222,78 +208,42 @@ impl RegionStorageUpgrader {
         let total_size = self.progress.total_file_fix_stats().total_operations() as f32;
         self.progress.set_status(UpgradeStatus::Upgrading);
         let files = std::mem::take(&mut self.files);
-        let next = AtomicUsize::new(0);
-        // Guards the finished-file count together with the progress it sets,
-        // so the shown progress never goes back.
-        let finished = Mutex::new(0usize);
-        let workers = self.builder.threads.clamp(1, files.len());
-        let this = &*self;
-        let work = || {
-            // The cancel flag is looked at before every file, as the vanilla
-            // loop does, and before every chunk (`upgrade_file`).
-            while !this.progress.is_canceled() {
-                let index = next.fetch_add(1, Ordering::Relaxed);
-                let Some(file) = files.get(index) else {
-                    break;
-                };
-                this.upgrade_file(file);
-                let mut done = finished.lock().unwrap_or_else(|e| e.into_inner());
-                *done += 1;
-                let dimension_progress = *done as f32 / total_size;
-                let total_progress = (this.start_index as usize + *done) as f32 / total_size;
-                this.progress
-                    .set_dimension_progress(&this.dimension, dimension_progress);
-                this.progress.set_total_progress(total_progress);
+        let mut next = 0usize;
+        while !self.progress.is_canceled() {
+            let mut worked = false;
+            if let Some(file) = files.get(next) {
+                next += 1;
+                let mut converted = true;
+                for &pos in &file.chunks {
+                    // `converted && processOnePosition(..)`: once a chunk was not
+                    // converted the rest of the file is not looked at.
+                    converted = converted && self.process_one_position(&file.path, pos);
+                    worked = true;
+                }
+                if self.builder.recreate_region_files {
+                    if converted {
+                        self.on_file_finished(&file.path);
+                    } else {
+                        eprintln!("Failed to convert region file {}", file.path.display());
+                    }
+                }
             }
-        };
-        std::thread::scope(|scope| {
-            // This thread is worker 0; a helper that fails to start leaves
-            // its share to the others.
-            for i in 1..workers {
-                let _ = std::thread::Builder::new()
-                    .name(format!("World Upgrader #{i}"))
-                    .spawn_scoped(scope, work);
+            let dimension_progress = next as f32 / total_size;
+            let total_progress = (self.start_index as usize + next) as f32 / total_size;
+            self.progress
+                .set_dimension_progress(&self.dimension, dimension_progress);
+            self.progress.set_total_progress(total_progress);
+            if !worked {
+                break;
             }
-            work();
-        });
+        }
         self.progress.set_status(UpgradeStatus::Finished);
         self.close();
     }
 
-    /// One region file of `upgrade`, stopping before the next chunk once the
-    /// upgrade is canceled. The file's writes reach the disk once, when it is
-    /// done, not after every chunk: a sync per chunk (vanilla opens the files
-    /// `DSYNC`) costs more than the chunk's whole upgrade.
-    fn upgrade_file(&self, file: &FileToUpgrade) {
-        let mut open = OpenFiles::default();
-        let mut converted = true;
-        for &pos in &file.chunks {
-            if self.progress.is_canceled() {
-                converted = false;
-                break;
-            }
-            // `converted && processOnePosition(..)`: once a chunk was not
-            // converted the rest of the file is not looked at.
-            converted = converted && self.process_one_position(&mut open, &file.path, pos);
-        }
-        if let Some((path, writer)) = &open.writer
-            && let Err(e) = writer.sync()
-        {
-            eprintln!("Failed to write region file {}: {e}", path.display());
-            converted = false;
-        }
-        if self.builder.recreate_region_files && !self.progress.is_canceled() {
-            if converted {
-                self.on_file_finished(&mut open, &file.path);
-            } else {
-                eprintln!("Failed to convert region file {}", file.path.display());
-            }
-        }
-    }
-
     /// `processOnePosition`: an IO error skips the chunk, the logged way.
-    fn process_one_position(&self, open: &mut OpenFiles, file: &Path, pos: ChunkPos) -> bool {
-        let converted = match self.try_process_one_position(open, file, pos) {
+    fn process_one_position(&mut self, file: &Path, pos: ChunkPos) -> bool {
+        let converted = match self.try_process_one_position(file, pos) {
             Ok(converted) => converted,
             Err(e) => {
                 eprintln!("Error upgrading chunk {pos:?}: {e}");
@@ -332,17 +282,12 @@ impl RegionStorageUpgrader {
     }
 
     /// `tryProcessOnePosition`.
-    fn try_process_one_position(
-        &self,
-        open: &mut OpenFiles,
-        file: &Path,
-        pos: ChunkPos,
-    ) -> io::Result<bool> {
+    fn try_process_one_position(&mut self, file: &Path, pos: ChunkPos) -> io::Result<bool> {
         let limits = Limits::default();
-        if open.reader.as_ref().is_none_or(|(path, _)| path != file) {
-            open.reader = Some((file.to_path_buf(), RegionFile::open(file)?));
+        if self.reader.as_ref().is_none_or(|(path, _)| path != file) {
+            self.reader = Some((file.to_path_buf(), RegionFile::open(file)?));
         }
-        let Some(record) = open
+        let Some(record) = self
             .reader
             .as_mut()
             .map_or(Ok(None), |(_, r)| r.read(pos))?
@@ -352,7 +297,13 @@ impl RegionStorageUpgrader {
         let mut root = record.nbt(limits)?;
         let version = as_int(root.tag.get("DataVersion"), -1);
         let mut changed = false;
-        for (&needed_version, modifier) in &self.builder.tag_modifiers {
+        let modifiers: Vec<(i32, Arc<TagModifier>)> = self
+            .builder
+            .tag_modifiers
+            .iter()
+            .map(|(v, m)| (*v, m.clone()))
+            .collect();
+        for (needed_version, modifier) in modifiers {
             self.upgrade_tag(&mut root.tag, needed_version);
             changed |= modifier(pos, &mut root.tag);
         }
@@ -364,19 +315,18 @@ impl RegionStorageUpgrader {
                 .map_or(0, |d| d.as_secs() as u32);
             let out = ChunkRecord::from_nbt(&root, Compression::Zlib, timestamp, limits)?;
             let target = if self.builder.recreate_region_files {
-                resolve_recreate_directory(&self.region_folder)
-                    .join(file.file_name().unwrap_or_default())
+                let dir = resolve_recreate_directory(&self.region_folder);
+                fs::create_dir_all(&dir)?;
+                dir.join(file.file_name().unwrap_or_default())
             } else {
                 file.to_path_buf()
             };
-            if open.writer.as_ref().is_none_or(|(path, _)| *path != target) {
-                if let Some(dir) = target.parent() {
-                    fs::create_dir_all(dir)?;
-                }
-                open.writer = Some((target.clone(), RegionFile::open_writable(&target, true)?));
+            if self.writer.as_ref().is_none_or(|(path, _)| *path != target) {
+                self.writer = Some((target.clone(), RegionFile::open_writable(&target, true)?));
             }
-            if let Some((_, writer)) = open.writer.as_mut() {
+            if let Some((_, writer)) = self.writer.as_mut() {
                 writer.write(pos, &out)?;
+                writer.sync()?;
             }
             return Ok(true);
         }
@@ -384,9 +334,9 @@ impl RegionStorageUpgrader {
     }
 
     /// `onFileFinished`: the rewritten file replaces the old one.
-    fn on_file_finished(&self, open: &mut OpenFiles, file: &Path) {
-        open.writer = None;
-        open.reader = None;
+    fn on_file_finished(&mut self, file: &Path) {
+        self.writer = None;
+        self.reader = None;
         let new_file = resolve_recreate_directory(file.parent().unwrap_or(Path::new(".")))
             .join(file.file_name().unwrap_or_default());
         if new_file.exists() {
@@ -403,6 +353,8 @@ impl RegionStorageUpgrader {
 
     /// `RecreatingSimpleRegionStorage.close`: the folder of the new files goes.
     fn close(&mut self) {
+        self.writer = None;
+        self.reader = None;
         if self.builder.recreate_region_files {
             let _ = fs::remove_dir_all(resolve_recreate_directory(&self.region_folder));
         }
@@ -519,7 +471,7 @@ impl WorldUpgrader {
         }
     }
 
-    /// `cancel`: stops after the chunks in hand and waits for the workers.
+    /// `cancel`: stops after the file in hand and waits for the worker.
     pub fn cancel(&mut self) {
         self.progress.set_canceled();
         if let Some(thread) = self.thread.take() {
@@ -568,44 +520,19 @@ fn work(
     erase_cache: bool,
     recreate: bool,
 ) {
-    work_with_threads(
-        base,
-        levels,
-        progress,
-        erase_cache,
-        recreate,
-        worker_threads(),
-    );
-}
-
-/// [`work`] with the number of region files upgraded at once.
-fn work_with_threads(
-    base: &Path,
-    levels: &[String],
-    progress: &Arc<UpgradeProgress>,
-    erase_cache: bool,
-    recreate: bool,
-    threads: usize,
-) {
     let started = std::time::Instant::now();
     upgrade_levels(
         base,
         levels,
         progress,
-        Builder {
-            threads,
-            ..Builder::new(UpgradeDataFixType::EntityChunk, "entities", recreate)
-        },
+        Builder::new(UpgradeDataFixType::EntityChunk, "entities", recreate),
         |_, _| {},
     );
     upgrade_levels(
         base,
         levels,
         progress,
-        Builder {
-            threads,
-            ..Builder::new(UpgradeDataFixType::PoiChunk, "poi", recreate)
-        },
+        Builder::new(UpgradeDataFixType::PoiChunk, "poi", recreate),
         |_, _| {},
     );
     let generators = generators(base).unwrap_or_default();
@@ -613,10 +540,7 @@ fn work_with_threads(
         base,
         levels,
         progress,
-        Builder {
-            threads,
-            ..Builder::new(UpgradeDataFixType::Chunk, "region", recreate)
-        },
+        Builder::new(UpgradeDataFixType::Chunk, "region", recreate),
         |builder, level| {
             let generator = generators
                 .iter()

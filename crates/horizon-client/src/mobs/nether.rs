@@ -31,6 +31,28 @@ pub fn register_blaze(m: &mut Mob) {
     m.ai.targets.add(1, HurtByTarget::new().alert());
     m.ai.targets.add(2, NearestTarget::player(true));
 }
+/// `Blaze.setCharged`, with when it rose and fell (`ints[0]`, `ints[1]`, as `age + 1`): a pack
+/// reads the charge (`is_charged`) apart from the volley that follows it.
+pub fn set_blaze_charged(m: &mut Mob, on: bool) {
+    if m.extra.flag == on {
+        return;
+    }
+    m.extra.flag = on;
+    m.extra.ints[if on { 0 } else { 1 }] = m.age as i32 + 1;
+}
+
+/// A blaze's charge in the pack's terms: the first 60 ticks of the flag, the three-second
+/// charge; the volley after it (the flag still up) is the attack, not the charge.
+pub fn blaze_charging(m: &Mob) -> bool {
+    m.extra.flag && (m.extra.ints[0] <= 0 || (m.age as i32) - m.extra.ints[0] < 60)
+}
+
+/// A blaze in its attack: the flag up, a target of its own, or the five-second rest after.
+pub fn blaze_attacking(m: &Mob) -> bool {
+    let fell = m.extra.ints[1];
+    m.extra.flag || m.ai.target.is_some() || (fell > 0 && (m.age as i32) - fell < 100)
+}
+
 /// `Blaze.BlazeAttackGoal`: melee up close, otherwise a 3-second charge and
 /// three small fireballs, then a five-second rest.
 #[derive(Clone, Debug, Default)]
@@ -53,7 +75,7 @@ impl Goal for BlazeAttack {
         self.step = 0;
     }
     fn stop(&mut self, m: &mut Mob, _: &mut Cx) {
-        m.extra.flag = false;
+        set_blaze_charged(m, false);
         self.last_seen = 0;
     }
     fn every_tick(&self) -> bool {
@@ -95,27 +117,22 @@ impl Goal for BlazeAttack {
                 self.step += 1;
                 if self.step == 1 {
                     self.time = 60;
-                    m.extra.flag = true;
+                    set_blaze_charged(m, true);
                 } else if self.step <= 4 {
                     self.time = 6;
                 } else {
                     self.time = 100;
                     self.step = 0;
-                    m.extra.flag = false;
+                    set_blaze_charged(m, false);
                 }
                 if self.step > 1 {
                     let sqd = d2.sqrt().sqrt() * 0.5;
-                    // LevelEvent 1018 at the blaze's block: the client plays the
-                    // shot (volume 2, its own pitch); nothing is drawn here.
-                    if !m.silent {
-                        let p = m.position;
-                        cx.events.push(MobEvent::LevelEventSound {
-                            sound: "entity.blaze.shoot",
-                            at: [p.x.floor() + 0.5, p.y.floor() + 0.5, p.z.floor() + 0.5],
-                            volume: 2.0,
-                            spread: 0.2,
-                        });
-                    }
+                    cx.events.push(MobEvent::Sound(
+                        "entity.blaze.shoot",
+                        m.center(),
+                        1.0,
+                        (m.random.next_float() - m.random.next_float()) * 0.2 + 1.0,
+                    ));
                     let dir = [
                         triangle(m, xd, 2.297 * sqd),
                         yd,
@@ -136,12 +153,34 @@ impl Goal for BlazeAttack {
         }
     }
 }
-/// `Blaze.aiStep`: slow falling. The burning sound and the smoke are its
-/// `isClientSide()` branch, which the window's game makes for itself
-/// (`ambient::client_ai_step`): a server neither plays them nor draws for them.
-pub fn blaze_ai_step(m: &mut Mob) {
+/// `Blaze.aiStep`: slow falling, the burning sound and smoke.
+pub fn blaze_ai_step(m: &mut Mob, events: &mut Vec<MobEvent>) {
     if !m.on_ground && m.velocity.y < 0.0 {
         m.velocity.y *= 0.6;
+    }
+    if m.random.next_int_bound(24).unwrap_or(1) == 0 {
+        let volume = 1.0 + m.random.next_float();
+        let pitch = m.random.next_float() * 0.7 + 0.3;
+        events.push(MobEvent::Sound(
+            "entity.blaze.burn",
+            m.center(),
+            volume,
+            pitch,
+        ));
+    }
+    // getRandomX(0.5), getRandomY(), getRandomZ(0.5), at rest.
+    let (w, h) = (f64::from(m.width()), f64::from(m.height()));
+    for _ in 0..2 {
+        let at = [
+            m.position.x + w * (2.0 * m.random.next_double() - 1.0) * 0.5,
+            m.position.y + h * m.random.next_double(),
+            m.position.z + w * (2.0 * m.random.next_double() - 1.0) * 0.5,
+        ];
+        events.push(MobEvent::Particles {
+            kind: "large_smoke",
+            at,
+            count: 0,
+        });
     }
 }
 /// `Blaze.customServerAiStep`: rise toward a target above the allowed offset.
@@ -156,9 +195,7 @@ pub fn blaze_server_ai_step(m: &mut Mob, cx: &mut Cx) {
         && !(t.is_player && t.creative)
         && t.eye_y > m.eye_y() + m.extra.vector[0]
     {
-        // (0.3F - y) * 0.3F: the floats widened.
-        let k = f64::from(0.3_f32);
-        m.velocity.y += (k - m.velocity.y) * k;
+        m.velocity.y += (0.3 - m.velocity.y) * 0.3;
     }
 }
 /// `BlazeModel.setupAnim`: three rings of rods circling and bobbing.

@@ -2,9 +2,8 @@
 //! test each mob's reach against every item (`Mob.aiStep`'s looting, the
 //! foxes' and dolphins' item searches). A reach that meets no cell holding an
 //! item meets no item, so its scan, which would find nothing, is skipped; a
-//! reach near an item scans as before, in the same order, with the same tests,
-//! jumping over the items of the cells it doesn't meet ([`ItemScan`]).
-use horizon_client::{entities::ItemEntity, fast_hash::FxHashMap, join_seq::JoinSeq};
+//! reach near an item scans as before, in the same order, with the same tests.
+use horizon_client::{entities::ItemEntity, fast_hash::FxHashSet, join_seq::JoinSeq};
 use horizon_core::geometry::Aabb;
 
 /// Cells of 8 blocks on each axis.
@@ -12,8 +11,7 @@ const SHIFT: i32 = 3;
 
 #[derive(Default)]
 pub(super) struct ItemAreas {
-    /// The items in each cell, by index, in the list's order.
-    cells: FxHashMap<[i32; 3], Vec<u32>>,
+    cells: FxHashSet<[i32; 3]>,
     /// What the cells were built from: the list's length, the last entity id
     /// the game handed out and the next join number. An item spawned or
     /// removed since changes one of them, and the cells are built again.
@@ -21,160 +19,42 @@ pub(super) struct ItemAreas {
 }
 
 impl ItemAreas {
-    /// Build the grid for villager item sensors only when many due sensors
-    /// would otherwise repeatedly scan a large, spatially spread item list.
-    /// Sampling a few 32-block columns avoids overhead for crowded piles.
-    pub(super) fn worthwhile(items: &[ItemEntity], queries: usize) -> bool {
-        if items.len() < 2048 || queries < 32 {
-            return false;
-        }
-        let stride = (items.len() / 32).max(1);
-        let mut columns = std::collections::HashSet::new();
-        for item in items.iter().step_by(stride) {
-            let p = item.position;
-            if p.is_finite() {
-                columns.insert((cell(p.x) >> 2, cell(p.z) >> 2));
-                if columns.len() >= 9 {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
     /// Whether an item of `items` may meet `area`: false only when none can.
     pub(super) fn may_meet(&mut self, items: &[ItemEntity], next_entity: u32, area: Aabb) -> bool {
-        self.build(items, next_entity);
+        let key = (items.len(), next_entity, JoinSeq::upcoming().get());
+        if self.built != Some(key) {
+            self.cells.clear();
+            self.cells.extend(items.iter().map(|e| {
+                let p = e.position;
+                [cell(p.x), cell(p.y), cell(p.z)]
+            }));
+            self.built = Some(key);
+        }
         if self.cells.is_empty() {
             return false;
         }
-        let Some((from, to)) = cell_span(area) else {
+        let (lo, hi) = (area.min_position(), area.max_position());
+        if !lo.is_finite() || !hi.is_finite() {
             return true;
-        };
-        if span(from, to) > self.cells.len() as i64 {
+        }
+        // An item's box spans its width sideways and upwards from its
+        // position; a margin of a whole width keeps rounding on the safe side.
+        let m = ItemEntity::WIDTH;
+        let from = [cell(lo.x - m), cell(lo.y - 2.0 * m), cell(lo.z - m)];
+        let to = [cell(hi.x + m), cell(hi.y + m), cell(hi.z + m)];
+        let span = (0..3)
+            .map(|a| i64::from(to[a]) - i64::from(from[a]) + 1)
+            .product::<i64>();
+        if span > self.cells.len() as i64 {
             return self
                 .cells
-                .keys()
+                .iter()
                 .any(|c| (0..3).all(|a| (from[a]..=to[a]).contains(&c[a])));
         }
         (from[2]..=to[2]).any(|z| {
-            (from[1]..=to[1])
-                .any(|y| (from[0]..=to[0]).any(|x| self.cells.contains_key(&[x, y, z])))
+            (from[1]..=to[1]).any(|y| (from[0]..=to[0]).any(|x| self.cells.contains(&[x, y, z])))
         })
     }
-
-    /// A scan of `items` for `area`, which jumps over the items that can't
-    /// meet it; empty when none can ([`Self::may_meet`] false).
-    pub(super) fn scan(&mut self, items: &[ItemEntity], next_entity: u32, area: Aabb) -> ItemScan {
-        let all = ItemScan {
-            near: None,
-            passed: 0,
-            len: items.len(),
-        };
-        if !self.may_meet(items, next_entity, area) {
-            return ItemScan {
-                near: Some(Vec::new()),
-                ..all
-            };
-        }
-        let Some((from, to)) = cell_span(area) else {
-            return all;
-        };
-        if span(from, to) > self.cells.len() as i64 {
-            return all;
-        }
-        let mut near = Vec::new();
-        for z in from[2]..=to[2] {
-            for y in from[1]..=to[1] {
-                for x in from[0]..=to[0] {
-                    if let Some(list) = self.cells.get(&[x, y, z]) {
-                        near.extend(list.iter().map(|&i| i as usize));
-                    }
-                }
-            }
-        }
-        near.sort_unstable();
-        ItemScan {
-            near: Some(near),
-            ..all
-        }
-    }
-
-    fn build(&mut self, items: &[ItemEntity], next_entity: u32) {
-        let key = (items.len(), next_entity, JoinSeq::upcoming().get());
-        if self.built == Some(key) {
-            return;
-        }
-        self.cells.clear();
-        for (i, e) in items.iter().enumerate() {
-            let p = e.position;
-            let at = [cell(p.x), cell(p.y), cell(p.z)];
-            self.cells.entry(at).or_default().push(i as u32);
-        }
-        self.built = Some(key);
-    }
-}
-
-/// One reach's walk over the items, in the list's order: [`Self::next_from`] gives
-/// the next index to test, past the items that lie in cells the reach doesn't
-/// meet. Told of each item the walk removes, it keeps up; if the list changes
-/// any other way (an item joins), the walk tests every item from there on.
-pub(super) struct ItemScan {
-    /// The items in the cells the reach meets, by index; `None`: every item.
-    near: Option<Vec<usize>>,
-    /// The first of `near` not yet passed.
-    passed: usize,
-    /// The list's length as the walk knows it.
-    len: usize,
-}
-
-impl ItemScan {
-    /// Whether no item can meet the reach.
-    pub(super) fn is_empty(&self) -> bool {
-        self.near.as_ref().is_some_and(Vec::is_empty)
-    }
-    /// The first index from `j` the walk must test (`len` or more: done).
-    pub(super) fn next_from(&mut self, j: usize, len: usize) -> usize {
-        if len != self.len {
-            self.near = None;
-        }
-        let Some(near) = &self.near else {
-            return j;
-        };
-        while near.get(self.passed).is_some_and(|&i| i < j) {
-            self.passed += 1;
-        }
-        near.get(self.passed).copied().unwrap_or(len).max(j)
-    }
-    /// The walk removed item `j`: the items after it moved down one.
-    pub(super) fn removed(&mut self, j: usize) {
-        self.len -= 1;
-        if let Some(near) = &mut self.near {
-            for i in near.iter_mut().filter(|i| **i > j) {
-                *i -= 1;
-            }
-        }
-    }
-}
-
-/// The cells an item meeting `area` may lie in: an item's box spans its width
-/// sideways and upwards from its position, and a margin of a whole width
-/// keeps rounding on the safe side. `None` for an area that isn't finite.
-fn cell_span(area: Aabb) -> Option<([i32; 3], [i32; 3])> {
-    let (lo, hi) = (area.min_position(), area.max_position());
-    if !lo.is_finite() || !hi.is_finite() {
-        return None;
-    }
-    let m = ItemEntity::WIDTH;
-    let from = [cell(lo.x - m), cell(lo.y - 2.0 * m), cell(lo.z - m)];
-    let to = [cell(hi.x + m), cell(hi.y + m), cell(hi.z + m)];
-    Some((from, to))
-}
-
-fn span(from: [i32; 3], to: [i32; 3]) -> i64 {
-    (0..3)
-        .map(|a| i64::from(to[a]) - i64::from(from[a]) + 1)
-        .product()
 }
 
 fn cell(v: f64) -> i32 {
@@ -189,8 +69,6 @@ mod tests {
     fn item_at(x: f64, y: f64, z: f64) -> ItemEntity {
         let p = Vec3::new(x, y, z);
         ItemEntity {
-            random: horizon_core::random::LegacyRandom::new(0),
-            rotation: [0.0, 0.0],
             join: Default::default(),
             health: 5,
             fire_ticks: 0,
@@ -212,7 +90,6 @@ mod tests {
             no_gravity: false,
             vertical_collision: false,
             horizontal_collision: false,
-            fall_distance: 0.0,
         }
     }
 
@@ -256,128 +133,6 @@ mod tests {
         assert!(cells.may_meet(&items, 1, near));
         assert!(!cells.may_meet(&items, 1, far));
         assert!(!cells.may_meet(&[], 1, near));
-    }
-
-    /// The items a walk tests that meet `area`, by position: what the scans
-    /// act on. `take` removes the item it names when the walk meets it.
-    fn walk(items: &mut Vec<ItemEntity>, area: Aabb, take: Option<f64>) -> Vec<f64> {
-        let mut cells = ItemAreas::default();
-        let mut scan = cells.scan(items, 1, area);
-        let (mut met, mut j) = (Vec::new(), 0);
-        loop {
-            j = scan.next_from(j, items.len());
-            let Some(e) = items.get(j) else {
-                break;
-            };
-            if !area.intersects(e.bounds()) {
-                j += 1;
-                continue;
-            }
-            met.push(e.position.x);
-            if take == Some(e.position.x) {
-                items.remove(j);
-                scan.removed(j);
-            } else {
-                j += 1;
-            }
-        }
-        met
-    }
-
-    #[test]
-    fn a_walk_meets_what_a_full_scan_meets_in_the_same_order() {
-        let mut items = Vec::new();
-        for i in 0..60 {
-            let x = -40.0 + f64::from(i) * 1.37;
-            items.push(item_at(
-                x,
-                64.0 + f64::from(i % 3) * 0.6,
-                (x * 0.7).sin() * 9.0,
-            ));
-        }
-        for k in 0..40 {
-            let x = -42.0 + f64::from(k) * 2.11;
-            let area = Aabb::new(Vec3::new(x, 63.5, -10.0), Vec3::new(x + 3.3, 65.5, 10.0));
-            let full: Vec<f64> = items
-                .iter()
-                .filter(|e| area.intersects(e.bounds()))
-                .map(|e| e.position.x)
-                .collect();
-            assert_eq!(walk(&mut items.clone(), area, None), full, "{area:?}");
-        }
-    }
-
-    #[test]
-    fn a_walk_keeps_up_with_the_items_it_removes() {
-        let xs = [1.0, 30.0, 1.5, 31.0, 2.0, 2.5];
-        let mut items: Vec<ItemEntity> = xs.iter().map(|&x| item_at(x, 64.0, 1.0)).collect();
-        let area = Aabb::new(Vec3::new(0.0, 63.0, 0.0), Vec3::new(3.0, 65.0, 2.0));
-        assert_eq!(walk(&mut items, area, Some(1.5)), vec![1.0, 1.5, 2.0, 2.5]);
-        assert_eq!(items.len(), 5);
-    }
-
-    #[test]
-    fn a_walk_tests_an_item_that_joins_during_it() {
-        let mut items = vec![item_at(1.0, 64.0, 1.0), item_at(40.0, 64.0, 1.0)];
-        let area = Aabb::new(Vec3::new(0.0, 63.0, 0.0), Vec3::new(3.0, 65.0, 2.0));
-        let mut cells = ItemAreas::default();
-        let mut scan = cells.scan(&items, 1, area);
-        assert_eq!(scan.next_from(0, items.len()), 0);
-        // One joins at the end, inside the reach, after the walk began.
-        items.push(item_at(2.0, 64.0, 1.0));
-        assert_eq!(scan.next_from(1, items.len()), 1);
-        assert_eq!(scan.next_from(2, items.len()), 2);
-    }
-
-    #[test]
-    fn villager_sensing_candidates_match_full_scan_order() {
-        let items: Vec<_> = (0..2600)
-            .map(|i| {
-                let x = f64::from(i % 52) * 31.0 - 800.0;
-                let z = f64::from(i / 52) * 31.0 - 750.0;
-                item_at(x, 64.0 + f64::from(i % 3) * 0.25, z)
-            })
-            .collect();
-        assert!(ItemAreas::worthwhile(&items, 32));
-        assert!(!ItemAreas::worthwhile(&items, 31));
-
-        let clustered: Vec<_> = (0..2048).map(|_| item_at(1.0, 64.0, 1.0)).collect();
-        assert!(!ItemAreas::worthwhile(&clustered, 32));
-
-        let mut cells = ItemAreas::default();
-        for (x, z) in [
-            (-800.0, -750.0),
-            (-80.0, 40.0),
-            (0.0, 0.0),
-            (220.0, -130.0),
-            (790.0, 770.0),
-        ] {
-            // A villager's inflated item sensor box, with a conservative
-            // fraction for the item bounding box at cell boundaries.
-            let area = Aabb::new(
-                Vec3::new(x - 32.4, 48.0, z - 32.4),
-                Vec3::new(x + 32.4, 80.0, z + 32.4),
-            );
-            let expected: Vec<usize> = items
-                .iter()
-                .enumerate()
-                .filter_map(|(i, e)| area.intersects(e.bounds()).then_some(i))
-                .collect();
-            let mut scan = cells.scan(&items, 1, area);
-            let mut actual = Vec::new();
-            let mut j = 0;
-            loop {
-                j = scan.next_from(j, items.len());
-                let Some(e) = items.get(j) else {
-                    break;
-                };
-                if area.intersects(e.bounds()) {
-                    actual.push(j);
-                }
-                j += 1;
-            }
-            assert_eq!(actual, expected, "sensor at {x}, {z}");
-        }
     }
 
     #[test]

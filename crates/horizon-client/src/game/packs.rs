@@ -17,7 +17,6 @@ use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration, Instant},
 };
 
 /// Where overlay roots are built (beside options.txt).
@@ -31,11 +30,20 @@ pub fn packs_dir() -> PathBuf {
         .unwrap_or_default()
         .join("resourcepacks")
 }
-mod folder;
-
+/// Where the addons are: `addons/` beside `resourcepacks/`.
+pub fn addons_dir() -> PathBuf {
+    std::env::current_dir().unwrap_or_default().join("addons")
+}
 /// `Util.getPlatform().openPath`: the system file manager on the folder.
 pub fn open_folder(dir: &Path) {
-    if let Err(e) = folder::command(dir).and_then(|mut command| command.spawn()) {
+    let program = if cfg!(target_os = "windows") {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    if let Err(e) = std::process::Command::new(program).arg(dir).spawn() {
         log::warn!("Horizon: could not open {}: {e}", dir.display());
     }
 }
@@ -51,24 +59,20 @@ pub fn open_uri(uri: &str) {
     #[cfg(not(windows))]
     open_folder(Path::new(uri));
 }
-/// The resource root to load from: the selection and a server's packs, which go on top
-/// (`Pack.Position.TOP`, fixed), laid over `base`. `base` is the mods' content root
-/// ([`super::mods::content_root`] of `vanilla`), so mod resources sit below the player's packs
-/// as in vanilla, and a pack change leaves the content root's cache alone (#12403). Built-in
-/// packs are found in `vanilla`.
+/// The resource root to load from, given the vanilla root, the selection and
+/// a server's packs, which go on top (`Pack.Position.TOP`, fixed).
 pub fn startup_root(
     vanilla: &Path,
-    base: &Path,
     selected: &[String],
     server: &[Pack],
 ) -> std::io::Result<PathBuf> {
-    let all = packs::discover(vanilla, &packs_dir());
+    let all = packs::discover_all(vanilla, &packs_dir(), &addons_dir());
     let mut enabled = packs::enabled(&all, selected);
     enabled.extend_from_slice(server);
-    packs::resource_root(base, &enabled, &cache_dir())
+    packs::resource_root(vanilla, &enabled, &cache_dir())
 }
 fn info(p: &Pack) -> PackInfo {
-    let built_in = !p.id.starts_with("file/");
+    let built_in = !(p.id.starts_with("file/") || packs::is_addon_id(&p.id));
     PackInfo {
         id: p.id.clone(),
         title: p.title.clone(),
@@ -140,28 +144,9 @@ pub(super) fn pack_infos(vanilla: &Path, server: &[Pack]) -> Vec<PackInfo> {
     infos.push(vanilla_info(vanilla));
     infos
 }
-/// The folder packs' Polytone config entries (#11486), by pack id, for those that have some:
-/// what the Pack Options page edits.
-pub(super) fn pack_configs(vanilla: &Path) -> std::collections::BTreeMap<String, packs::Configs> {
-    packs::discover(vanilla, &packs_dir())
-        .into_iter()
-        .filter(|p| !p.polytone_configs.entries().is_empty())
-        .map(|p| (p.id, p.polytone_configs))
-        .collect()
-}
-/// The player changed Pack Options: `chosen` replaces their choices for `entries`, kept in
-/// `polytone-configs.json`.
-pub(super) fn save_pack_options(
-    entries: &[String],
-    chosen: std::collections::BTreeMap<String, packs::ConfigValue>,
-) {
-    let mut all = packs::polytone_choices();
-    all.retain(|id, _| !entries.contains(id));
-    all.extend(chosen);
-    if let Err(e) = packs::save_polytone_choices(&packs::polytone_choices_file(), &all) {
-        log::warn!("could not save the pack options: {e}");
-    }
-    packs::set_polytone_choices(all);
+/// Packs the Addons screen lists: the `addons/` folder's.
+pub(super) fn addon_infos() -> Vec<PackInfo> {
+    packs::addons(&addons_dir()).iter().map(info).collect()
 }
 impl Game<'_> {
     pub(super) fn vanilla_root(&self) -> PathBuf {
@@ -192,12 +177,11 @@ impl Game<'_> {
     /// (`PackSelectionScreen` makes its `PackSelectionModel` from them).
     pub(super) fn refresh_pack_lists(&mut self) {
         let infos = pack_infos(&self.vanilla_root(), &self.server_packs.active);
-        let configs = pack_configs(&self.vanilla_root());
         let browsing = self.settings.extras.pack_browser;
         let o = &mut self.ui.options;
         o.pack_browser = browsing;
         o.pack_infos = infos;
-        o.pack_configs = configs;
+        o.addon_infos = addon_infos();
         o.pack_selection = self.settings.resource_packs.clone();
         o.pack_screen = None;
     }
@@ -241,7 +225,6 @@ impl Game<'_> {
             let selection = self.settings.resource_packs.clone();
             let infos = pack_infos(&self.vanilla_root(), &self.server_packs.active);
             self.ui.options.pack_infos = infos;
-            self.ui.options.pack_configs = pack_configs(&self.vanilla_root());
             self.ui.options.pack_selection = selection;
             self.ui.options.pack_screen = None;
         }
@@ -265,7 +248,7 @@ impl Game<'_> {
     /// screen again, with the error.
     fn selection_reload_failed(&mut self, error: &str) {
         log::warn!("Horizon: resource reload failed: {error}");
-        let all = packs::discover(&self.vanilla_root(), &packs_dir());
+        let all = packs::discover_all(&self.vanilla_root(), &packs_dir(), &addons_dir());
         if packs::able_to_clear_any_pack(&all, &self.settings.resource_packs) {
             // clearResourcePacksOnError.
             log::info!("Caught error loading resourcepacks, removing all selected resourcepacks");
@@ -277,10 +260,8 @@ impl Game<'_> {
                 match &mut self.server_packs.load_fail {
                     Some(toast) => toast.reset(title, None),
                     None => {
-                        if self.toast_allowed("system", "pack_load_failure") {
-                            self.server_packs.load_fail =
-                                Some(horizon_client::toasts::SystemToast::new(title, None));
-                        }
+                        self.server_packs.load_fail =
+                            Some(horizon_client::toasts::SystemToast::new(title, None));
                     }
                 }
                 return;
@@ -307,11 +288,10 @@ impl Game<'_> {
         if self.ui.vanilla_root.as_os_str().is_empty() {
             self.ui.vanilla_root = vanilla.clone();
         }
-        let (selected, server, mods, disabled, dev_mods) = (
+        let (selected, server, mods, dev_mods) = (
             self.settings.resource_packs.clone(),
             self.server_packs.active.clone(),
-            self.applied_mods(),
-            self.settings.mods.disabled.clone(),
+            self.settings.mods.enabled.clone(),
             self.options.dev_mods.clone(),
         );
         let (assets, res, context) = (
@@ -322,8 +302,8 @@ impl Game<'_> {
         let (unicode, japanese) = (self.settings.force_unicode, self.settings.japanese_glyphs);
         self.pack_reload = Some(PackReload::spawn(kind, move |progress| {
             stage_pack(
-                &vanilla, &selected, &server, &mods, &disabled, &dev_mods, &assets, &res, &context,
-                unicode, japanese, progress,
+                &vanilla, &selected, &server, &mods, &dev_mods, &assets, &res, &context, unicode,
+                japanese, progress,
             )
             .map_err(|e| e.to_string())
         })?);
@@ -341,7 +321,6 @@ impl Game<'_> {
             staged.and_then(|staged| self.apply_staged_pack(staged).map_err(|e| e.to_string()));
         match kind {
             ReloadKind::Selection => {
-                self.mods_reloaded(result.is_ok());
                 if let Err(e) = result {
                     self.selection_reload_failed(&e);
                 }
@@ -363,14 +342,12 @@ impl Game<'_> {
             pack,
             textures,
             cem,
+            bedrock,
             block_entity_shapes,
             sounds,
             ui_metadata,
             language,
         } = staged;
-        // The packs' Polytone creative tab modifiers.
-        let tab_modifiers = horizon_client::polytone_creative_tabs::TabModifier::read_all(&root);
-        self.creative_screen.set_pack_modifiers(tab_modifiers);
         // Keep the working GPU resources, and hand its window surface over.
         if let Some(renderer) = &mut self.renderer {
             renderer.release_surface();
@@ -388,12 +365,8 @@ impl Game<'_> {
                     Some(textures),
                     self.settings.horizon.api,
                     self.settings.horizon.translucent_batching,
-                    &self.settings.horizon,
-                    super::shader_packs::picked_pack_shape(&self.settings),
-                    self.renderer
-                        .as_ref()
-                        .map(|r| r.display_reading())
-                        .unwrap_or_default(),
+                    self.settings.horizon.wide_frame(),
+                    super::shader_packs::picked_pack_draws_flat(&self.settings),
                     (
                         self.settings.file.int("textureFiltering"),
                         self.settings.file.int("maxAnisotropyBit"),
@@ -420,7 +393,6 @@ impl Game<'_> {
         self.random_tick_sections.clear();
         self.portals.sections.clear();
         self.options.resources = root.clone();
-        self.falling_vertices.get_mut().clear();
         self.pack = pack;
         self.gui = gui;
         // The new atlas's skin and map slots are blank: players and maps
@@ -452,6 +424,12 @@ impl Game<'_> {
             .cem
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = cem;
+        *self
+            .res
+            .mob_data()
+            .bedrock
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = bedrock;
         self.res
             .block_entity_render()
             .set_shapes(block_entity_shapes);
@@ -528,7 +506,6 @@ pub(super) fn stage_pack(
     selected: &[String],
     server: &[Pack],
     mods_enabled: &BTreeSet<String>,
-    mods_disabled: &BTreeSet<String>,
     dev_mods: &[PathBuf],
     assets: &Arc<Assets>,
     res: &Resources,
@@ -537,8 +514,8 @@ pub(super) fn stage_pack(
     japanese: bool,
     progress: &super::Progress,
 ) -> horizon_client::Result<StagedPack> {
-    let base = super::mods::content_root(vanilla_root, mods_enabled, mods_disabled, dev_mods);
-    let root = startup_root(vanilla_root, &base, selected, server)?;
+    let root = startup_root(vanilla_root, selected, server)?;
+    let root = super::mods::content_root(&root, mods_enabled, dev_mods);
     progress.set(1);
     // The world's models and sprites and the GUI atlas read the same root and nothing of
     // each other: about a second each, side by side.
@@ -576,12 +553,21 @@ pub(super) fn stage_pack(
         panorama: Arc::new(panorama.unwrap_or_else(|p| std::panic::resume_unwind(p))),
     };
     progress.set(2);
+    // The grass, foliage and dry foliage colormaps are the new root's (`GrassColorReloadListener`):
+    // a pack's own tint, or vanilla's back once it is off.
+    let biomes = match horizon_client::biome::Biomes::load(&root) {
+        Ok(biomes) => Arc::new(biomes),
+        Err(e) => {
+            log::warn!("Horizon: the biome colormaps of the new resources are not read: {e}");
+            context.biomes.clone()
+        }
+    };
     let pack = PackResources::load(
         &root,
         assets.clone(),
         render,
         res.facts(),
-        context.biomes.clone(),
+        biomes,
         context.light.clone(),
     )?;
     let textures = prepare_renderer_textures(&pack);
@@ -589,6 +575,7 @@ pub(super) fn stage_pack(
         &root,
         res.mob_types(),
     ));
+    let bedrock = Arc::new(horizon_client::mobs::bedrock::BedrockMobs::load(&root));
     let block_entity_shapes = res.block_entity_render().shapes_for(&root);
     progress.set(3);
     Ok(StagedPack {
@@ -597,6 +584,7 @@ pub(super) fn stage_pack(
         pack,
         textures,
         cem,
+        bedrock,
         block_entity_shapes,
         sounds,
         ui_metadata,
@@ -613,6 +601,8 @@ pub(super) struct StagedPack {
     pub textures: PreparedTextures,
     /// The packs' custom entity models (OptiFine CEM).
     pub cem: Arc<horizon_client::mobs::cem::CemModels>,
+    /// The Bedrock packs' look for mobs.
+    pub bedrock: Arc<horizon_client::mobs::bedrock::BedrockMobs>,
     /// The block entities' models, the packs' custom entity models over vanilla's.
     pub block_entity_shapes: Arc<horizon_client::block_entity_render::BlockEntityShapes>,
     /// The root's sound events, GUI sprite metadata and current language.
@@ -649,29 +639,11 @@ pub(super) struct PackReload {
     pub(super) progress: super::Progress,
     kind: ReloadKind,
     handle: Option<std::thread::JoinHandle<StageResult>>,
-    /// When the overlay went up. `LoadingOverlay.fadeInStart`, set on the
-    /// first frame it draws.
-    started: Instant,
-    /// How long the overlay stays up before the reload may be applied.
-    hold: Duration,
 }
-/// `LoadingOverlay.isReadyToFadeOut`: a reload started from inside the game
-/// (`fadeIn`) is not ready while `Util.getMillis() - fadeInStart < 1000L`, so
-/// a pack that stages in a few frames still shows its overlay for a second
-/// instead of flashing.
-pub(super) const OVERLAY_HOLD: Duration = Duration::from_millis(1000);
 impl PackReload {
     /// Starts `stage` on its own thread and returns at once.
     fn spawn(
         kind: ReloadKind,
-        stage: impl FnOnce(&super::Progress) -> StageResult + Send + 'static,
-    ) -> std::io::Result<Self> {
-        Self::spawn_holding(kind, OVERLAY_HOLD, stage)
-    }
-    /// `spawn` with the overlay's hold spelled out, so a test need not wait it.
-    fn spawn_holding(
-        kind: ReloadKind,
-        hold: Duration,
         stage: impl FnOnce(&super::Progress) -> StageResult + Send + 'static,
     ) -> std::io::Result<Self> {
         let progress = super::Progress::with(&RELOAD_LINES);
@@ -683,17 +655,14 @@ impl PackReload {
             progress,
             kind,
             handle: Some(handle),
-            started: Instant::now(),
-            hold,
         })
     }
     pub(super) fn kind(&self) -> ReloadKind {
         self.kind
     }
-    /// The staged pack once the worker is done and the overlay has had its
-    /// second (taken once); none while either is outstanding.
+    /// The staged pack once the worker is done (taken once); none while it runs.
     fn finished(&mut self) -> Option<(ReloadKind, StageResult)> {
-        if self.started.elapsed() < self.hold || !self.handle.as_ref()?.is_finished() {
+        if !self.handle.as_ref()?.is_finished() {
             return None;
         }
         let staged = self
@@ -755,36 +724,6 @@ mod tests {
             staged.err().as_deref(),
             Some("the pack reload worker panicked")
         );
-    }
-
-    /// `LoadingOverlay.isReadyToFadeOut`: a reload that stages at once still
-    /// keeps its overlay up - the 1000 ms `fadeInStart` gate - so a small pack
-    /// does not flash the Mojang logo for a frame or two.
-    #[test]
-    fn a_fast_reload_keeps_the_overlay_up_before_it_applies() {
-        assert_eq!(OVERLAY_HOLD, Duration::from_millis(1000));
-        let mut quick = PackReload::spawn_holding(ReloadKind::Selection, Duration::ZERO, |_| {
-            Err("staged".into())
-        })
-        .unwrap();
-        assert_eq!(wait(&mut quick).0, ReloadKind::Selection);
-        // A hold no test machine outlasts, however loaded: the worker is done long
-        // before the overlay has had its time.
-        let hold = Duration::from_secs(3600);
-        let mut held =
-            PackReload::spawn_holding(ReloadKind::Selection, hold, |_| Err("staged".into()))
-                .unwrap();
-        for _ in 0..500 {
-            if held.handle.as_ref().is_some_and(|h| h.is_finished()) {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        assert!(held.handle.as_ref().is_some_and(|h| h.is_finished()));
-        assert!(held.finished().is_none(), "the overlay is still up");
-        // Once the hold has passed, the staged pack is handed over.
-        held.hold = Duration::ZERO;
-        assert_eq!(wait(&mut held).0, ReloadKind::Selection);
     }
 
     #[test]

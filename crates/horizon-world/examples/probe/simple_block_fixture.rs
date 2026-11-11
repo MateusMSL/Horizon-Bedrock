@@ -45,7 +45,7 @@ struct World<'a, 'r, W, R> {
     fallback: BlockStateId,
     fluid: Option<BlockStateId>,
     fluids: &'a FluidStateTable,
-    water_mask: horizon_world::fluid::FluidMask,
+    water_mask: u8,
     survival: &'a BlockSurvivalRegistry<'r>,
     support: &'a BlockSupportRegistry<'r>,
     collision: &'a BlockCollisionRegistry<'r>,
@@ -390,7 +390,7 @@ fn fixture<R: RandomSource>(
     support: &BlockSupportRegistry<'_>,
     collision: &BlockCollisionRegistry<'_>,
     fluids: &FluidStateTable,
-    water_mask: horizon_world::fluid::FluidMask,
+    water_mask: u8,
     out: &mut impl Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let json = f["definition"].as_str().unwrap();

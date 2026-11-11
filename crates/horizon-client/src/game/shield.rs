@@ -151,27 +151,21 @@ impl Game<'_> {
         } else {
             (base + factor * outcome.blocked).floor() as i32
         };
-        if item_damage > 0
-            && !self.creative
-            && let Some(max) = blocking_item_max_damage(
-                &stack,
-                self.items()
-                    .get(&stack.item)
-                    .map_or(0, |item| item.max_damage),
-            )
-        {
+        if item_damage > 0 && !self.creative {
             let loss = self.wear(&stack, item_damage as u32);
+            let max = self
+                .res
+                .items()
+                .get(&stack.item)
+                .map_or(0, |i| i.max_damage);
             let cell = self.stack_in_mut(slot);
-            if loss > 0
-                && let Some(s) = cell.as_mut()
+            if let Some(s) = cell.as_mut()
+                && max > 0
             {
-                s.damage = s.damage.saturating_add(loss).min(max);
+                s.damage += loss;
                 if s.damage >= max {
                     let broken = s.clone();
-                    s.count -= 1;
-                    if s.count == 0 {
-                        *cell = None;
-                    }
+                    *cell = None;
                     self.using = None;
                     // ItemStack.hurtAndBreak: onEquippedItemBroken for the hand it was used from.
                     let hand = if slot == OFFHAND_SLOT {
@@ -271,11 +265,10 @@ impl Game<'_> {
             {
                 self.native_player_shield_disable(player, &name, ticks);
             }
-            let used = self
+            let item = self
                 .using
                 .and_then(|(slot, _)| self.stack_in(slot))
-                .cloned();
-            let item = used.as_ref().map(|stack| stack.item.clone());
+                .map(|stack| stack.item.clone());
             let mut cancel = false;
             if let (Some(player), Some(name), Some(item)) =
                 (self.lan_acting_uuid, self.lan_acting_name.clone(), item)
@@ -284,17 +277,6 @@ impl Game<'_> {
             }
             if !cancel {
                 self.shield_cooldown = ticks;
-                // ItemCooldowns.addCooldown(stack, ticks) on the shield's group: a guest is
-                // sent it (ServerItemCooldowns), which keeps the shield down on their screen,
-                // and the 0 that ends it.
-                if let Some(stack) = &used {
-                    let default = self
-                        .items()
-                        .get(&stack.item)
-                        .and_then(|i| i.use_cooldown.clone());
-                    let group = horizon_client::cooldowns::group(stack, default.as_ref());
-                    self.add_cooldown(group, ticks as i32);
-                }
             }
             self.using = None;
             if let Some(sound) = &component.disabled_sound {
@@ -303,29 +285,4 @@ impl Game<'_> {
             }
         }
     }
-}
-
-/// `ItemStack.isDamageableItem` and `getMaxDamage` for the blocking stack.
-fn blocking_item_max_damage(stack: &ItemStack, prototype_max: u32) -> Option<u32> {
-    let data = stack.data();
-    let component = |id| data.and_then(|data| data.other(id));
-    if stack.count == 0
-        || component("minecraft:unbreakable").is_some()
-        || component("!minecraft:max_damage").is_some()
-        || component("!minecraft:damage").is_some()
-    {
-        return None;
-    }
-    // A non-damageable prototype supplies neither MAX_DAMAGE nor DAMAGE.
-    if prototype_max == 0
-        && stack.damage == 0
-        && !data.is_some_and(|data| data.explicit_zero_damage)
-    {
-        return None;
-    }
-    let max = match component("minecraft:max_damage") {
-        Some(value) => horizon_world::datafix::dynamic::as_int(Some(value), 0).max(0) as u32,
-        None => prototype_max,
-    };
-    (max > 0).then_some(max)
 }

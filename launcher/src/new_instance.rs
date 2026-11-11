@@ -1,5 +1,5 @@
 //! New instance's kinds (docs/design-system.md, "Night"; plan R0, screen 4): Horizon, Vanilla
-//! (Minecraft: Java Edition as Mojang ships it) and Modded (with Fabric, Quilt, Forge or NeoForge). A Java kind picks
+//! (Minecraft: Java Edition as Mojang ships it) and Modded (with Fabric or Quilt). A Java kind picks
 //! its version from Mojang's public list (`minecraft_versions`), fetched once when the dialog first
 //! needs it; the game itself comes with the first Play, for an account that owns it.
 use super::*;
@@ -8,7 +8,6 @@ use crate::shell::{c, Action};
 use horizon_launcher::loaders::{self, Kind as Loader};
 use horizon_launcher::minecraft_versions::{Kind as VersionKind, Versions};
 use servers_page::Field;
-use std::sync::Arc;
 use theme::night;
 
 /// Rows the version list shows at most: the search finds the others.
@@ -30,32 +29,6 @@ pub(super) struct JavaChoice {
     pub(super) version: Option<String>,
     pub(super) snapshots: bool,
     pub(super) old: bool,
-    /// The loader's version; None: its newest stable one.
-    pub(super) loader_version: Option<String>,
-    /// The loader's versions for the chosen Minecraft version, asked of its service once.
-    pub(super) loader_versions: LoaderVersions,
-}
-
-/// A loader's versions for one Minecraft version, as the dialog has them.
-#[derive(Clone, Debug, Default)]
-pub(super) enum LoaderVersions {
-    #[default]
-    NotAsked,
-    Loading(Loader, String),
-    Ready(Loader, String, Arc<Vec<loaders::Listed>>),
-    Failed(Loader, String, String),
-}
-
-impl LoaderVersions {
-    /// The loader and Minecraft version they are for.
-    fn of(&self) -> Option<(Loader, &str)> {
-        match self {
-            LoaderVersions::NotAsked => None,
-            LoaderVersions::Loading(l, mc)
-            | LoaderVersions::Ready(l, mc, _)
-            | LoaderVersions::Failed(l, mc, _) => Some((*l, mc)),
-        }
-    }
 }
 
 impl Default for JavaChoice {
@@ -66,8 +39,6 @@ impl Default for JavaChoice {
             version: None,
             snapshots: false,
             old: false,
-            loader_version: None,
-            loader_versions: LoaderVersions::NotAsked,
         }
     }
 }
@@ -143,11 +114,7 @@ impl Launcher {
     pub(super) fn change(&mut self, f: impl FnOnce(&mut JavaChoice)) {
         let before = self.default_name();
         if let Some(j) = self.java_choice() {
-            let was = (j.loader, j.version.clone());
             f(j);
-            if was != (j.loader, j.version.clone()) {
-                j.loader_version = None;
-            }
         }
         // An instance being edited keeps its name.
         if self
@@ -194,42 +161,6 @@ impl Launcher {
                 if before {
                     this.change(|_| {});
                 }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    /// Asks the chosen loader's service for its versions for `minecraft`, unless the dialog has
-    /// them or is asking already.
-    fn ask_loader_versions(&mut self, minecraft: &str, cx: &mut Context<Self>) {
-        let Some(j) = self.java_choice() else {
-            return;
-        };
-        let loader = j.loader;
-        if j.kind != NewKind::Modded || j.loader_versions.of() == Some((loader, minecraft)) {
-            return;
-        }
-        j.loader_versions = LoaderVersions::Loading(loader, minecraft.to_string());
-        let mc = minecraft.to_string();
-        let task = cx.background_executor().spawn(async move {
-            loaders::versions(loader, &mc, &horizon_launcher::backend::get_bytes)
-        });
-        let mc = minecraft.to_string();
-        cx.spawn(async move |this, cx| {
-            let listed = task.await;
-            let _ = this.update(cx, |this, cx| {
-                let Some(j) = this.java_choice() else {
-                    return;
-                };
-                // A list for what is no longer chosen is dropped.
-                if j.loader_versions.of() != Some((loader, mc.as_str())) {
-                    return;
-                }
-                j.loader_versions = match listed {
-                    Ok(l) => LoaderVersions::Ready(loader, mc, Arc::new(l)),
-                    Err(e) => LoaderVersions::Failed(loader, mc, e),
-                };
                 cx.notify();
             });
         })
@@ -342,7 +273,6 @@ impl Launcher {
                         .h(px(6. * 32. + 8.))
                         .p(px(4.))
                         .overflow_y_scroll()
-                        .on_scroll(|_, _, cx| cx.stop_propagation())
                         .rounded(px(night::RADIUS_CONTROL))
                         .border_1()
                         .border_color(alpha(n.stroke, n.stroke_alpha))
@@ -379,18 +309,13 @@ impl Launcher {
             .child(list);
         if choice.kind == NewKind::Modded {
             let scale = self.scale;
-            let logos = Loader::ALL.map(|l| (l, self.loader_logo(l.id(), 24.)));
+            let logos = [Loader::Fabric, Loader::Quilt].map(|l| (l, self.loader_logo(l.id(), 24.)));
             let card = |loader: Loader| {
                 let logo = logos
                     .iter()
                     .find(|(l, _)| *l == loader)
                     .and_then(|(_, i)| i.clone());
                 let on = choice.loader == loader;
-                let picked = choice
-                    .loader_version
-                    .clone()
-                    .filter(|_| on)
-                    .unwrap_or_else(|| tr("newest stable version").to_string());
                 shell::action(
                     SharedString::from(format!("loader-{}", loader.id())),
                     Action::Raised,
@@ -408,7 +333,10 @@ impl Launcher {
                         .flex()
                         .flex_col()
                         .child(loader.name())
-                        .child(shell::text(night::CAPTION, c(n.muted)).child(picked)),
+                        .child(
+                            shell::text(night::CAPTION, c(n.muted))
+                                .child(tr("newest stable version").to_string()),
+                        ),
                 )
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     this.change(|j| j.loader = loader);
@@ -418,16 +346,10 @@ impl Launcher {
             rows = rows.child(heading("Loader")).child(
                 div()
                     .flex()
-                    .flex_wrap()
                     .gap(px(10.))
-                    .children(Loader::ALL.map(card)),
+                    .child(card(Loader::Fabric))
+                    .child(card(Loader::Quilt)),
             );
-            if let Some(mc) = chosen.clone() {
-                self.ask_loader_versions(&mc, cx);
-                rows = rows
-                    .child(heading("Version"))
-                    .child(self.loader_version_list(&choice, cx));
-            }
         }
         rows.child(shell::text(night::CAPTION, c(n.muted)).child(
             tr("Play downloads the game from Mojang for your account the first time, with the Java it needs.")
@@ -436,101 +358,15 @@ impl Launcher {
     }
 }
 
-impl Launcher {
-    /// The chosen loader's versions for the chosen game version, the newest first: Newest stable,
-    /// then each version, a beta marked so.
-    fn loader_version_list(&mut self, choice: &JavaChoice, cx: &mut Context<Self>) -> AnyElement {
-        let t = self.theme;
-        let n = t.night;
-        let listed = match &choice.loader_versions {
-            LoaderVersions::Ready(_, _, listed) => listed.clone(),
-            LoaderVersions::Failed(_, _, e) => {
-                return shell::text(night::UI, c(n.danger))
-                    .child(e.clone())
-                    .into_any_element();
-            }
-            _ => {
-                return shell::text(night::UI, c(n.muted))
-                    .child(tr("Loading…"))
-                    .into_any_element();
-            }
-        };
-        let row = |id: String, label: String, note: String, on: bool, pick: Option<String>| {
-            shell::row(id, on, &t)
-                .flex_none()
-                .h(px(28.))
-                .px(px(12.))
-                .gap(px(10.))
-                .child(
-                    shell::text(night::UI, c(n.ink))
-                        .relative()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(label),
-                )
-                .child(
-                    shell::text(night::CAPTION, c(n.muted))
-                        .relative()
-                        .child(note),
-                )
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                    let pick = pick.clone();
-                    this.change(|j| j.loader_version = pick);
-                    cx.notify();
-                }))
-        };
-        let newest = listed.iter().find(|l| l.stable).or(listed.first());
-        let mut rows = vec![row(
-            "loader-version-newest".into(),
-            tr("newest stable version").to_string(),
-            newest.map(|l| l.version.clone()).unwrap_or_default(),
-            choice.loader_version.is_none(),
-            None,
-        )];
-        rows.extend(listed.iter().take(ROWS).map(|l| {
-            let note = if l.stable {
-                String::new()
-            } else {
-                tr("Beta").to_string()
-            };
-            row(
-                format!("loader-version-{}", l.version),
-                l.version.clone(),
-                note,
-                choice.loader_version.as_deref() == Some(l.version.as_str()),
-                Some(l.version.clone()),
-            )
-        }));
-        div()
-            .id("loader-versions")
-            .flex()
-            .flex_col()
-            .h(px(4. * 28. + 8.))
-            .p(px(4.))
-            .overflow_y_scroll()
-            .rounded(px(night::RADIUS_CONTROL))
-            .border_1()
-            .border_color(alpha(n.stroke, n.stroke_alpha))
-            .children(rows)
-            .into_any_element()
-    }
-}
-
-/// Makes a Java instance: `name`, playing `minecraft`, with the loader version chosen for Modded
-/// (none: its newest stable one), asked of its service now, so a version it doesn't support
-/// says so here.
+/// Makes a Java instance: `name`, playing `minecraft`, with the newest stable loader for Modded
+/// (asked of its service now, so a version it doesn't support says so here).
 pub(super) fn create_java(
     choice: &JavaChoice,
     name: &str,
     minecraft: &str,
 ) -> Result<instances::Instance, String> {
     let loader = (choice.kind == NewKind::Modded)
-        .then(|| {
-            loaders::choose(
-                choice.loader.id(),
-                minecraft,
-                choice.loader_version.as_deref(),
-            )
-        })
+        .then(|| loaders::choose(choice.loader.id(), minecraft, None))
         .transpose()?;
     let made = instances::create_java(name, minecraft)?;
     match loader {

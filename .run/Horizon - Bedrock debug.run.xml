@@ -1,0 +1,23 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Horizon - Bedrock debug" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
+    <option name="buildProfileId" value="Custom:fast" />
+    <option name="command" value="run --profile fast --timings -p horizon-client -- --resources C:\Users\Mateus\AppData\Roaming\horizon-launcher\versions\nightly-2026-11-04-6475f62\.local\horizon-client\26.3" />
+    <option name="workingDirectory" value="file://$PROJECT_DIR$" />
+    <envs>
+      <env name="HORIZON_BEDROCK_DEBUG" value="1" />
+      <env name="HORIZON_LAUNCHER_EXE" value="C:\Users\Mateus\Downloads\horizon-launcher-windows-x64 (1)\horizon-launcher.exe" />
+    </envs>
+    <option name="emulateTerminal" value="true" />
+    <option name="channel" value="DEFAULT" />
+    <option name="requiredFeatures" value="true" />
+    <option name="allFeatures" value="false" />
+    <option name="withSudo" value="false" />
+    <option name="buildTarget" value="REMOTE" />
+    <option name="backtrace" value="SHORT" />
+    <option name="isRedirectInput" value="false" />
+    <option name="redirectInputPath" value="" />
+    <method v="2">
+      <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+    </method>
+  </configuration>
+</component>

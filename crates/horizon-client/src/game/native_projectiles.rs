@@ -5,7 +5,7 @@
 //! through whatever it hit.
 use super::{
     Game,
-    creatures::{ProjWorld, pickable_projectile_hit},
+    creatures::{ProjWorld, wind_charge_hit},
     dragon::{CRYSTAL_IDS, SPECIAL},
     lan_pvp::meets_players,
     native_hooks::mob_kind,
@@ -32,8 +32,16 @@ pub(super) struct Impact {
 }
 
 /// The type the mods know a projectile by: a spectral arrow is its own.
-fn projectile_type(p: &Projectile) -> &'static str {
-    p.entity_type()
+pub(super) fn projectile_type(p: &Projectile) -> &'static str {
+    let spectral = p
+        .arrow
+        .as_ref()
+        .is_some_and(|a| &*a.pickup_item.item == "minecraft:spectral_arrow");
+    if spectral {
+        "minecraft:spectral_arrow"
+    } else {
+        p.kind.id()
+    }
 }
 
 impl Game<'_> {
@@ -150,7 +158,7 @@ impl Game<'_> {
                     who: Who::Mob(id),
                     at,
                 } => {
-                    if pickable_projectile_hit(id).is_some() {
+                    if wind_charge_hit(id).is_some() {
                         canceled.push(false);
                         continue;
                     }

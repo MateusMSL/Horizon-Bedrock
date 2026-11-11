@@ -558,7 +558,7 @@ pub(super) fn content_with(
         .when(!selected.is_empty(), |d| {
             d.child(
                 text(selected)
-                    .rounded(px(if crate::glass_ui::on() { 2. } else { 0. }))
+                    .rounded(px(2.))
                     .bg(t.accent.opacity(theme::SELECTION)),
             )
         })

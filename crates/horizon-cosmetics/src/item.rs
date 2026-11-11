@@ -33,22 +33,6 @@ pub enum Slot {
     /// A name tag style: no model, a square mark drawn before the player's
     /// name and a line under it (`Item::tag`).
     NameTag,
-    /// An emote: not worn, played (`Item::emote`); its parts are props.
-    Emote,
-    /// A small creature or object floating beside the player (`Item::companion`): on no bone,
-    /// so it goes with a shoulder pet.
-    Companion,
-    /// Particles left behind while the player moves (`Item::trail`): no model.
-    Trail,
-    /// A see-through model around the feet or the body (`Item::aura`).
-    Aura,
-}
-
-impl Slot {
-    /// A trail or an aura: what "Hide other players' trails and auras" hides.
-    pub fn is_effect(self) -> bool {
-        matches!(self, Slot::Trail | Slot::Aura)
-    }
 }
 
 /// The part of the player model an item follows.
@@ -75,19 +59,6 @@ impl Bone {
             Bone::LeftLeg => "left_leg",
             Bone::RightLeg => "right_leg",
         }
-    }
-
-    /// The part's pivot in the player model at rest (pixels, y down): vanilla `PlayerModel`'s,
-    /// with the wide arms (a slim skin's sit half a pixel lower).
-    pub fn rest(self) -> glam::Vec3 {
-        let [x, y, z] = match self {
-            Bone::Head | Bone::Body => [0.0, 0.0, 0.0],
-            Bone::LeftArm => [5.0, 2.0, 0.0],
-            Bone::RightArm => [-5.0, 2.0, 0.0],
-            Bone::LeftLeg => [1.9, 12.0, 0.0],
-            Bone::RightLeg => [-1.9, 12.0, 0.0],
-        };
-        glam::Vec3::new(x, y, z)
     }
 }
 
@@ -174,51 +145,6 @@ pub struct Item {
     pub limbs: Vec<(Bone, Part)>,
     /// A name tag's line (`Slot::NameTag` only; it has no parts).
     pub tag: Option<Tag>,
-    /// How a companion floats and follows (`Slot::Companion` only).
-    pub companion: Option<crate::Companion>,
-    /// What a trail leaves (`Slot::Trail` only; it has no parts).
-    pub trail: Option<crate::Trail>,
-    /// How an aura shows (`Slot::Aura` only).
-    pub aura: Option<crate::Aura>,
-    /// How high the item gets above the player model's neck (the head's and body's pivot), in
-    /// pixels: its highest vertex with every bone at rest (`Bone::rest`), animations included.
-    /// The game lifts its wearer's name tag over it. 0 for a name tag style (no model) and for
-    /// the kinds on no bone (a companion, a trail, an aura).
-    pub top: f32,
-    /// What an emote does (`Slot::Emote` only).
-    pub emote: Option<crate::Emote>,
-    /// The animated parts, found once (`animate` runs every frame for every wearer).
-    animated: Vec<Animated>,
-}
-
-/// A part `animations` move: the index of its first animation (its name), its rest pose and
-/// its animations, in the file's order.
-#[derive(Clone, Debug, PartialEq)]
-struct Animated {
-    first: usize,
-    rest: Pose,
-    all: Vec<usize>,
-}
-
-/// Each part `animations` move, in the order of its first animation; a name no part has moves
-/// nothing.
-fn animated(roots: &[&Part], animations: &[Animation]) -> Vec<Animated> {
-    let mut out: Vec<Animated> = Vec::new();
-    for (i, anim) in animations.iter().enumerate() {
-        if let Some(a) = out
-            .iter_mut()
-            .find(|a| animations[a.first].part == anim.part)
-        {
-            a.all.push(i);
-        } else if let Some(part) = roots.iter().find_map(|r| find(r, &anim.part)) {
-            out.push(Animated {
-                first: i,
-                rest: part.pose,
-                all: vec![i],
-            });
-        }
-    }
-    out
 }
 
 #[derive(Debug, PartialEq)]
@@ -258,24 +184,15 @@ struct ItemFile {
     id: String,
     slot: Slot,
     #[serde(default)]
-    bone: Option<Bone>,
+    bone: Bone,
     #[serde(default)]
     attach: AttachFile,
-    /// Only an emote without props goes without.
-    #[serde(default)]
-    texture: Option<TextureFile>,
+    texture: TextureFile,
     parts: Vec<PartFile>,
     #[serde(default)]
     animations: Vec<Animation>,
     #[serde(default)]
     tag: Option<TagFile>,
-    #[serde(default)]
-    emote: Option<crate::emote::EmoteFile>,
-    companion: Option<crate::fx::CompanionFile>,
-    #[serde(default)]
-    trail: Option<crate::fx::TrailFile>,
-    #[serde(default)]
-    aura: Option<crate::fx::AuraFile>,
 }
 
 #[derive(Deserialize)]
@@ -381,16 +298,7 @@ impl Item {
         {
             return Err(invalid("the id is 1 to 64 of a-z, 0-9 and _"));
         }
-        let texture = match (&file.texture, file.slot) {
-            (Some(t), _) => decode_png(&t.png)?,
-            // Nothing is drawn from it: no skin slot is taken.
-            (None, Slot::Emote) if file.parts.is_empty() => Texture {
-                width: 1,
-                height: 1,
-                rgba: vec![0; 4],
-            },
-            (None, _) => return Err(Error::Texture("no texture".into())),
-        };
+        let texture = decode_png(&file.texture.png)?;
         let tag = match (file.slot, &file.tag) {
             (Slot::NameTag, Some(t)) => {
                 if !file.parts.is_empty() || !file.animations.is_empty() {
@@ -408,33 +316,6 @@ impl Item {
             (_, Some(_)) => return Err(invalid("only a name tag has a tag")),
             (_, None) => None,
         };
-        let on_bone = !matches!(file.slot, Slot::Companion | Slot::Trail | Slot::Aura);
-        if !on_bone && file.bone.is_some() {
-            return Err(invalid("a companion, a trail or an aura rides no bone"));
-        }
-        let trail = match (file.slot, file.trail) {
-            (Slot::Trail, Some(t)) => {
-                if !file.parts.is_empty() || !file.animations.is_empty() {
-                    return Err(invalid("a trail has no parts or animations"));
-                }
-                Some(t.check(texture.width, texture.height)?)
-            }
-            (Slot::Trail, None) => return Err(invalid("a trail needs its trail")),
-            (_, Some(_)) => return Err(invalid("only a trail has a trail")),
-            (_, None) => None,
-        };
-        if file.slot == Slot::Companion && file.companion.is_none() {
-            return Err(invalid("a companion needs its companion"));
-        }
-        if file.slot == Slot::Aura && file.aura.is_none() {
-            return Err(invalid("an aura needs its aura"));
-        }
-        if (file.slot != Slot::Companion && file.companion.is_some())
-            || (file.slot != Slot::Aura && file.aura.is_some())
-        {
-            return Err(invalid("only a companion has a companion, an aura an aura"));
-        }
-        let bone = file.bone.unwrap_or_default();
         let a = &file.attach;
         finite(&a.offset, "attach.offset")?;
         finite(&a.rotation, "attach.rotation")?;
@@ -459,10 +340,7 @@ impl Item {
         let mut limbs: Vec<(Bone, Part)> = Vec::new();
         for p in &file.parts {
             let part = bake(p, size, &mut names, true)?;
-            if !on_bone && p.bone.is_some() {
-                return Err(invalid(format!("{:?} rides no bone: no part does", p.name)));
-            }
-            match p.bone.filter(|b| *b != bone) {
+            match p.bone.filter(|b| *b != file.bone) {
                 None => children.push(part),
                 Some(bone) => match limbs.iter_mut().find(|(b, _)| *b == bone) {
                     Some((_, limb)) => limb.children.push(part),
@@ -481,12 +359,6 @@ impl Item {
         if names.len() > MAX_PARTS {
             return Err(Error::TooManyParts(names.len()));
         }
-        let emote = match (file.slot, file.emote) {
-            (Slot::Emote, Some(e)) => Some(e.check(&names)?),
-            (Slot::Emote, None) => return Err(invalid("an emote needs its emote")),
-            (_, Some(_)) => return Err(invalid("only an emote has an emote")),
-            (_, None) => None,
-        };
         let root = Part {
             name: "cosmetic".into(),
             pose,
@@ -517,43 +389,22 @@ impl Item {
                 )));
             }
         }
-        let mut roots = vec![&root];
-        roots.extend(limbs.iter().map(|(_, l)| l));
-        let animated = animated(&roots, &file.animations);
         let item = Item {
             id: file.id,
             slot: file.slot,
-            bone,
+            bone: file.bone,
             root,
             texture,
             animations: file.animations,
             vertices,
             limbs,
             tag,
-            top: 0.0,
-            emote,
-            companion: None,
-            trail,
-            aura: None,
-            animated,
         };
-        let extent = item.extent();
-        let companion = match file.companion {
-            Some(c) => Some(c.check(&names, extent.reach)?),
-            None if extent.reach > MAX_REACH => return Err(Error::TooFar(extent.reach)),
-            None => None,
-        };
-        let aura = match file.aura {
-            Some(a) => Some(a.check(extent.low, extent.high)?),
-            None => None,
-        };
-        let top = if on_bone { extent.top } else { 0.0 };
-        Ok(Item {
-            top,
-            companion,
-            aura,
-            ..item
-        })
+        let reach = item.reach();
+        if reach > MAX_REACH {
+            return Err(Error::TooFar(reach));
+        }
+        Ok(item)
     }
 
     /// The item's roots and the bone each rides: `root` on `bone`, then the `limbs`.
@@ -561,70 +412,43 @@ impl Item {
         std::iter::once((self.bone, &self.root)).chain(self.limbs.iter().map(|(b, p)| (*b, p)))
     }
 
-    /// The farthest any vertex gets from its bone's pivot, the highest above the neck with the
-    /// bones at rest, and the box around every vertex in the root's space (pixels): at rest, at
-    /// 32 points of each animation's period, and through an emote's props' keys.
-    fn extent(&self) -> Extent {
+    /// The farthest any vertex gets from the bone's pivot (pixels): at rest,
+    /// and at 32 points of each animation's period.
+    fn reach(&self) -> f32 {
         let mut times = vec![0.0];
         for anim in &self.animations {
             times.extend((0..32).map(|k| anim.period * k as f32 / 32.0));
         }
-        if let Some(emote) = &self.emote {
-            times.extend(emote.sample_times());
-        }
         let mut far = 0.0_f32;
-        let mut top = 0.0_f32;
-        let (mut low, mut high) = (glam::Vec3::splat(f32::MAX), glam::Vec3::splat(f32::MIN));
         let mut poses = std::collections::HashMap::new();
         for ticks in times {
             poses.clear();
             self.animate(ticks, |name, pose| {
                 poses.insert(name.to_owned(), pose);
             });
-            if let Some(emote) = &self.emote {
-                let mut props = Vec::new();
-                emote.pose_props(
-                    ticks,
-                    |name| self.rest(name),
-                    |name, pose| props.push((name.to_owned(), pose)),
-                );
-                poses.extend(props);
-            }
-            for (bone, root) in self.roots() {
-                let pivot = bone.rest();
+            for (_, root) in self.roots() {
                 walk(root, glam::Mat4::IDENTITY, &poses, &mut |p| {
                     far = far.max(p.length() * 16.0);
-                    // y points down.
-                    top = top.max(-(pivot.y + p.y * 16.0));
-                    low = low.min(p * 16.0);
-                    high = high.max(p * 16.0);
                 });
             }
         }
-        if low.x > high.x {
-            (low, high) = (glam::Vec3::ZERO, glam::Vec3::ZERO);
-        }
-        Extent {
-            reach: far,
-            top,
-            low,
-            high,
-        }
-    }
-
-    /// The rest pose of the part named `name`.
-    pub fn rest(&self, name: &str) -> Option<Pose> {
-        self.roots()
-            .find_map(|(_, r)| find(r, name))
-            .map(|p| p.pose)
+        far
     }
 
     /// The animated parts' poses at `ticks` (game ticks, any start): each
     /// is the part's rest pose with its animations added.
     pub fn animate(&self, ticks: f32, mut set: impl FnMut(&str, Pose)) {
-        for part in &self.animated {
-            let mut pose = part.rest;
-            for a in part.all.iter().map(|&i| &self.animations[i]) {
+        let mut done: Vec<&str> = Vec::new();
+        for anim in &self.animations {
+            if done.contains(&anim.part.as_str()) {
+                continue;
+            }
+            done.push(&anim.part);
+            let Some(part) = self.roots().find_map(|(_, r)| find(r, &anim.part)) else {
+                continue;
+            };
+            let mut pose = part.pose;
+            for a in self.animations.iter().filter(|a| a.part == anim.part) {
                 let turns = ticks / a.period + a.phase;
                 let axis = a.axis as usize;
                 match a.motion {
@@ -640,17 +464,9 @@ impl Item {
                     }
                 }
             }
-            set(&self.animations[part.first].part, pose);
+            set(&anim.part, pose);
         }
     }
-}
-
-/// What `Item::extent` finds (pixels).
-struct Extent {
-    reach: f32,
-    top: f32,
-    low: glam::Vec3,
-    high: glam::Vec3,
 }
 
 /// Every vertex of `part`'s subtree under `parent`, as posed by `poses`

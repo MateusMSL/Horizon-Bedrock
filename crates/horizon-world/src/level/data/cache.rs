@@ -5,10 +5,8 @@
 //! versions, corrupt payloads and write failures always use the normal loader.
 //! Snapshots live in the game's own cache folder ([`set_dir`]), never in the
 //! resource folder: that one is shared by worktrees and copied between installed
-//! versions by the launcher. Its key includes a hash of the code that resolves
-//! the tables (this crate, `horizon-core`, their dependencies; see `build.rs`),
-//! so a build that resolves them differently never reads another build's
-//! snapshot, while a rebuild that only touched other crates keeps them.
+//! versions by the launcher. Its key includes the running executable, so a build
+//! that resolves the tables differently never reads another build's snapshot.
 use super::*;
 use crate::registry::snapshot as registry_snapshot;
 use serde::{Deserialize, Serialize};
@@ -20,12 +18,12 @@ use std::{
         Mutex, OnceLock,
         atomic::{AtomicU32, Ordering},
     },
-    time::SystemTime,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 const MAGIC: &[u8; 8] = b"HZBEHAV\0";
-const VERSION: u32 = 3;
-const FILE_NAME: &str = "behaviours-v3.bin";
+const VERSION: u32 = 2;
+const FILE_NAME: &str = "behaviours-v2.bin";
 const REGISTRY_MAGIC: &[u8; 8] = b"HZREGIS\0";
 const REGISTRY_VERSION: u32 = 1;
 const REGISTRY_FILE_NAME: &str = "registry-v1.bin";
@@ -47,7 +45,7 @@ struct Snapshot {
     facts: Vec<Fact>,
     shapes: Vec<Shape>,
     shape_info: Vec<[u8; 3]>,
-    fluid_tags: [crate::fluid::FluidMask; 6],
+    fluid_tags: [u8; 6],
     blocks: Vec<Block>,
     items: HashMap<String, Item>,
 }
@@ -143,18 +141,26 @@ struct Item {
     game_master: bool,
 }
 
-/// The build that resolves the tables: a hash of this crate's and
-/// `horizon-core`'s sources, `Cargo.lock` and the profile (`build.rs`). The
-/// version constant alone misses loader changes that keep a snapshot's layout.
-fn hash_build(hasher: &mut Sha256) {
-    hash_str(hasher, env!("HORIZON_WORLD_SOURCES"));
+/// The running executable's stamp: the version constant alone misses loader
+/// changes that keep a snapshot's layout.
+fn hash_executable(hasher: &mut Sha256) -> io::Result<()> {
+    let exe = std::env::current_exe()?;
+    let built = fs::metadata(&exe)?;
+    hash_str(hasher, &exe.to_string_lossy());
+    hasher.update(built.len().to_le_bytes());
+    let modified = built
+        .modified()?
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| invalid(e.to_string()))?;
+    hasher.update(modified.as_nanos().to_le_bytes());
+    Ok(())
 }
 
 fn fingerprint(registry: &BlockRegistry, root: &Path) -> io::Result<[u8; 32]> {
     let mut hasher = Sha256::new();
     hasher.update(b"horizon resolved behaviours 2");
     // The build that resolved the tables.
-    hash_build(&mut hasher);
+    hash_executable(&mut hasher)?;
     hasher.update(sources_digest(root)?);
     // The registry argument may be modified independently of facts.json.
     hasher.update((registry.len() as u64).to_le_bytes());
@@ -435,7 +441,7 @@ impl Snapshot {
                 sturdy: fact.sturdy,
                 weak: fact.weak,
                 strong: fact.strong,
-                fluid_kind: fact.fluid.kind().index() as u8,
+                fluid_kind: fact.fluid.kind() as u8,
                 fluid_amount: fact.fluid.amount(),
                 fluid_falling: fact.fluid.falling(),
                 emission: fact.emission,
@@ -622,7 +628,9 @@ impl Snapshot {
                 if wire.shape < -1 || wire.shape >= shapes.len() as i32 {
                     return Err(invalid("cached shape index out of range"));
                 }
-                let fluid_kind = FluidKind::from_index(wire.fluid_kind as usize)
+                let fluid_kind = FluidKind::ALL
+                    .get(wire.fluid_kind as usize)
+                    .copied()
                     .ok_or_else(|| invalid("cached fluid kind out of range"))?;
                 Ok(StateFacts {
                     flags: wire.flags,
@@ -857,7 +865,7 @@ fn write(
 fn registry_fingerprint(root: &Path) -> io::Result<[u8; 32]> {
     let mut hasher = Sha256::new();
     hasher.update(b"horizon block registry 1");
-    hash_build(&mut hasher);
+    hash_executable(&mut hasher)?;
     hasher.update(paths_digest(root, &[root.join("facts.json")])?);
     Ok(hasher.finalize().into())
 }

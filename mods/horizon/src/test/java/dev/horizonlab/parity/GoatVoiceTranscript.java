@@ -14,7 +14,7 @@ import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
 import net.minecraft.world.phys.Vec3;
 
 /** The sound packets of the frozen goat scene, with server-chat phase barriers. */
-final class GoatVoiceTranscript implements PhasedTranscript {
+final class GoatVoiceTranscript {
     private final Map<Integer, Vec3> goats = new HashMap<>();
     private final List<String> lines = new ArrayList<>();
     private String phase = "setup";
@@ -22,8 +22,7 @@ final class GoatVoiceTranscript implements PhasedTranscript {
     private boolean tracked;
     private boolean done;
 
-    @Override
-    public void accept(Packet<?> packet) {
+    void accept(Packet<?> packet) {
         if (packet instanceof ClientboundAddEntityPacket p
                 && BuiltInRegistries.ENTITY_TYPE.getKey(p.getType()).toString().equals("minecraft:goat")) {
             // Keep spawn positions through removal: a death sound can name the removed entity.
@@ -57,8 +56,7 @@ final class GoatVoiceTranscript implements PhasedTranscript {
         }
     }
 
-    @Override
-    public String acknowledgement() {
+    String acknowledgement() {
         if (!tracked && goats.size() >= 18) {
             tracked = true;
             return "goat voices tracked";
@@ -68,8 +66,6 @@ final class GoatVoiceTranscript implements PhasedTranscript {
         return ack;
     }
 
-    @Override public boolean done() { return done; }
-    @Override public List<String> lines() { return lines; }
-    @Override public String request() { return "summon the goats"; }
-    @Override public String record() { return "play-goat-voice"; }
+    boolean done() { return done; }
+    List<String> lines() { return lines; }
 }

@@ -1,10 +1,7 @@
 //! `BlockStateData`: the table that maps the 1.12 block states (`blockId << 4 | data`)
 //! to 1.13 block states, and the 1.12 `Name` + `Properties` tags to those ids.
-//! The table is vanilla's `register` calls, one line each in call order, from the
-//! prepared resources (`tables::tables().block_state_data`, exported from the
-//! player's jar). A line is tab separated: the 1.12 id (`blockId << 4 | data`), the
-//! 1.13 state's name and properties, then the name and properties of each 1.12 state
-//! that maps to it; properties are `key=value` joined by `;`, sorted by key.
+//! The table itself is `block_state_data.txt`, generated from vanilla's source by
+//! `tools/gen_block_state_data.py`.
 //!
 //! Vanilla keeps one tag object per `register` call (and per defaulted id) and
 //! `ChunkPalettedStorageFix` compares them by identity, so a state is an
@@ -107,7 +104,10 @@ pub fn data() -> &'static Data {
         let mut instances = Vec::new();
         let mut id_by_old = HashMap::new();
         let mut id_by_old_name: HashMap<String, i32> = HashMap::new();
-        for line in super::tables::tables().block_state_data {
+        for line in include_str!("block_state_data.txt").lines() {
+            if line.starts_with('#') || line.is_empty() {
+                continue;
+            }
             let f: Vec<&str> = line.split('\t').collect();
             let id: usize = f[0].parse().expect("id");
             let instance = instances.len() as u32;
@@ -168,19 +168,6 @@ pub fn upgrade_block_state_tag(old: &Tag) -> Tag {
     match State::from_tag(old).and_then(|s| d.id_by_old.get(&s).copied()) {
         Some(id) if (0..4096).contains(&id) => match d.map[id as usize] {
             Some(i) => d.state(i).to_tag(),
-            None => old.clone(),
-        },
-        _ => old.clone(),
-    }
-}
-
-/// `BlockStateData.upgradeBlockStateTag` on a state given as a `State` (its properties sorted): the 1.13 state a
-/// 1.12 one becomes, or the state itself when the table has none.
-pub fn upgrade_state(old: &State) -> State {
-    let d = data();
-    match d.id_by_old.get(old).copied() {
-        Some(id) if (0..4096).contains(&id) => match d.map[id as usize] {
-            Some(i) => d.state(i).clone(),
             None => old.clone(),
         },
         _ => old.clone(),

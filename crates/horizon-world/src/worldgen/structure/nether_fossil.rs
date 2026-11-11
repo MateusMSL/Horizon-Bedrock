@@ -43,7 +43,7 @@ pub fn find_floor(
 
 /// NetherFossilPiece: a template placed whole into every chunk it touches.
 #[derive(Debug)]
-pub struct NetherFossilPiece(pub(super) TemplatePiece);
+pub struct NetherFossilPiece(TemplatePiece);
 
 /// NetherFossilPieces.addPieces.
 pub fn piece(

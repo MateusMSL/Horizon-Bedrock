@@ -232,7 +232,10 @@ pub fn roll_container(
 
 /// A saved `LootTableSeed`, if any.
 pub fn loot_seed(nbt: &Tag) -> Option<i64> {
-    horizon_client_core::nbt_value::number(nbt.get("LootTableSeed"))
+    match nbt.get("LootTableSeed") {
+        Some(Tag::Long(seed)) => Some(*seed),
+        _ => None,
+    }
 }
 
 fn text(nbt: &Compound, key: &str) -> Option<String> {
@@ -314,18 +317,6 @@ pub fn block_entities(
 mod tests {
     use super::*;
     use horizon_world::loot::{ExplorationMap, LootStack};
-
-    #[test]
-    fn a_loot_seed_is_any_number() {
-        assert_eq!(
-            loot_seed(&Tag::compound([("LootTableSeed", Tag::Int(42))])),
-            Some(42)
-        );
-        assert_eq!(
-            loot_seed(&Tag::compound([("LootTableSeed", Tag::Long(7))])),
-            Some(7)
-        );
-    }
 
     #[test]
     fn a_saved_mod_sign_uses_its_vanilla_entity_type() {

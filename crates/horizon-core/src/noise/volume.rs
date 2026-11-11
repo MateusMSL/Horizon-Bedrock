@@ -88,8 +88,7 @@ impl DensityVolume {
             (relative[i] / self.steps[i]) as usize
         }))
     }
-    #[inline]
-    pub(crate) fn coordinate(self, axis: usize, index: usize) -> i32 {
+    pub(super) fn coordinate(self, axis: usize, index: usize) -> i32 {
         self.minimum[axis].wrapping_add((index as i32).wrapping_mul(self.steps[axis]))
     }
 }

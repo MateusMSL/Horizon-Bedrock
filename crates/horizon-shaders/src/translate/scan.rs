@@ -53,15 +53,10 @@ pub(super) struct Stage<'p> {
     pub(super) attributes: Vec<(String, String, String)>,
     /// A gbuffers-style program: the matrices are the frame's, not the quad's.
     pub(super) gbuffers: bool,
-    /// `normals` and `specular` are paged maps (`GbuffersInputs::paged_maps`).
-    pub(super) paged_maps: bool,
     /// The pack's fragment outputs, declared again with their locations.
     pub(super) frag_outs: Vec<(u32, String)>,
     /// Narrow outputs copied into their vec4 after the pack's `main`.
     pub(super) out_copies: Vec<String>,
-    /// Locations whose `hz_outN` is ours, filled from the pack's outputs: its vector type and
-    /// the components written so far (a bit each).
-    pub(super) wide_outs: HashMap<u32, (&'static str, u8)>,
     /// The stage calls `inverse`, which ours replaces, and doesn't define its own.
     pub(super) inverse: bool,
     /// The stage calls `textureGatherOffsets`, which naga lacks: ours is in the prelude.
@@ -79,8 +74,6 @@ pub(super) struct Stage<'p> {
     pub(super) sampler_functions: HashMap<String, Vec<bool>>,
     /// The pack's structs: each member's type and name with its array suffix.
     pub(super) structs: HashMap<String, Vec<(String, String)>>,
-    /// `out struct S { .. } s;`: the qualifiers and `S`, read with the declarators after `}`.
-    struct_qualifiers: Vec<usize>,
     pub(super) outputs: BTreeSet<u32>,
     pub(super) frag_coord: bool,
     /// Tokens written differently, by index.
@@ -252,23 +245,6 @@ fn widened(ty: &str) -> Option<(&'static str, &'static str)> {
     })
 }
 
-/// A scalar or vector fragment output's vec4 of its kind, its width, and the value the
-/// components no output writes start from (alpha 1, as `widened` fills them).
-fn output_kind(ty: &str) -> Option<(&'static str, usize, &'static str)> {
-    let (wide, fill) = match ty.trim_end_matches(['2', '3', '4']) {
-        "float" | "vec" => ("vec4", "vec4(0.0, 0.0, 0.0, 1.0)"),
-        "int" | "ivec" => ("ivec4", "ivec4(0, 0, 0, 1)"),
-        "uint" | "uvec" => ("uvec4", "uvec4(0u, 0u, 0u, 1u)"),
-        _ => return None,
-    };
-    let width = match ty.as_bytes().last() {
-        Some(&n @ b'2'..=b'4') if ty.contains("vec") => (n - b'0') as usize,
-        _ if ty.contains("vec") => return None,
-        _ => 1,
-    };
-    Some((wide, width, fill))
-}
-
 /// `sampler2D`, `isampler3D`, `usampler2D`, `sampler2DShadow`...
 pub(super) fn is_sampler_type(t: &str) -> bool {
     t.trim_start_matches(['i', 'u']).starts_with("sampler")
@@ -335,7 +311,6 @@ impl<'p> Stage<'p> {
             attributes: Vec::new(),
             frag_outs: Vec::new(),
             out_copies: Vec::new(),
-            wide_outs: HashMap::new(),
             inverse: false,
             gather_offsets: false,
             query_lod: false,
@@ -344,11 +319,9 @@ impl<'p> Stage<'p> {
             trinary: Vec::new(),
             sampler_functions: HashMap::new(),
             structs: HashMap::new(),
-            struct_qualifiers: Vec::new(),
             outputs: BTreeSet::new(),
             frag_coord: false,
             gbuffers: false,
-            paged_maps: false,
             replaced: HashMap::new(),
             inits: Vec::new(),
             globals: BTreeSet::new(),
@@ -536,35 +509,22 @@ impl<'p> Stage<'p> {
 
     /// Core names share the compatibility state for geometry, including shadow transforms.
     /// Authored non-uniform globals (or uniforms of another type) keep their own meaning.
-    /// `normalMatrix` is the core profile's only (ShaderDoc's `gl_NormalMatrix`, as #9136 quotes
-    /// it): in a compatibility-profile stage it stays a uniform of the frame, read as zero.
-    /// `textureMatrix` is `gl_TextureMatrix[0]` in the vertex stage only: our probes read the
-    /// identity in Iris 1.11.7's terrain and shadow vertex stages, and zero in the terrain
-    /// fragment stage (#9080).
     pub(super) fn core_matrix(&self, name: &str) -> Option<&'static str> {
-        let (matrix, ty) = match name {
-            "projectionMatrix" => ("hz_ProjectionMatrix", "mat4"),
-            "modelViewMatrix" => ("hz_ModelViewMatrix", "mat4"),
-            "normalMatrix" if self.core_profile() => ("hz_NormalMatrix", "mat3"),
-            "textureMatrix" if self.kind == ShaderStage::Vertex => ("hz_TextureMatrix[0]", "mat4"),
+        let matrix = match name {
+            "projectionMatrix" => "hz_ProjectionMatrix",
+            "modelViewMatrix" => "hz_ModelViewMatrix",
             _ => return None,
         };
         if !self.gbuffers
             || (self.globals.contains(name)
-                && !self.uniforms.iter().any(|(n, t, _)| n == name && t == ty))
+                && !self
+                    .uniforms
+                    .iter()
+                    .any(|(n, ty, _)| n == name && ty == "mat4"))
         {
             return None;
         }
         Some(matrix)
-    }
-
-    /// The stage is in the core profile: a `#version` of 150 or later that doesn't name the
-    /// compatibility profile. A fit of our #9136 probe's Iris 1.11.7 pictures (`normalMatrix` set
-    /// at `330 core`, `330` and `150`, zero at `330 compatibility`), not Iris's rule. Below 150 is
-    /// unmeasured (Iris drew no geometry for the `140` probe) and stays as before.
-    fn core_profile(&self) -> bool {
-        matches!(&self.pp.version, Some((version, profile))
-            if *version >= 150 && profile.as_deref() != Some("compatibility"))
     }
 
     /// Remember names without interpreting their values. Commas inside constructors and array
@@ -594,26 +554,9 @@ impl<'p> Stage<'p> {
 
     /// A statement at global scope, tokens `from..to` (without its `;`, or before a `{`).
     pub(super) fn global(&mut self, from: usize, to: usize, body: bool) {
-        let mut words: Vec<usize> = (from..to)
+        let words: Vec<usize> = (from..to)
             .filter(|&i| significant(self.tokens[i]))
             .collect();
-        // A struct defined in an interface declaration (GLSL 4.60, 4.1.8): `flat out struct S
-        // { .. } s;` declares `s` as `flat out S s;` would, after the definition.
-        let pending = std::mem::take(&mut self.struct_qualifiers);
-        if body {
-            if let Some(s) = words.iter().position(|&i| self.tokens[i] == "struct")
-                && let Some(&name) = words.get(s + 1)
-                && words[..s]
-                    .iter()
-                    .any(|&i| matches!(self.tokens[i], "in" | "out" | "varying"))
-            {
-                self.struct_qualifiers = words[..s].to_vec();
-                self.struct_qualifiers.push(name);
-                return;
-            }
-        } else {
-            words.splice(0..0, pending);
-        }
         // A prototype: a `(` before any `=`, and no storage qualifier.
         let paren = words
             .iter()
@@ -629,7 +572,6 @@ impl<'p> Stage<'p> {
         let mut k = 0;
         let mut storage = None;
         let mut location = None;
-        let mut component = None;
         let mut format = None;
         let mut access = "";
         let mut coherent = false;
@@ -646,11 +588,6 @@ impl<'p> Stage<'p> {
                             location = words
                                 .get(j + 1)
                                 .and_then(|&n| self.tokens[n].parse::<u32>().ok());
-                        }
-                        "component" => {
-                            component = words
-                                .get(j + 1)
-                                .and_then(|&n| self.tokens[n].parse::<usize>().ok());
                         }
                         f if IMAGE_FORMATS.contains(&f) => format = Some(f),
                         ")" => break,
@@ -794,11 +731,6 @@ impl<'p> Stage<'p> {
                 }),
                 _ if fragment => {
                     let n = location.unwrap_or(self.outputs.len() as u32);
-                    let shared = self.wide_outs.contains_key(&n);
-                    if component.is_some_and(|c| c > 0) || shared {
-                        self.output_part(n, component.unwrap_or(0), &ty, &name, &array, ty_at);
-                        continue;
-                    }
                     self.outputs.insert(n);
                     // wgpu wants every component of the target's format written; GL fills
                     // what a narrower output leaves out. Ours is a vec4, theirs a private global.
@@ -812,8 +744,6 @@ impl<'p> Stage<'p> {
                             ));
                             self.out_copies
                                 .push(format!("hz_out{n} = {wide}({name}{fill});"));
-                            let width = output_kind(&ty).map_or(4, |(_, width, _)| width);
-                            self.wide_outs.insert(n, (wide, (1 << width) - 1));
                         }
                         None => self
                             .frag_outs
@@ -827,55 +757,6 @@ impl<'p> Stage<'p> {
                 }),
             }
         }
-    }
-
-    /// A fragment output with a `component` offset, or one sharing its location with another
-    /// (GLSL 4.60, 4.4.2): it fills components `component..` of the location's vector. Ours is
-    /// that vector, the pack's a private global copied into its components after `main`.
-    fn output_part(
-        &mut self,
-        n: u32,
-        component: usize,
-        ty: &str,
-        name: &str,
-        array: &str,
-        ty_at: usize,
-    ) {
-        let kind = output_kind(ty).filter(|_| array.is_empty());
-        let Some((wide, width, fill)) = kind.filter(|&(_, width, _)| component + width <= 4) else {
-            let message = format!(
-                "`{name}`: a `{ty}{array}` output at component {component} is not supported"
-            );
-            return self.errors.push(self.error(ty_at, &message));
-        };
-        let mask = ((1u8 << width) - 1) << component;
-        match self.wide_outs.get_mut(&n) {
-            Some((other, _)) if *other != wide => {
-                let message =
-                    format!("`{name}`: a `{ty}` output beside a `{other}` at location {n}");
-                return self.errors.push(self.error(ty_at, &message));
-            }
-            Some((_, written)) if *written & mask != 0 => {
-                let message = format!("`{name}`: components of location {n} written twice");
-                return self.errors.push(self.error(ty_at, &message));
-            }
-            Some((_, written)) => {
-                *written |= mask;
-                self.frag_outs.push((n, format!("{ty} {name};")));
-            }
-            None => {
-                self.wide_outs.insert(n, (wide, mask));
-                self.outputs.insert(n);
-                self.frag_outs.push((
-                    n,
-                    format!("layout(location = {n}) out {wide} hz_out{n}; {ty} {name};"),
-                ));
-                self.out_copies.push(format!("hz_out{n} = {fill};"));
-            }
-        }
-        let swizzle = &"xyzw"[component..component + width];
-        self.out_copies
-            .push(format!("hz_out{n}.{swizzle} = {name};"));
     }
 
     /// A global `T name = a ? b : c;` or, without `const`, any initialized global: naga only
@@ -1157,28 +1038,5 @@ impl<'p> Stage<'p> {
             self.sampler_functions
                 .insert(self.tokens[name].to_owned(), params);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::translate::Target;
-    use crate::translate::tests::program;
-
-    #[test]
-    fn a_struct_defined_in_a_varyings_declaration_is_a_varying() {
-        // GLSL 4.60, 4.1.8: the qualifiers before `struct` apply to the declarators after `}`.
-        let vsh = "#version 120\nflat varying struct P { vec2 a; vec2 b; } p, q;\nvoid main() {\n    \
-                   gl_Position = ftransform();\n    p.a = vec2(1.0);\n    q.b = vec2(2.0);\n}\n";
-        let fsh = "#version 120\nflat varying struct P { vec2 a; vec2 b; } p, q;\n\
-                   void main() { gl_FragData[0] = vec4(p.a, q.b); }\n";
-        let p = program(
-            &[("composite.vsh", vsh), ("composite.fsh", fsh)],
-            Target::Buffers,
-        )
-        .unwrap_or_else(|e| panic!("{e:?}"));
-        // `p` and `q`, each packed into one slot.
-        let inputs = p.fragment.entry_points[0].function.arguments.len();
-        assert_eq!(inputs, 2, "{inputs} inputs");
     }
 }

@@ -1,7 +1,7 @@
 //! The wither (`WitherBoss`): eleven seconds of invulnerable charging that
 //! end in a blast, then flying after its target while three heads fire
-//! skulls, breaking blocks around it when hurt, immune to arrows and a
-//! player's wind charges below half health.
+//! skulls, breaking blocks around it when hurt, immune to arrows below half
+//! health.
 use super::{
     DamageKind, Mob, MobEvent, MobWorld, Species, Who,
     anim::{Poses, State},
@@ -222,68 +222,23 @@ pub fn client_tick(m: &mut Mob, find: impl Fn(i32) -> Option<([f64; 3], f64)>) {
     m.anim.vo = m.anim.v;
     turn_heads(m, find);
 }
-/// `WitherBoss.aiStep` after `super.aiStep()`: the side heads turn, then
-/// smoke and (while powered) the dim entity-effect particles at each head.
-pub fn ai_step(
-    m: &mut Mob,
-    w: &MobWorld,
-    level_random: &mut impl RandomSource,
-    events: &mut Vec<MobEvent>,
-) {
+/// `WitherBoss.aiStep` after `super.aiStep()`: the side heads turn, smoke
+/// rises from the heads (the particle offsets are drawn on the server too).
+pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     turn_heads(m, |id| target_pos(w, id).map(|(p, eye, _)| (p, eye)));
-    head_particles(m, level_random, events);
-}
-/// `WitherBoss.getHeadX/Y/Z`: the centre head is 3 blocks up, the side heads
-/// 2.2 up and 1.3 out, all scaled.
-fn particle_head(m: &Mob, index: usize, scale: f64) -> [f64; 3] {
-    let p = m.position;
-    if index == 0 {
-        return [p.x, p.y + 3.0 * scale, p.z];
-    }
-    let a = (m.body_yaw + 180.0 * (index as f32 - 1.0)).to_radians();
-    [
-        p.x + f64::from(a.mcos()) * 1.3 * scale,
-        p.y + 2.2 * scale,
-        p.z + f64::from(a.msin()) * 1.3 * scale,
-    ]
-}
-/// `WitherBoss.aiStep`'s head particles. Smoke is one per head, offset by
-/// the wither's gaussian times `0.3 * getScale()`. While powered, the level
-/// random picks one tick in four for an entity-effect particle `(0.7, 0.7,
-/// 0.5)` at a fresh offset. A wither that is still charging then adds the
-/// `(0.7, 0.7, 0.9)` cloud. `Level.addParticle` on the server draws nothing,
-/// so a window following a server runs this on its own copy too.
-pub fn head_particles(
-    m: &mut Mob,
-    level_random: &mut impl RandomSource,
-    events: &mut Vec<MobEvent>,
-) {
     let powered = powered(m);
-    let scale = super::riders::scale(m);
-    let radius = 0.3 * scale;
     for i in 0..3 {
-        let h = particle_head(m, i, scale);
-        let at = [
-            h[0] + m.random.next_gaussian() * radius,
-            h[1] + m.random.next_gaussian() * radius,
-            h[2] + m.random.next_gaussian() * radius,
-        ];
+        let h = head_pos(m, i);
+        for _ in 0..3 {
+            m.random.next_gaussian();
+        }
         events.push(MobEvent::Particles {
             kind: "smoke",
-            at,
+            at: h,
             count: 0,
         });
-        if powered && level_random.next_int_bound(4).unwrap_or(1) == 0 {
-            let at = [
-                h[0] + m.random.next_gaussian() * radius,
-                h[1] + m.random.next_gaussian() * radius,
-                h[2] + m.random.next_gaussian() * radius,
-            ];
-            events.push(MobEvent::ParticleColored {
-                at,
-                color: [0.7, 0.7, 0.5],
-            });
-        }
+        // The entity-effect particles roll the level random, not the wither's.
+        let _ = powered;
     }
     if m.extra.counter > 0 {
         charging_particles(m, events);
@@ -328,13 +283,11 @@ pub fn custom_server_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEven
                 charged: false,
                 name,
                 in_water: m.fluids.in_water,
-                kind: m.kind.id.clone(),
             });
             events.push(MobEvent::Explode(
                 [m.position.x, m.eye_y(), m.position.z],
                 7.0,
                 m.species(),
-                m.silent,
             ));
             // Global level event 1023.
             if !m.silent {
@@ -413,13 +366,7 @@ pub fn custom_server_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEven
             let mut found: Vec<i32> = w
                 .others
                 .iter()
-                .filter(|s| {
-                    s.alive
-                        && s.id != m.id
-                        && !undead(s.species)
-                        && near(s.position)
-                        && m.sees(w, Who::Mob(s.id))
-                })
+                .filter(|s| s.alive && s.id != m.id && !undead(s.species) && near(s.position))
                 .map(|s| s.id as i32)
                 .collect();
             if let Some(pl) = &w.player
@@ -427,7 +374,6 @@ pub fn custom_server_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEven
                 && !pl.creative
                 && !pl.spectator
                 && near(pl.position)
-                && m.sees(w, Who::Player)
             {
                 found.push(-1);
             }
@@ -503,14 +449,6 @@ pub fn accepts(m: &mut Mob, kind: DamageKind, attacker: Option<Who>, others_unde
     m.extra.ints[5] += 3;
     true
 }
-/// `WitherBoss.hurtServer`: a powered wither's armor refuses a direct
-/// `WindCharge`. A breeze's `BreezeWindCharge` is not one (both only extend
-/// `AbstractWindCharge`), so it still hurts. Checked on the projectile, not on
-/// `DamageKind`: the `wind_charge` damage type alone has no direct charge
-/// (`/damage @s minecraft:wind_charge`) and goes through.
-pub fn armor_refuses(m: &Mob, direct: &ProjectileKind) -> bool {
-    m.species() == Species::Wither && *direct == ProjectileKind::WindCharge && powered(m)
-}
 /// `WitherBossModel.setupAnim`.
 pub fn anim(m: &Mob, s: &State, p: &mut Poses) {
     let body =
@@ -580,40 +518,6 @@ mod tests {
         assert!(!shielded_from(Species::Wither, Species::Creeper));
         assert!(!shielded_from(Species::Zombie, Species::Wither));
     }
-    /// `WitherBoss.hurtServer` tests `instanceof WindCharge`: a powered wither
-    /// took a point of damage from every charge (#8779), and a breeze's charge,
-    /// a sibling class, has to keep hurting it.
-    #[test]
-    fn only_a_powered_withers_armor_refuses_a_wind_charge() {
-        use crate::mobs::Damage;
-        use crate::mobs::sensor_scan_tests::kind;
-        use std::sync::Arc;
-        let mob = |species, health: f32| {
-            let mut kind = kind();
-            Arc::make_mut(&mut kind).species = species;
-            let mut m = Mob::new(1, kind, Vec3::ZERO, 0.0);
-            m.attrs.max_health = 300.0;
-            m.health = health;
-            m
-        };
-        let (charge, breeze) = (ProjectileKind::WindCharge, ProjectileKind::BreezeWindCharge);
-        // `isPowered` is `health <= max / 2`: the armor starts at exactly half.
-        let half = mob(Species::Wither, 150.0);
-        assert!(armor_refuses(&half, &charge));
-        assert!(armor_refuses(&mob(Species::Wither, 1.0), &charge));
-        assert!(!armor_refuses(&half, &breeze));
-        assert!(!armor_refuses(&mob(Species::Wither, 150.5), &charge));
-        assert!(!armor_refuses(&mob(Species::Zombie, 150.0), &charge));
-
-        // What `wind_charge_damage` lets through still lands on the armor...
-        let mut m = mob(Species::Wither, 150.0);
-        assert!(m.damage(1.0, Damage::of(DamageKind::Thrown)));
-        assert!(m.health < 150.0);
-        // ...and arrows stay refused by the damage filter.
-        let mut m = mob(Species::Wither, 150.0);
-        assert!(!m.damage(1.0, Damage::of(DamageKind::Arrow)));
-        assert_eq!(m.health, 150.0);
-    }
     /// A spawning wither rolled the three particles of `aiStep`'s
     /// `getInvulnerableTicks() > 0` block and dropped them on the floor: the
     /// potion-coloured (`0.7, 0.7, 0.9`) cloud around it never appeared (#7486).
@@ -672,168 +576,5 @@ mod tests {
         let mut events = Vec::new();
         charging_particles(&mut m, &mut events);
         assert!(events.is_empty());
-    }
-    /// `WitherBoss.aiStep`: a powered wither (at or below half health) adds an
-    /// entity-effect particle `(0.7, 0.7, 0.5)` at a head when the level
-    /// random's `nextInt(4)` is 0. A healthy wither does not roll that random.
-    #[test]
-    fn a_powered_wither_sheds_dim_effect_particles_one_tick_in_four() {
-        use crate::mobs::sensor_scan_tests::kind;
-        use horizon_core::geometry::trig::Mth;
-        use horizon_core::random::LegacyRandom;
-        use std::sync::Arc;
-        let mut kind = kind();
-        let k = Arc::make_mut(&mut kind);
-        k.id = "minecraft:wither".into();
-        k.species = Species::Wither;
-        let mut healthy = Mob::new(1, kind.clone(), Vec3::new(4.0, 64.0, -2.0), 0.0);
-        healthy.attrs.max_health = 300.0;
-        healthy.health = 151.0;
-        let mut untouched = LegacyRandom::new(7);
-        let mut level = LegacyRandom::new(7);
-        let mut events = Vec::new();
-        head_particles(&mut healthy, &mut level, &mut events);
-        assert!(events.iter().all(|e| !matches!(
-            e,
-            MobEvent::ParticleColored { color, .. } if *color == [0.7, 0.7, 0.5]
-        )));
-        assert_eq!(level.next_int(), untouched.next_int());
-
-        let mut powered = Mob::new(1, kind, Vec3::new(4.0, 64.0, -2.0), 0.0);
-        powered.attrs.max_health = 300.0;
-        powered.health = 150.0;
-        powered.body_yaw = 0.0;
-        // The level random's three nextInt(4) draws, taken from a copy so the
-        // expected heads are not read back out of the wither.
-        let mut rolls_from = LegacyRandom::new(1);
-        let rolls = [
-            rolls_from.next_int_bound(4).unwrap(),
-            rolls_from.next_int_bound(4).unwrap(),
-            rolls_from.next_int_bound(4).unwrap(),
-        ];
-        let mut level = LegacyRandom::new(1);
-        let mut probe = powered.random.clone();
-        let mut events = Vec::new();
-        head_particles(&mut powered, &mut level, &mut events);
-        let radius = 0.3;
-        let mut smoke = Vec::new();
-        let mut effect = Vec::new();
-        for i in 0..3 {
-            let h = if i == 0 {
-                [4.0, 67.0, -2.0]
-            } else {
-                let a = (180.0 * (i as f32 - 1.0)).to_radians();
-                [
-                    4.0 + f64::from(a.mcos()) * 1.3,
-                    64.0 + 2.2,
-                    -2.0 + f64::from(a.msin()) * 1.3,
-                ]
-            };
-            smoke.push([
-                h[0] + probe.next_gaussian() * radius,
-                h[1] + probe.next_gaussian() * radius,
-                h[2] + probe.next_gaussian() * radius,
-            ]);
-            if rolls[i] == 0 {
-                effect.push([
-                    h[0] + probe.next_gaussian() * radius,
-                    h[1] + probe.next_gaussian() * radius,
-                    h[2] + probe.next_gaussian() * radius,
-                ]);
-            }
-        }
-        let got_smoke: Vec<[f64; 3]> = events
-            .iter()
-            .filter_map(|e| match e {
-                MobEvent::Particles { kind, at, count: 0 } if *kind == "smoke" => Some(*at),
-                _ => None,
-            })
-            .collect();
-        let got_effect: Vec<[f64; 3]> = events
-            .iter()
-            .filter_map(|e| match e {
-                MobEvent::ParticleColored { at, color } if *color == [0.7, 0.7, 0.5] => Some(*at),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(got_smoke, smoke);
-        assert_eq!(got_effect, effect);
-        assert_eq!(
-            effect.len(),
-            rolls.iter().filter(|roll| **roll == 0).count()
-        );
-    }
-    /// `WitherBoss.customServerAiStep` finds its side heads' targets with
-    /// `TARGETING_CONDITIONS`, whose `TargetingConditions` checks line of
-    /// sight. A cow behind a wall is not picked.
-    #[test]
-    fn a_withers_side_head_does_not_pick_through_a_wall() {
-        use crate::mobs::world::with_built_test_world;
-        use crate::mobs::{Mob, Species, sensor_scan_tests::kind};
-        use horizon_core::geometry::Vec3;
-        use std::sync::Arc;
-        let run = |wall: bool| -> Option<bool> {
-            let mut found = None;
-            if !with_built_test_world(
-                &[],
-                move |world, registry| {
-                    for (cx, cz) in [
-                        (-1, -1),
-                        (-1, 0),
-                        (-1, 1),
-                        (0, -1),
-                        (0, 0),
-                        (0, 1),
-                        (1, -1),
-                        (1, 0),
-                        (1, 1),
-                    ] {
-                        world
-                            .chunks
-                            .insert((cx, cz), Arc::new(crate::chunk::Chunk::empty(cx, cz)));
-                    }
-                    let stone = registry.default_state("minecraft:stone").unwrap();
-                    for x in -8..17 {
-                        for z in -8..9 {
-                            world.set(x, 64, z, stone).unwrap();
-                        }
-                    }
-                    if wall {
-                        for x in 3..5 {
-                            for y in 65..68 {
-                                for z in -3..4 {
-                                    world.set(x, y, z, stone).unwrap();
-                                }
-                            }
-                        }
-                    }
-                },
-                |w, _| {
-                    let mut wither_kind = (*kind()).clone();
-                    wither_kind.species = Species::Wither;
-                    let mut wither =
-                        Mob::new(1, Arc::new(wither_kind), Vec3::new(0.5, 65.0, 0.5), 0.0);
-                    let mut cow_kind = (*kind()).clone();
-                    cow_kind.species = Species::Cow;
-                    let cow = Mob::new(2, Arc::new(cow_kind), Vec3::new(5.5, 65.0, 0.5), 0.0);
-                    let seen = [cow.seen(None)];
-                    let world = crate::mobs::MobWorld {
-                        others: &seen,
-                        ..w.clone()
-                    };
-                    let mut events = Vec::new();
-                    custom_server_ai_step(&mut wither, &world, &mut events);
-                    found = Some(wither.extra.ints[0] != 0);
-                },
-            ) {
-                return None;
-            }
-            found
-        };
-        let (Some(open), Some(walled)) = (run(false), run(true)) else {
-            return;
-        };
-        assert!(open, "the sighted cow is picked");
-        assert!(!walled, "the cow behind the wall is not picked");
     }
 }

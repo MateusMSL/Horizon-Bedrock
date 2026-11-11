@@ -18,9 +18,12 @@ impl FxHasher {
 impl Hasher for FxHasher {
     #[inline]
     fn write(&mut self, bytes: &[u8]) {
-        let (words, rest) = bytes.as_chunks::<8>();
+        let words = bytes.chunks_exact(8);
+        let rest = words.remainder();
         for word in words {
-            self.add(u64::from_le_bytes(*word));
+            let mut w = [0u8; 8];
+            w.copy_from_slice(word);
+            self.add(u64::from_le_bytes(w));
         }
         if !rest.is_empty() {
             let mut word = [0u8; 8];

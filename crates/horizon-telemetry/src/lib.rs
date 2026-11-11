@@ -20,9 +20,7 @@ pub mod outbox;
 pub mod payload;
 pub mod scrub;
 pub mod server_status;
-/// The machine's probes, from the platform (`horizon-system`). Kept at this path for the
-/// launcher and the benchmark.
-pub use horizon_platform::system;
+pub mod system;
 #[cfg(feature = "upload")]
 pub mod upload;
 
@@ -41,7 +39,7 @@ pub const CONSENT_VERSION: u32 = 2;
 /// The ingest server (`crates/horizon-telemetry-server`, on Railway). `HORIZON_TELEMETRY_URL`
 /// overrides it (a local server); `HORIZON_TELEMETRY_URL=off` sends nothing at all, no ping
 /// either (tests and automated runs). What is sent still depends on the player's switches.
-pub const DEFAULT_ENDPOINT: &str = horizon_addresses::TELEMETRY;
+pub const DEFAULT_ENDPOINT: &str = "https://telemetry.playhorizon.dev";
 
 /// Where items are sent, if anywhere.
 pub fn endpoint() -> Option<String> {

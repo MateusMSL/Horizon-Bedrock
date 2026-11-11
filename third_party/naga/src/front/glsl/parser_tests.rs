@@ -84,7 +84,7 @@ fn version() {
                 Error {
                     kind: ErrorKind::InvalidToken(
                         TokenValue::Identifier("version".into()),
-                        vec![TokenValue::Semicolon.into(), ExpectedToken::Eof]
+                        vec![ExpectedToken::Eof]
                     ),
                     meta: Span::new(28, 35)
                 }

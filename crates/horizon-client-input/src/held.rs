@@ -3,18 +3,15 @@
 //! device letting go (splitscreen moving the keyboard to another player, say)
 //! can't release what another still presses.
 
-use crate::actions::Action;
 use std::collections::HashMap;
 use winit::keyboard::KeyCode;
 
 /// Where a press came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Source {
-    /// The keyboard and mouse.
+    /// The keyboard and mouse, and the scripting socket acting as them.
     Keyboard,
     Pad,
-    /// `horizon-ctl`'s `key` and `mouse` and the agent commands that walk and click.
-    Agent,
 }
 
 impl Source {
@@ -22,7 +19,6 @@ impl Source {
         match self {
             Source::Keyboard => 1,
             Source::Pad => 2,
-            Source::Agent => 4,
         }
     }
 }
@@ -33,19 +29,8 @@ pub struct HeldKeys {
 }
 
 impl HeldKeys {
-    /// Whether anything holds this mapping: every device, whatever the mapping is bound to.
-    pub fn held(&self, action: Action) -> bool {
-        action.key().is_some_and(|key| self.raw(&key))
-    }
-    /// Whether a key that is no mapping's default is held (Right Shift, the arrows, Alt, the system
-    /// key), or the key a caller already holds as a key: most code wants [`HeldKeys::held`].
-    pub fn raw(&self, key: &KeyCode) -> bool {
-        self.held.contains_key(key)
-    }
-    /// The old way of asking, by a mapping's default key; clippy refuses it (`clippy.toml`). It
-    /// stays so that a change written against it says what to use instead.
     pub fn contains(&self, key: &KeyCode) -> bool {
-        self.raw(key)
+        self.held.contains_key(key)
     }
     /// `source` holds `key`. True when nothing held it before.
     pub fn press(&mut self, key: KeyCode, source: Source) -> bool {
@@ -87,7 +72,7 @@ impl HeldKeys {
     /// Held, by the keyboard unless a device already holds it: for callers
     /// that don't say where the press came from.
     pub fn insert(&mut self, key: KeyCode) -> bool {
-        if self.raw(&key) {
+        if self.contains(&key) {
             return false;
         }
         self.press(key, Source::Keyboard)
@@ -147,23 +132,11 @@ mod tests {
         assert!(!keys.press(KeyCode::Space, Source::Keyboard));
         assert!(keys.press(KeyCode::KeyW, Source::Keyboard));
         assert_eq!(keys.release_source(Source::Keyboard), vec![KeyCode::KeyW]);
-        assert!(keys.held(Action::Jump) && !keys.held(Action::Forward));
+        assert!(keys.contains(&KeyCode::Space) && !keys.contains(&KeyCode::KeyW));
         assert!(keys.held_by(&KeyCode::Space, Source::Pad));
         assert!(!keys.held_by(&KeyCode::Space, Source::Keyboard));
         assert!(keys.release(&KeyCode::Space, Source::Pad));
         assert!(keys.is_empty());
-    }
-
-    #[test]
-    fn a_script_holds_a_key_by_itself() {
-        let mut keys = HeldKeys::default();
-        keys.press(KeyCode::KeyW, Source::Agent);
-        keys.press(KeyCode::KeyW, Source::Keyboard);
-        assert!(!keys.release(&KeyCode::KeyW, Source::Keyboard));
-        assert!(keys.held(Action::Forward));
-        assert!(keys.release_source(Source::Pad).is_empty());
-        assert_eq!(keys.release_source(Source::Agent), vec![KeyCode::KeyW]);
-        assert!(!keys.held(Action::Forward));
     }
 
     #[test]
@@ -176,7 +149,7 @@ mod tests {
             keys.remove(&KeyCode::ShiftLeft),
             "remove lets go for everyone"
         );
-        assert!(!keys.held(Action::Sneak));
+        assert!(!keys.contains(&KeyCode::ShiftLeft));
         assert!(keys.release(&KeyCode::KeyA, Source::Keyboard), "never held");
     }
 }

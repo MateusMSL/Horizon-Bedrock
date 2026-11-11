@@ -5,8 +5,7 @@
 use super::*;
 use crate::glass_ui::{self as ui, white};
 use glass_home_lists::Listener;
-use horizon_launcher::browser::horizon::Standing;
-use horizon_theme::glass::{ink, radius};
+use horizon_theme::glass::radius;
 use instance_mods::ModRow;
 use servers_page::Field;
 
@@ -203,22 +202,9 @@ impl Launcher {
                 )
             }
         };
-        let standing = row.standing.as_ref().map(|s| {
-            let (tone, line) = match s {
-                Standing::Built(line) => (ui::live(), line),
-                Standing::Moved(line) => (ui::warn(), line),
-                Standing::LeftOut(line) => (ui::danger(), line),
-                Standing::Expected(true, line) => (white(ink::QUIET), line),
-                Standing::Expected(false, line) => (ui::warn(), line),
-            };
-            ui::text(13., FontWeight::MEDIUM, ink::FULL)
-                .line_height(px(19.5))
-                .text_color(tone)
-                .child(line.clone())
-        });
         ui::list_row(key, hovered, hover, &t)
             .child(icon)
-            .child(ui::list_text(row.name.clone(), note).children(standing))
+            .child(ui::list_text(row.name.clone(), note))
             .children(update.map(|u| u.relative()))
             .child(
                 controls
@@ -234,7 +220,6 @@ impl Launcher {
 /// Find mods: the Mods page, to add some to this instance.
 fn find_mods(cx: &mut Context<Launcher>) -> Listener<ClickEvent> {
     Box::new(cx.listener(|this, _: &ClickEvent, _, cx| {
-        this.mods_find_for_instance();
         this.go(Page::Mods);
         cx.notify();
     }))

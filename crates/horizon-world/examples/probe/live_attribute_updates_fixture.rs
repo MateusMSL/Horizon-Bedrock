@@ -1,7 +1,4 @@
-#[allow(
-    dead_code,
-    reason = "this fixture shares another one's source and uses part of it"
-)]
+#[allow(dead_code)]
 mod integration {
     include!("live_attributes_fixture.rs");
     use horizon_world::{

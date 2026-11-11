@@ -82,14 +82,12 @@ fn utf16(token: &str) -> Result<Vec<u16>, String> {
     if token == "-" {
         return Ok(Vec::new());
     }
-    if !token.len().is_multiple_of(4) {
+    if token.len() % 4 != 0 {
         return Err("invalid UTF-16 hex".to_owned());
     }
     token
         .as_bytes()
-        .as_chunks::<4>()
-        .0
-        .iter()
+        .chunks_exact(4)
         .map(|part| {
             u16::from_str_radix(
                 std::str::from_utf8(part).map_err(|_| "invalid UTF-16 hex")?,

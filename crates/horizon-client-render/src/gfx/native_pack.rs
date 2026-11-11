@@ -59,25 +59,6 @@ fn chosen_cells(
     chosen.unwrap_or(d.cells)
 }
 
-/// `[shadow]` with the option values `constants`: none while its `option` is off, else the
-/// resolution and distance its `resolution_option` and `distance_option` pick.
-fn chosen_shadow(
-    s: &horizon_shader_api::manifest::Shadow,
-    options: &[horizon_shader_api::manifest::PackOption],
-    constants: &[(String, f64)],
-) -> Option<horizon_shader_api::manifest::Shadow> {
-    let number = |id: Option<&String>| {
-        let option = options.iter().find(|o| Some(&o.id) == id)?;
-        let (_, value) = constants.iter().find(|(k, _)| *k == option.id)?;
-        option.kind.number(*value)
-    };
-    option_on(constants, s.option.as_ref()).then(|| horizon_shader_api::manifest::Shadow {
-        resolution: number(s.resolution_option.as_ref()).map_or(s.resolution, |r| r as u32),
-        distance: number(s.distance_option.as_ref()).map_or(s.distance, |d| d as f32),
-        ..s.clone()
-    })
-}
-
 impl NativePack {
     /// The pack of the checked stages `report` with the option values `constants`, drawing
     /// onto the world's targets as `terrain` describes; the sky reads the terrain's group 0.
@@ -91,46 +72,13 @@ impl NativePack {
         constants: &[(String, f64)],
         lights: super::block_light::LightTable,
     ) -> Result<(Self, Vec<String>), String> {
-        // A backend may refuse a layout or pipeline the pack asks for (a stage's bindings
-        // past its sampled-texture limit, say, as OpenGL's 16 was before #10095): the pack
-        // is refused with that error instead of a validation panic in the renderer.
-        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let built = Self::build(device, queue, terrain, report, constants, lights);
-        let refused = pollster::block_on(scope.pop());
-        match (built, refused) {
-            (Ok(built), None) => Ok(built),
-            (Ok(_), Some(e)) => Err(e.to_string()),
-            (Err(e), _) => Err(e),
-        }
-    }
-
-    fn build(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        terrain: &TerrainShape<'_>,
-        report: Report,
-        constants: &[(String, f64)],
-        lights: super::block_light::LightTable,
-    ) -> Result<(Self, Vec<String>), String> {
         let (globals, format) = (terrain.globals, terrain.format);
         let textures = super::native_post::pack_textures(device, queue, &report);
-        // `[shadow]`, unless its option is off, at the size its options pick.
-        let chosen = report
+        let settings = report
             .shadow
             .as_ref()
-            .and_then(|s| chosen_shadow(s, &report.manifest.options, constants));
-        let settings = chosen
-            .as_ref()
             .map(|settings| super::native_shadow::fitted(device, settings));
-        let api = report.manifest.api;
-        let mut frame = NativeFrame::new(
-            device,
-            settings.as_ref(),
-            textures,
-            lights,
-            terrain.pbr,
-            api,
-        );
+        let mut frame = NativeFrame::new(device, settings.as_ref(), textures, lights, terrain.pbr);
         // `[displacement]`, unless its option is off; nothing to displace without heights.
         let displacement = report
             .manifest
@@ -155,7 +103,8 @@ impl NativePack {
                     report.shadow.is_some(),
                 )
             });
-        let shadow = chosen
+        let shadow = report
+            .shadow
             .as_ref()
             .map(|s| {
                 let vertex = report.stages.iter().find(|s| s.kind == StageKind::Vertex);
@@ -251,13 +200,8 @@ impl NativePack {
                 )
             })
             .transpose()?;
-        // A 0.2 pack always has one: its decode and tonemap run without a chain too.
-        let tonemap = others.iter().find(|s| s.kind == StageKind::Tonemap);
-        let post = (!post.is_empty() || api == horizon_shader_api::Api::V0_2)
-            .then(|| {
-                let manifest = &report.manifest;
-                NativePost::new(device, post, manifest, constants, format, &frame, tonemap)
-            })
+        let post = (!post.is_empty())
+            .then(|| NativePost::new(device, post, &report.manifest, constants, format, &frame))
             .transpose()?;
         let mut labels: Vec<String> = sky.iter().map(|s| s.label.clone()).collect();
         labels.extend(
@@ -294,144 +238,5 @@ impl NativePack {
             || self.material.is_some()
             || self.weather.is_some()
             || self.post.is_some()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{NativePack, TerrainShape, chosen_shadow};
-    use horizon_shader_api::manifest::{OptionKind, PackOption, Shadow};
-
-    /// A device with OpenGL's minimum 16 sampled textures per stage refuses a pack whose
-    /// sky adds the terrain's 10 to the frame's 9: that is the pack's error to report, not
-    /// a validation panic (#10095).
-    #[test]
-    fn a_pack_the_backend_refuses_is_an_error_not_a_panic() {
-        use horizon_shader_api::{MANIFEST, Pack, check};
-        let instance = crate::gfx::test_gpu::instance();
-        let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
-            return;
-        };
-        let mut limits = adapter.limits();
-        limits.max_sampled_textures_per_shader_stage = 16;
-        let Ok((device, queue)) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                required_limits: limits,
-                ..Default::default()
-            }))
-        else {
-            return;
-        };
-        // The terrain's group 0: its uniform and the 10 sampled textures (_terrain.wgsl_'s
-        // 8 sprite arrays, the lightmap and the emission thresholds).
-        let entry = |binding, ty| wgpu::BindGroupLayoutEntry {
-            binding,
-            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-            ty,
-            count: None,
-        };
-        let mut entries = vec![entry(
-            0,
-            wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-        )];
-        entries.extend((1..=10).map(|binding| {
-            entry(
-                binding,
-                wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-            )
-        }));
-        let globals = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &entries,
-        });
-        let empty = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[],
-        });
-        let terrain = TerrainShape {
-            globals: &globals,
-            flat: None,
-            sprites: [1.0, 2048.0],
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            sprite_tags: &[],
-            sprite_materials: &[],
-            entities: &empty,
-            weather_groups: [&empty, &empty],
-            pbr: None,
-        };
-        let manifest = "schema = 1\nid = \"t\"\nname = \"T\"\nversion = \"1\"\napi = \"0.1\"\n\
-            [sky]\nfile = \"sky.wgsl\"\n";
-        let files = [
-            (MANIFEST, manifest),
-            (
-                "sky.wgsl",
-                "fn sky(input: SkyInput) -> vec4<f32> { return input.color; }\n",
-            ),
-        ]
-        .map(|(n, t)| (n.to_owned(), t.as_bytes().to_vec()))
-        .into();
-        let report = check(&Pack::from_files(files).unwrap()).unwrap();
-        let built = NativePack::new(&device, &queue, &terrain, report, &[], Default::default());
-        assert!(built.is_err(), "the pack should be refused");
-    }
-
-    fn option(id: &str, kind: OptionKind) -> PackOption {
-        PackOption {
-            id: id.into(),
-            name: id.into(),
-            description: String::new(),
-            kind,
-        }
-    }
-
-    #[test]
-    fn the_shadow_map_follows_its_options() {
-        let options = [
-            option("shadows", OptionKind::Bool { default: true }),
-            option(
-                "quality",
-                OptionKind::Choice {
-                    values: vec!["1024".into(), "4096".into()],
-                    default: 0,
-                },
-            ),
-            option(
-                "reach",
-                OptionKind::Int {
-                    default: 96,
-                    min: 32,
-                    max: 512,
-                },
-            ),
-        ];
-        let shadow = Shadow {
-            option: Some("shadows".into()),
-            resolution_option: Some("quality".into()),
-            distance_option: Some("reach".into()),
-            ..Shadow::default()
-        };
-        let values = |on: f64, quality: f64, reach: f64| {
-            [("shadows", on), ("quality", quality), ("reach", reach)].map(|(k, v)| (k.into(), v))
-        };
-        let size = |values: &[(String, f64)]| {
-            chosen_shadow(&shadow, &options, values).map(|s| (s.resolution, s.distance))
-        };
-        assert_eq!(size(&values(1.0, 1.0, 200.0)), Some((4096, 200.0)));
-        assert_eq!(size(&values(1.0, 0.0, 64.0)), Some((1024, 64.0)));
-        assert_eq!(size(&values(0.0, 1.0, 200.0)), None);
-        // Without the options' keys: the manifest's own numbers, always drawn.
-        assert_eq!(
-            chosen_shadow(&Shadow::default(), &options, &values(0.0, 1.0, 200.0))
-                .map(|s| (s.resolution, s.distance)),
-            Some((2048, 128.0))
-        );
     }
 }

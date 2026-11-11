@@ -23,10 +23,8 @@ pub(super) struct Social {
     /// who left is still listed by name.
     names: HashMap<u128, String>,
     page: Page,
-    pub(super) search: EditBox,
-    /// `PlayerEntry.TOOLTIP_DELAY`: the row buttons' tooltips wait 500 ms.
-    tooltip: social_screen::TooltipDelay,
-    pub(super) scroll: f32,
+    search: EditBox,
+    scroll: f32,
     /// Opened from the pause menu: Done goes back there.
     from_pause: bool,
 }
@@ -40,7 +38,6 @@ impl Default for Social {
             names: HashMap::new(),
             page: Page::All,
             search,
-            tooltip: Default::default(),
             scroll: 0.0,
             from_pause: false,
         }
@@ -77,10 +74,8 @@ impl Game<'_> {
     }
     /// `new SocialInteractionsScreen(lastScreen)`: it opens on All, with an empty search.
     pub(super) fn open_social(&mut self, from_pause: bool) {
-        self.hide_social_tutorial();
         self.social.page = Page::All;
         self.social.search.set_value("");
-        self.social.tooltip = Default::default();
         self.social.scroll = 0.0;
         self.social.from_pause = from_pause;
         self.screen = Screen::Social;
@@ -172,7 +167,6 @@ impl Game<'_> {
             self.cursor,
             &view,
             &mut self.social.search,
-            &mut self.social.tooltip,
             true,
         );
     }

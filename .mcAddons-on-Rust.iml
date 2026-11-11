@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="JAVA_MODULE" version="4">
+  <component name="NewModuleRootManager" inherit-compiler-output="true">
+    <exclude-output />
+    <content url="file://$MODULE_DIR$">
+      <sourceFolder url="file://$MODULE_DIR$/crates/cargo-horizon-mod/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-anticheat/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-assets/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-assets/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-bedrock/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-bedrock/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-bedrock/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-bench/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-bots/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-chat-filter/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-client-core/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-client-input/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-client-render/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-client-render/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-client-render/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-client/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-client/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-client/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-command/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-core/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-core/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-core/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-cosmetics/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-dualsense/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-dualsense/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-friends/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-hdr/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-items/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-items/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-mcp/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-mod-api-gen/dispatch-tests/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-mod-api-gen/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-mods/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-mods/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-narrator/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-narrator/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-optifine/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-optifine/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-port-pack/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-prepare/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-prepare/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-protocol/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-protocol/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-relay/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-relay/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-release-sign/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-release-sign/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-server-files/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-server/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-shader-api/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-shader-api/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-shaders/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-shaders/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-telemetry/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-telemetry/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-theme/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-threads/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-world/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-world/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/horizon-world/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/tools" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/xtask/src" isTestSource="false" />
+      <excludeFolder url="file://$MODULE_DIR$/target" />
+    </content>
+    <orderEntry type="inheritedJdk" />
+    <orderEntry type="sourceFolder" forTests="false" />
+  </component>
+</module>

@@ -91,14 +91,11 @@ impl Prompt {
 }
 
 impl Game<'_> {
-    /// The server list entry of the joined address, if it has one, shown or
-    /// hidden (`ServerList.get`).
+    /// The server list entry of the joined address, if it has one.
     fn accepted_code_of_conduct(&self) -> Option<i32> {
         let address = self.server_packs.address.as_deref()?;
-        let (shown, hidden) = servers::load_all(&multiplayer::servers_file(&saves()));
-        shown
+        servers::load(&multiplayer::servers_file(&saves()))
             .into_iter()
-            .chain(hidden)
             .find(|s| s.ip == address)
             .map(|s| s.accepted_code_of_conduct)
     }
@@ -109,20 +106,13 @@ impl Game<'_> {
             return;
         };
         let file = multiplayer::servers_file(&saves());
-        let (mut list, mut hidden) = servers::load_all(&file);
+        let mut list = servers::load(&file);
         let mut found = false;
         for entry in list.iter_mut().filter(|s| &s.ip == address) {
             entry.accepted_code_of_conduct = accepted;
             found = true;
         }
-        // Not among the shown entries: the hidden ones (a Direct Connection's).
-        if !found {
-            for entry in hidden.iter_mut().filter(|s| &s.ip == address) {
-                entry.accepted_code_of_conduct = accepted;
-                found = true;
-            }
-        }
-        if found && let Err(e) = servers::save_all(&file, &list, &hidden) {
+        if found && let Err(e) = servers::save(&file, &list) {
             log::warn!("Horizon: could not save {}: {e}", file.display());
         }
     }
@@ -179,7 +169,6 @@ impl Game<'_> {
         let Some(prompt) = &self.code_of_conduct else {
             return;
         };
-        horizon_client::widgets::cover_frame();
         // CodeOfConductScreen: WarningScreen's narration, the title and the
         // text on the next line.
         horizon_client::widgets::begin_screen(|| {
@@ -229,7 +218,6 @@ impl Game<'_> {
 
         let [x, y, cw, ch] = layout.check;
         let hover = ui::hovered(cursor, x, y, cw, ch);
-        horizon_client::widgets::record(&layout.label.plain(), layout.check, true);
         horizon_client::widgets::narratable(|| {
             horizon_client::widgets::Narratable::new(
                 horizon_client::widgets::What::Checkbox {

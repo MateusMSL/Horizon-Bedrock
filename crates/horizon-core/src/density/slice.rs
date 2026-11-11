@@ -29,9 +29,6 @@ pub struct SliceSampler {
     pub axes: SliceAxes,
 }
 impl DensitySampler for SliceSampler {
-    fn pointwise_inputs(&self) -> Option<Vec<&Arc<dyn DensitySampler>>> {
-        Some(vec![&self.input])
-    }
     fn sample_value(
         &self,
         context: &mut SamplerContext,

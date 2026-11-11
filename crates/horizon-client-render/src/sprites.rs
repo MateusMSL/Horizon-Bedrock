@@ -27,10 +27,6 @@ impl SpriteAnimation {
         let frames = self.materials[kind].as_ref()?;
         Some(&frames[self.frame(tick) % frames.len()])
     }
-    /// Polytone's `mode` on this animation, when it has one.
-    pub fn mode(&self) -> Option<&horizon_assets::animation::ClipMode> {
-        self.clip.mode()
-    }
     pub fn frame(&self, tick: u64) -> usize {
         self.clip.sample(tick).frame as usize
     }
@@ -38,21 +34,7 @@ impl SpriteAnimation {
     /// `interpolate` mixes the frame with the next one by
     /// `(int)(subFrame / time * 1000)` thousandths; others show the frame.
     pub fn blend(&self, tick: u64) -> FrameBlend {
-        self.blend_sample(self.clip.sample(tick))
-    }
-    /// [`Self::blend`], or what a Polytone `mode` (time of day, weather, an expression) picks
-    /// from `inputs` for an animation that has one.
-    pub fn blend_with(
-        &self,
-        tick: u64,
-        inputs: Option<&horizon_assets::animation::ModeInputs>,
-    ) -> FrameBlend {
-        match inputs.and_then(|i| self.clip.sample_mode(i)) {
-            Some(sample) => self.blend_sample(sample),
-            None => self.blend(tick),
-        }
-    }
-    fn blend_sample(&self, sample: horizon_assets::animation::AnimationSample) -> FrameBlend {
+        let sample = self.clip.sample(tick);
         let frame = sample.frame as usize;
         let next = sample.next_frame as usize;
         if self.clip.interpolates() && sample.interpolation_millis > 0 && next != frame {
@@ -127,9 +109,6 @@ pub struct Sprites {
     /// textures under their own names, and one layer serves them all (the GPU's array may
     /// hold as few as 2048).
     still: std::collections::HashMap<StillKey, u32>,
-    /// Names a connected-texture rule matches by name (`matchTiles`, `connectTiles`): each keeps a
-    /// layer of its own ([`Sprites::keep_apart`]).
-    apart: std::collections::HashSet<String>,
     /// Decoded textures kept on disk between launches ([`Sprites::with_disk_cache`]).
     disk: Option<crate::sprite_cache::SpriteCache>,
     /// Textures [`Sprites::prefetch`] decoded ahead of their insert, by sprite name or
@@ -165,15 +144,8 @@ pub fn set_labpbr_maps(on: bool) {
 pub fn labpbr_maps() -> bool {
     LABPBR_MAPS.load(std::sync::atomic::Ordering::Relaxed)
 }
-/// Budget for either complete normal or specular image set: a quarter of the block textures'
-/// budget, so raising `textureBudgetMiB` sharpens a pack's LabPBR maps along with its colours.
-fn map_bytes(texture_budget: u64) -> u64 {
-    texture_budget / 4
-}
-/// [`map_bytes`] for the budget the next resource load keeps to.
-fn max_map_bytes() -> u64 {
-    map_bytes(TEXTURE_BUDGET.load(std::sync::atomic::Ordering::Relaxed))
-}
+/// Budget for either complete normal or specular image set.
+const MAX_MAP_BYTES: u64 = DEFAULT_TEXTURE_BUDGET / 4;
 /// Fewer layers than any game has (vanilla's are about 1300): what a map is kept at while
 /// loading assumes at least these many share the array.
 const LAYERS_AT_LEAST: u64 = 1024;
@@ -220,13 +192,6 @@ impl Sprites {
             disk: crate::sprite_cache::SpriteCache::open(root),
             ..Self::default()
         }
-    }
-    /// Keeps each of `names` on a layer of its own, never shared with an identical texture: the
-    /// connected-texture rules that name them find their faces by layer, so a texture sharing it
-    /// would be matched too (a tile a rule chains onto, and a model's transparent placeholder
-    /// with the same pixels). Before the textures that bear these names are inserted.
-    pub fn keep_apart(&mut self, names: impl IntoIterator<Item = String>) {
-        self.apart.extend(names);
     }
     /// Write what this run decoded to the cache file.
     pub fn save_disk_cache(&mut self) {
@@ -297,13 +262,8 @@ impl Sprites {
         let mut resized = Vec::with_capacity(self.native.len());
         self.pixels.clear();
         for (from, frames, initial) in &self.native {
-            // Native frames already match the atlas size: share the immutable
-            // buffers with animations rather than copying every frame again.
-            let frames: Arc<Vec<Vec<u8>>> = if *from == size {
-                Arc::clone(frames)
-            } else {
-                Arc::new(frames.iter().map(|f| resample(f, *from, size)).collect())
-            };
+            let frames: Arc<Vec<Vec<u8>>> =
+                Arc::new(frames.iter().map(|f| resample(f, *from, size)).collect());
             self.pixels.extend_from_slice(&frames[*initial]);
             resized.push(frames);
         }
@@ -315,7 +275,7 @@ impl Sprites {
         self.specular.clear();
         let largest_map = self.pbr.iter().flatten().flatten().map(|m| m.0).max();
         self.pbr_size = largest_map.map_or(SPRITE_SIZE, |l| {
-            side_within(l.min(size), layers, max_map_bytes())
+            side_within(l.min(size), layers, MAX_MAP_BYTES)
         });
         if largest_map.is_some() {
             let pbr_size = self.pbr_size;
@@ -701,24 +661,23 @@ impl Sprites {
                     .is_some_and(|(_, p)| p.starts_with("item/")),
             dither_cutouts: crate::mipmap::dither_cutouts(),
         };
-        let still =
-            (animation.is_none() && frames.len() == 1 && !self.apart.contains(name)).then(|| {
-                use std::hash::{Hash, Hasher};
-                let mut frame = std::collections::hash_map::DefaultHasher::new();
-                frames[0].hash(&mut frame);
-                let mut maps = std::collections::hash_map::DefaultHasher::new();
-                pbr.hash(&mut maps);
-                StillKey {
-                    frame: frame.finish(),
-                    pbr: maps.finish(),
-                    side,
-                    settings: [
-                        settings.strategy as u32,
-                        settings.alpha_cutoff_bias.to_bits(),
-                    ],
-                    flags: [settings.has_transparent, settings.item, opaque, translucent],
-                }
-            });
+        let still = (animation.is_none() && frames.len() == 1).then(|| {
+            use std::hash::{Hash, Hasher};
+            let mut frame = std::collections::hash_map::DefaultHasher::new();
+            frames[0].hash(&mut frame);
+            let mut maps = std::collections::hash_map::DefaultHasher::new();
+            pbr.hash(&mut maps);
+            StillKey {
+                frame: frame.finish(),
+                pbr: maps.finish(),
+                side,
+                settings: [
+                    settings.strategy as u32,
+                    settings.alpha_cutoff_bias.to_bits(),
+                ],
+                flags: [settings.has_transparent, settings.item, opaque, translucent],
+            }
+        });
         if let Some(&same) = still.as_ref().and_then(|k| self.still.get(k)) {
             self.layers.insert(name.to_owned(), same);
             return Ok(same);
@@ -755,7 +714,7 @@ impl Sprites {
 /// A PNG's width, height and pixels as RGBA. From the prepared data file
 /// when it holds the texture: no file opened per texture, nor for its absent
 /// LabPBR maps.
-pub(crate) fn read_rgba(path: &Path) -> Result<(u32, u32, Vec<u8>)> {
+fn read_rgba(path: &Path) -> Result<(u32, u32, Vec<u8>)> {
     let bytes = horizon_core::prepared_files::read(path)?;
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.ignore_checksums(true);
@@ -824,7 +783,7 @@ fn pbr_map(
         return None;
     }
     let side = w.max(h);
-    let output_side = side_within(side, LAYERS_AT_LEAST, max_map_bytes()).min(side);
+    let output_side = side_within(side, LAYERS_AT_LEAST, MAX_MAP_BYTES).min(side);
     let frames = (0..columns * rows)
         .map(|index| {
             let (x, y) = (index % columns * w, index / columns * h);
@@ -888,35 +847,6 @@ mod tests {
     use super::*;
     use std::fs::{self, File};
     #[test]
-    fn native_frames_at_atlas_size_are_shared_without_resampling() {
-        let pixels = vec![
-            [10, 20, 30, 255].repeat((SPRITE_SIZE * SPRITE_SIZE) as usize),
-            [40, 50, 60, 255].repeat((SPRITE_SIZE * SPRITE_SIZE) as usize),
-        ];
-        let native = Arc::new(pixels.clone());
-        let smaller = Arc::new(vec![vec![12; 8 * 8 * 4], vec![34; 8 * 8 * 4]]);
-        let metadata = r#"{"frametime":2}"#;
-        let mut sprites = Sprites {
-            native: vec![
-                (SPRITE_SIZE, Arc::clone(&native), 1),
-                (8, Arc::clone(&smaller), 0),
-            ],
-            pbr: vec![[None, None], [None, None]],
-            animations: vec![
-                test_frames(0, pixels.clone(), metadata),
-                test_frames(1, smaller.as_ref().clone(), metadata),
-            ],
-            ..Default::default()
-        };
-        sprites.finish();
-        assert!(Arc::ptr_eq(&sprites.animations[0].frames, &native));
-        assert!(!Arc::ptr_eq(&sprites.animations[1].frames, &smaller));
-        assert_eq!(sprites.animations[0].pixels(1), pixels[1].as_slice());
-        let resized = resample(&smaller[0], 8, SPRITE_SIZE);
-        assert_eq!(sprites.animations[1].pixels(0), resized.as_slice());
-        assert_eq!(&sprites.pixels[..pixels[1].len()], pixels[1].as_slice());
-    }
-    #[test]
     fn the_texture_budget_picks_the_largest_side_that_fits() {
         // 1300 layers: vanilla's count, about.
         assert_eq!(side_within(512, 1300, DEFAULT_TEXTURE_BUDGET), 128);
@@ -924,15 +854,6 @@ mod tests {
         assert_eq!(side_within(64, 1300, 1536 << 20), 64);
         // Never under vanilla's size, whatever the budget.
         assert_eq!(side_within(512, 1300, 1), SPRITE_SIZE);
-    }
-    #[test]
-    fn labpbr_maps_follow_the_texture_budget() {
-        // 1300 layers of 1024 px maps: 64 px at the default budget, 256 px at 1536 MiB.
-        assert_eq!(
-            side_within(1024, 1300, map_bytes(DEFAULT_TEXTURE_BUDGET)),
-            64
-        );
-        assert_eq!(side_within(1024, 1300, map_bytes(1536 << 20)), 256);
     }
     #[test]
     fn a_labpbr_map_selects_whole_texels_and_missing_layers_get_defaults() {
@@ -1325,40 +1246,6 @@ mod tests {
         assert_eq!((sprites.opaque.len(), sprites.mips.len()), (3, 3));
         sprites.finish();
         assert_eq!(sprites.pixels.len(), 3 * 16 * 16 * 4);
-    }
-    #[test]
-    fn a_texture_a_connected_rule_matches_keeps_a_layer_of_its_own() {
-        // A resource pack's transparent placeholders: a model's layer and a tile another
-        // connected-texture rule chains onto (`matchTiles=./19.png`) have the same pixels. The
-        // rule finds its faces by layer, so the one it names can't share the others'.
-        let root =
-            std::env::temp_dir().join(format!("horizon-sprite-apart-{}", std::process::id()));
-        let directory = root.join("assets/a/textures/block");
-        fs::create_dir_all(&directory).unwrap();
-        let write = |name: &str| {
-            let mut encoder =
-                png::Encoder::new(File::create(directory.join(name)).unwrap(), 16, 16);
-            encoder.set_color(png::ColorType::Rgba);
-            encoder.set_depth(png::BitDepth::Eight);
-            encoder
-                .write_header()
-                .unwrap()
-                .write_image_data(&[0; 16 * 16 * 4])
-                .unwrap();
-        };
-        for name in ["placeholder.png", "named.png", "again.png"] {
-            write(name);
-        }
-        let mut sprites = Sprites::default();
-        sprites.keep_apart(["a:block/named".to_owned()]);
-        let placeholder = sprites.insert(&root, "a:block/placeholder").unwrap();
-        let named = sprites.insert(&root, "a:block/named").unwrap();
-        let again = sprites.insert(&root, "a:block/again").unwrap();
-        fs::remove_dir_all(&root).unwrap();
-        // The named one alone; the others still share.
-        assert_ne!(named, placeholder);
-        assert_eq!(again, placeholder);
-        assert_eq!(sprites.count(), 2);
     }
     #[test]
     fn a_32px_only_atlas_does_not_add_an_extra_mipmap() {

@@ -10,7 +10,6 @@ pub mod density;
 pub mod fast_hash;
 pub mod geometry;
 pub mod jmath;
-pub mod level_key;
 pub mod no_ai;
 pub mod noise;
 pub mod paletted;
@@ -24,5 +23,4 @@ pub mod ticks;
 pub mod release;
 pub mod version;
 
-pub use level_key::LevelKey;
 pub use version::VANILLA_VERSION;

@@ -7,9 +7,8 @@
 use crate::{
     api::{Phase, Shared},
     engine,
-    management::{self, Failure, INTERNAL_ERROR, invalid_params},
+    management::{Failure, INTERNAL_ERROR, invalid_params},
 };
-use horizon_platform::server_files::properties::{ServerProperties, SystemEntropy};
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -131,23 +130,8 @@ pub fn call(shared: &Shared, client: u32, short: &str, argument: &Value) -> Resu
                     .ok_or_else(|| invalid_params(format!("Not a boolean: {argument}")))?,
             ),
         ),
-        "serversettings/status_heartbeat_interval" => {
-            Ok(json!(management::heartbeat_seconds(shared)))
-        }
-        "serversettings/status_heartbeat_interval/set" => {
-            status_heartbeat_interval(shared, management_int(argument)?)
-        }
         "serversettings/status_replies" => game.status_replies(client, None),
         "serversettings/status_replies/set" => game.status_replies(
-            client,
-            Some(
-                argument
-                    .as_bool()
-                    .ok_or_else(|| invalid_params(format!("Not a boolean: {argument}")))?,
-            ),
-        ),
-        "serversettings/accept_transfers" => game.accepts_transfers(client, None),
-        "serversettings/accept_transfers/set" => game.accepts_transfers(
             client,
             Some(
                 argument
@@ -438,53 +422,6 @@ fn component(message: &Value) -> Option<Value> {
         .map(|text| json!({ "text": text }))
 }
 
-/// `MinecraftServerSettingsServiceImpl.setStatusHeartbeatInterval`: the supervisor owns the heartbeat, so
-/// the new interval takes effect here, and is kept in server.properties and server.toml's `[properties]`
-/// (which writes server.properties again at the next start). The answer is the interval now in force: the
-/// old one when the heartbeat cannot be rescheduled (`management::set_heartbeat_seconds`), which keeps
-/// nothing.
-fn status_heartbeat_interval(shared: &Shared, seconds: i32) -> Result<Value, Failure> {
-    if !management::set_heartbeat_seconds(shared, seconds) {
-        crate::supervisor::note(
-            shared,
-            "WARN",
-            &format!(
-                "The existing heartbeat was not canceled and the new heartbeat of {seconds} seconds has not been applied."
-            ),
-        );
-        crate::supervisor::note(
-            shared,
-            "INFO",
-            &format!(
-                "The heartbeat interval was not updated to the new value of {seconds} seconds as the json rpc server is null or a pre-existing heartbeat failed to get canceled"
-            ),
-        );
-        return Ok(json!(management::heartbeat_seconds(shared)));
-    }
-    let path = shared.dir.join(crate::config::PROPERTIES);
-    let stored = ServerProperties::from_file(&path, &mut SystemEntropy::default())
-        .and_then(|p| p.update("status-heartbeat-interval", seconds.to_string()))
-        .map_err(|e| (INTERNAL_ERROR, Some(e)))?;
-    stored
-        .store(&path)
-        .map_err(|e| (INTERNAL_ERROR, Some(e.to_string())))?;
-    crate::config::update(
-        &shared.dir,
-        "properties",
-        "status-heartbeat-interval",
-        toml::Value::Integer(i64::from(seconds)),
-    )
-    .map_err(|e| (INTERNAL_ERROR, Some(e)))?;
-    // Vanilla reads the interval for its log line after setting it, so both numbers are the new one.
-    let now = management::heartbeat_seconds(shared);
-    crate::supervisor::note(
-        shared,
-        "INFO",
-        &format!("Updated status heartbeat interval from {now} to {seconds}"),
-    );
-    Ok(json!(seconds))
-}
-
 /// Vanilla's `Codec.INT`: numeric input narrows through `Number.intValue`, including fractions and overflow.
 fn management_int(value: &Value) -> Result<i32, Failure> {
     let parsed = if let Some(number) = value.as_i64() {
@@ -708,29 +645,6 @@ impl Game<'_> {
                 &self.shared.dir,
                 "properties",
                 "enable-status",
-                toml::Value::Boolean(value),
-            )
-            .map_err(|e| (INTERNAL_ERROR, Some(e)))?;
-        }
-        Ok(reply["value"].clone())
-    }
-
-    /// `MinecraftServerSettingsServiceImpl.acceptsTransfers` and `setAcceptsTransfers`.
-    fn accepts_transfers(&self, client: u32, value: Option<bool>) -> Result<Value, Failure> {
-        let mut request = json!({ "method": "serversettings/accept_transfers" });
-        if let Some(value) = value {
-            request["method"] = json!("serversettings/accept_transfers/set");
-            request["value"] = json!(value);
-        }
-        let reply = self.ask(&format!("management {client} {request}"))?;
-        if let Some(error) = reply["error"].as_str() {
-            return Err((INTERNAL_ERROR, Some(error.to_owned())));
-        }
-        if let Some(value) = value {
-            crate::config::update(
-                &self.shared.dir,
-                "properties",
-                "accepts-transfers",
                 toml::Value::Boolean(value),
             )
             .map_err(|e| (INTERNAL_ERROR, Some(e)))?;
@@ -1007,8 +921,8 @@ impl Game<'_> {
     /// `ServerStateService.status`.
     fn status(&self) -> Value {
         let version = json!({
-            "name": horizon_platform::version::VERSION_ID,
-            "protocol": horizon_platform::version::PROTOCOL_VERSION,
+            "name": horizon_core::version::VERSION_ID,
+            "protocol": horizon_core::version::PROTOCOL_VERSION,
         });
         let players = if self.running() {
             self.online().ok()
@@ -1089,18 +1003,17 @@ impl Game<'_> {
 struct Lists<'a>(&'a Path);
 
 impl Lists<'_> {
-    fn load<E: horizon_platform::server_files::user_lists::Entry>(
+    fn load<E: horizon_server_files::user_lists::Entry>(
         &self,
         file: &str,
-    ) -> horizon_platform::server_files::user_lists::UserList<E> {
-        let mut list = horizon_platform::server_files::user_lists::UserList::new(self.0.join(file));
+    ) -> horizon_server_files::user_lists::UserList<E> {
+        let mut list = horizon_server_files::user_lists::UserList::new(self.0.join(file));
         let _ = list.load();
         list
     }
 
     fn allowlist(&self) -> Value {
-        let list: horizon_platform::server_files::user_lists::WhiteList =
-            self.load("whitelist.json");
+        let list: horizon_server_files::user_lists::WhiteList = self.load("whitelist.json");
         list.entries()
             .iter()
             .map(|e| json!({ "id": uuid(e.user.id), "name": e.user.name }))
@@ -1108,7 +1021,7 @@ impl Lists<'_> {
     }
 
     fn operators(&self) -> Value {
-        let list: horizon_platform::server_files::user_lists::OpList = self.load("ops.json");
+        let list: horizon_server_files::user_lists::OpList = self.load("ops.json");
         list.entries()
             .iter()
             .map(|e| {
@@ -1122,8 +1035,7 @@ impl Lists<'_> {
     }
 
     fn bans(&self) -> Value {
-        let list: horizon_platform::server_files::user_lists::BanList =
-            self.load("banned-players.json");
+        let list: horizon_server_files::user_lists::BanList = self.load("banned-players.json");
         list.entries()
             .iter()
             .map(|b| {
@@ -1134,8 +1046,7 @@ impl Lists<'_> {
     }
 
     fn ip_bans(&self) -> Value {
-        let list: horizon_platform::server_files::user_lists::IpBanList =
-            self.load("banned-ips.json");
+        let list: horizon_server_files::user_lists::IpBanList = self.load("banned-ips.json");
         list.entries()
             .iter()
             .map(|b| ban(("ip", json!(b.user)), &b.reason, &b.source, b.expires))
@@ -1232,64 +1143,6 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         Shared::with_install(&dir, None)
-    }
-
-    /// The interval is live at once, and server.properties and server.toml's `[properties]` keep it, so
-    /// that a restart reads it back (what the parity harness compares with vanilla's).
-    #[test]
-    fn the_status_heartbeat_interval_is_live_and_kept() {
-        let shared = shared();
-        let dir = shared.dir.clone();
-        std::fs::write(dir.join(crate::config::FILE), crate::config::TEMPLATE).unwrap();
-        std::fs::write(
-            dir.join(crate::config::PROPERTIES),
-            "#Minecraft server properties
-status-heartbeat-interval=0
-",
-        )
-        .unwrap();
-        assert_eq!(status_heartbeat_interval(&shared, 30).unwrap(), json!(30));
-        assert_eq!(management::heartbeat_seconds(&shared), 30);
-        let properties = std::fs::read_to_string(dir.join(crate::config::PROPERTIES)).unwrap();
-        assert!(
-            properties.contains("status-heartbeat-interval=30"),
-            "{properties}"
-        );
-        let toml = std::fs::read_to_string(dir.join(crate::config::FILE)).unwrap();
-        assert!(toml.contains("status-heartbeat-interval = 30"), "{toml}");
-        // Vanilla keeps any int, and schedules nothing for 0 or less.
-        assert_eq!(status_heartbeat_interval(&shared, -5).unwrap(), json!(-5));
-        assert_eq!(management::heartbeat_seconds(&shared), -5);
-        // A value that is no integer is refused before anything changes.
-        assert!(management_int(&json!("yes")).is_err());
-        assert_eq!(management::heartbeat_seconds(&shared), -5);
-        // -5 cancelled the running 30 s heartbeat: vanilla cannot cancel it again, so it refuses every
-        // later set, answers with the interval in force and keeps nothing.
-        assert_eq!(status_heartbeat_interval(&shared, 30).unwrap(), json!(-5));
-        assert_eq!(management::heartbeat_seconds(&shared), -5);
-        let properties = std::fs::read_to_string(dir.join(crate::config::PROPERTIES)).unwrap();
-        assert!(
-            properties.contains("status-heartbeat-interval=-5"),
-            "{properties}"
-        );
-    }
-
-    /// A set to 0 or less with no heartbeat running cancels nothing, so later sets still apply.
-    #[test]
-    fn a_heartbeat_never_started_can_still_be_set() {
-        let shared = shared();
-        let dir = shared.dir.clone();
-        std::fs::write(dir.join(crate::config::FILE), crate::config::TEMPLATE).unwrap();
-        std::fs::write(
-            dir.join(crate::config::PROPERTIES),
-            "#Minecraft server properties
-status-heartbeat-interval=0
-",
-        )
-        .unwrap();
-        assert_eq!(status_heartbeat_interval(&shared, 0).unwrap(), json!(0));
-        assert_eq!(status_heartbeat_interval(&shared, 45).unwrap(), json!(45));
-        assert_eq!(management::heartbeat_seconds(&shared), 45);
     }
 
     #[test]

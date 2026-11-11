@@ -25,7 +25,7 @@ use horizon_world::{
         FluidSections, FluidTagId,
     },
     entity_fluid_tick::{self, EntityFluidTickWorld},
-    fluid::{FluidHeightWorld, FluidKind, FluidState, FluidTemplate},
+    fluid::{FluidHeightWorld, FluidKind, FluidState},
     fluid_flow::{FluidFlowWorld, flow_at},
     registry::BlockStateId,
     water_splash::{self, SplashParticle, WaterSplashWorld},
@@ -172,8 +172,6 @@ pub struct ArrowState {
     pub pickup: Pickup,
     /// Its entity type is `SpectralArrow` (the type is its own, not the pickup item's).
     pub spectral: bool,
-    /// `SpectralArrow` saved duration; its constructor default is 200.
-    pub spectral_duration: i32,
     /// `pickupItemStack`: what picking the arrow up gives.
     pub pickup_item: crate::items::ItemStack,
     /// `AbstractArrow.firedFromWeapon`: the crossbow or bow it was shot from.
@@ -188,17 +186,12 @@ pub struct ArrowState {
     pub pierced: Vec<Who>,
     /// `Entity.remainingFireTicks`.
     pub fire_ticks: i32,
-    /// The server's shared fire flag, independent of the client-local fire timer.
-    pub synced_fire: bool,
     pub fall_distance: f64,
     pub fluids: EntityFluidInteraction,
     pub was_touching_water: bool,
     pub was_eye_in_water: bool,
     pub first_tick: bool,
     pub has_been_shot: bool,
-    /// `Projectile.canBreak`: the decoded top-level projectile predicate,
-    /// independent of its pickup item and firing weapon.
-    pub can_break: Option<horizon_world::nbt::Tag>,
     /// `ThrownTrident.dealtDamage`: it has hit an entity (or sat in a block
     /// for over 4 ticks) and hits no more.
     pub dealt_damage: bool,
@@ -221,7 +214,6 @@ impl fmt::Debug for ArrowState {
             .field("in_ground", &self.in_ground)
             .field("life", &self.life)
             .field("fire_ticks", &self.fire_ticks)
-            .field("synced_fire", &self.synced_fire)
             .finish_non_exhaustive()
     }
 }
@@ -231,7 +223,6 @@ impl PartialEq for ArrowState {
             && self.life == other.life
             && self.last_state == other.last_state
             && self.fire_ticks == other.fire_ticks
-            && self.synced_fire == other.synced_fire
     }
 }
 impl ArrowState {
@@ -245,7 +236,6 @@ impl ArrowState {
             last_state: None,
             pickup: Pickup::Disallowed,
             spectral: false,
-            spectral_duration: 200,
             pickup_item: crate::items::ItemStack::new("minecraft:arrow", 1),
             fired_from_weapon: None,
             no_physics: false,
@@ -253,14 +243,12 @@ impl ArrowState {
             pierce: 0,
             pierced: Vec::new(),
             fire_ticks: 0,
-            synced_fire: false,
             fall_distance: 0.0,
             fluids: EntityFluidInteraction::new([WATER, LAVA]),
             was_touching_water: false,
             was_eye_in_water: false,
             first_tick: true,
             has_been_shot: false,
-            can_break: None,
             dealt_damage: false,
             removed: false,
             random,
@@ -274,8 +262,8 @@ impl ArrowState {
     /// `Arrow.getColor` of the server's own arrow: the colour of the potion on
     /// its pickup item, None for a plain arrow (`PotionContents.EMPTY`).
     pub fn potion_color(&self) -> Option<u32> {
-        (!crate::brewing::contents_empty(&self.pickup_item))
-            .then(|| crate::brewing::contents_color(&self.pickup_item))
+        let potion = self.pickup_item.potion()?;
+        Some(crate::brewing::potion_color(Some(potion)))
     }
     /// The `AbstractArrow` constructor's `pickupItemStack`: the drawn ammo
     /// (one item). Ammo drawn without being used up (`INTANGIBLE_PROJECTILE`)
@@ -309,7 +297,7 @@ impl ArrowState {
     }
     /// `Entity.isOnFire` (arrows are not fire immune).
     pub fn on_fire(&self) -> bool {
-        self.fire_ticks > 0 || self.synced_fire
+        self.fire_ticks > 0
     }
     /// `Entity.clearFire`.
     pub fn clear_fire(&mut self) {
@@ -338,20 +326,9 @@ pub struct ArrowScene<'a, 'r> {
     /// The `mob_griefing` and `tnt_explodes` game rules.
     pub mob_griefing: bool,
     pub tnt_explodes: bool,
-    pub owners: &'a dyn OwnerLookup,
-}
-/// `EntityReference.getEntity` for an owner the arrow only knows by UUID.
-pub trait OwnerLookup {
-    /// A loaded entity other than a player has this UUID.
-    fn non_player_entity(&self, uuid: [i32; 4]) -> bool;
-}
-impl OwnerLookup for () {
-    fn non_player_entity(&self, _: [i32; 4]) -> bool {
-        false
-    }
 }
 impl ArrowScene<'_, '_> {
-    pub fn block(&self, p: BlockPos) -> BlockStateId {
+    fn block(&self, p: BlockPos) -> BlockStateId {
         self.world.block(p.x, p.y, p.z)
     }
     fn is_air(&self, state: BlockStateId) -> bool {
@@ -388,8 +365,6 @@ impl ArrowScene<'_, '_> {
             binding: self.collision,
             subject: None,
         };
-        // CollisionContext.of(arrow): scaffolding is open from below.
-        let context = horizon_world::collision_context::CollisionContext::position(from.y);
         let hit = horizon_core::geometry::traverse_blocks(from, to, 1024, |p: BlockPos| {
             if Some(p) == ignored {
                 return None;
@@ -400,7 +375,7 @@ impl ArrowScene<'_, '_> {
             }
             let shape = self
                 .collision
-                .collision_shape_with_context(&mut scene, state, p, &context)
+                .collision_shape(&mut scene, state, [p.x, p.y, p.z])
                 .ok()?;
             shape.clip(from, to, p)
         });
@@ -408,7 +383,7 @@ impl ArrowScene<'_, '_> {
         Some((hit.location, hit.block, hit.direction.normal()))
     }
     /// `CollisionGetter.noCollision(null, box)` over blocks.
-    pub fn no_block_collision(&self, b: Aabb) -> bool {
+    fn no_block_collision(&self, b: Aabb) -> bool {
         let (lo, hi) = (b.min_position(), b.max_position());
         for x in (lo.x.floor() as i32 - 1)..=(hi.x.floor() as i32 + 1) {
             for y in (lo.y.floor() as i32 - 1)..=(hi.y.floor() as i32 + 1) {
@@ -467,15 +442,13 @@ pub fn clip_block_hit(
         binding: collision,
         subject: None,
     };
-    // CollisionContext.of(projectile): scaffolding is open from below.
-    let context = horizon_world::collision_context::CollisionContext::position(from.y);
     let hit = horizon_core::geometry::traverse_blocks(from, to, 1024, |p: BlockPos| {
         let state = world.block(p.x, p.y, p.z);
         if facts.is_air(state) {
             return None;
         }
         let shape = collision
-            .collision_shape_with_context(&mut scene, state, p, &context)
+            .collision_shape(&mut scene, state, [p.x, p.y, p.z])
             .ok()?;
         shape.clip(from, to, p)
     })
@@ -561,7 +534,7 @@ fn signum(v: f64) -> f64 {
 /// entity stops there and is not kept: the game hands it to
 /// `finish_entity_hit` once it has hurt the entity.
 pub fn tick(p: &mut Projectile, scene: &ArrowScene, targets: &[(Who, Aabb)]) -> (bool, Hit) {
-    tick_with(p, scene, targets, true, false)
+    tick_with(p, scene, targets, true)
 }
 /// One arrow tick whose hit is canceled (`ProjectileImpactEvent`): the arrow
 /// flies through its full movement: not stuck, nothing hurt, no hit.
@@ -570,26 +543,13 @@ pub fn tick_through(
     scene: &ArrowScene,
     targets: &[(Who, Aabb)],
 ) -> (bool, Hit) {
-    tick_with(p, scene, targets, false, false)
-}
-/// Simulate a remote arrow without server-only despawn or block reactions.
-/// Entity hits remain authoritative on the server.
-pub fn tick_client(p: &mut Projectile, scene: &ArrowScene) -> (bool, Hit) {
-    let out = tick_with(p, scene, &[], true, true);
-    // `Entity.playSound` passes no player to `Level.playSound`, and
-    // `ClientLevel.playSeededSound` plays only for its own player: the server's
-    // sound packets carry the hit and splash. The sounds' draws still happened.
-    if let Some(a) = p.arrow.as_mut() {
-        a.events.retain(|e| !matches!(e, ArrowEvent::Sound { .. }));
-    }
-    out
+    tick_with(p, scene, targets, false)
 }
 fn tick_with(
     p: &mut Projectile,
     scene: &ArrowScene,
     targets: &[(Who, Aabb)],
     impact: bool,
-    client: bool,
 ) -> (bool, Hit) {
     let Some(mut st) = p.arrow.take() else {
         return (false, Hit::None);
@@ -602,7 +562,6 @@ fn tick_with(
         p,
         st: &mut st,
         scene,
-        client,
     }
     .tick(targets, impact);
     p.stuck = st.in_ground;
@@ -624,24 +583,6 @@ pub enum EntityHit {
     /// flies on and falls to the ground.
     Dodged,
 }
-/// `ProjectileDeflection.REVERSE` with power `0.2`: each axis of the movement
-/// is multiplied by `-0.2 * 0.5` (`-0.1`), and the yaw turns `170 + nextFloat * 20`
-/// degrees. No hit sound. One left almost still (`lengthSqr < 1e-7`) drops its
-/// pickup when that is ALLOWED, then is discarded.
-pub fn deflect_reverse(velocity: &mut Vec3, yaw: &mut f32, st: &mut ArrowState) {
-    let power = 0.2;
-    let rotation = 170.0 + st.random.next_float() * 20.0;
-    let v = *velocity;
-    let k = -power * 0.5;
-    *velocity = Vec3::new(v.x * k, v.y * k, v.z * k);
-    *yaw += rotation;
-    if velocity.length_squared() < 1.0e-7 {
-        if st.pickup == Pickup::Allowed {
-            st.events.push(ArrowEvent::Drop);
-        }
-        st.removed = true;
-    }
-}
 /// The rest of the tick of an arrow that hit an entity: whether to keep it.
 pub fn finish_entity_hit(p: &mut Projectile, scene: &ArrowScene, outcome: EntityHit) -> bool {
     let Some(mut st) = p.arrow.take() else {
@@ -652,7 +593,6 @@ pub fn finish_entity_hit(p: &mut Projectile, scene: &ArrowScene, outcome: Entity
         p,
         st: &mut st,
         scene,
-        client: false,
     };
     match outcome {
         EntityHit::Hurt | EntityHit::Refused if trident => ticker.trident_bounce(),
@@ -683,7 +623,6 @@ struct Ticker<'p, 's, 'a, 'r> {
     p: &'p mut Projectile,
     st: &'s mut ArrowState,
     scene: &'s ArrowScene<'a, 'r>,
-    client: bool,
 }
 impl Ticker<'_, '_, '_, '_> {
     fn position(&self) -> Vec3 {
@@ -737,15 +676,13 @@ impl Ticker<'_, '_, '_, '_> {
             self.st.clear_fire();
         }
         if self.st.in_ground && physics {
-            if !self.client {
-                if self.st.last_state != Some(state) && self.should_fall() {
-                    self.start_falling();
-                } else {
-                    // AbstractArrow.tickDespawn.
-                    self.st.life += 1;
-                    if self.st.life >= 1200 {
-                        self.st.removed = true;
-                    }
+            if self.st.last_state != Some(state) && self.should_fall() {
+                self.start_falling();
+            } else {
+                // AbstractArrow.tickDespawn.
+                self.st.life += 1;
+                if self.st.life >= 1200 {
+                    self.st.removed = true;
                 }
             }
             self.st.in_ground_time += 1;
@@ -757,8 +694,7 @@ impl Ticker<'_, '_, '_, '_> {
             // entity event 0 (the clients' burst of particles in its colour,
             // `handleEntityEvent`) and turns into a plain arrow. The flight
             // and ground particles are the clients' own (`Level.isClientSide`).
-            if !self.client
-                && self.st.in_ground_time >= 600
+            if self.st.in_ground_time >= 600
                 && let Some(color) = self.st.potion_color()
             {
                 self.st.events.push(ArrowEvent::PotionPuff {
@@ -845,18 +781,14 @@ impl Ticker<'_, '_, '_, '_> {
         }
         // Projectile.tick, then Entity.baseTick's fluid and fire phases.
         if !self.st.has_been_shot {
-            if !self.client {
-                self.st.events.push(ArrowEvent::ShootEvent);
-            }
+            self.st.events.push(ArrowEvent::ShootEvent);
             self.st.has_been_shot = true;
         }
         self.st.was_eye_in_water = self.st.fluids.is_eye_in_fluid(&Tags, WATER);
         let mut fluids = std::mem::take(&mut self.st.fluids);
         let _ = entity_fluid_tick::update(&mut fluids, self, WATER, LAVA, 1_000_000);
         self.st.fluids = fluids;
-        if self.client {
-            self.st.clear_fire();
-        } else if self.st.fire_ticks > 0 {
+        if self.st.fire_ticks > 0 {
             self.st.fire_ticks -= 1;
         }
         if !self.st.first_tick && self.st.fluids.is_in_fluid(&Tags, LAVA) {
@@ -899,8 +831,11 @@ impl Ticker<'_, '_, '_, '_> {
     /// `AbstractArrow.startFalling`.
     fn start_falling(&mut self) {
         self.st.in_ground = false;
-        self.p.velocity =
-            crate::projectiles::start_falling_velocity(self.p.velocity, &mut self.st.random);
+        let v = self.p.velocity;
+        let x = f64::from(self.st.random.next_float() * 0.2);
+        let y = f64::from(self.st.random.next_float() * 0.2);
+        let z = f64::from(self.st.random.next_float() * 0.2);
+        self.p.velocity = Vec3::new(v.x * x, v.y * y, v.z * z);
         self.st.life = 0;
     }
     /// `AbstractArrow.stepMoveAndHit`: the nearest entity on the way, else the
@@ -1046,7 +981,18 @@ impl Ticker<'_, '_, '_, '_> {
     /// a half turn give or take ten degrees at a tenth of the speed; one
     /// left almost still drops its pickup (ALLOWED) and is discarded.
     fn turn_back(&mut self) {
-        deflect_reverse(&mut self.p.velocity, &mut self.p.yaw, self.st);
+        let power = 0.2;
+        let rotation = 170.0 + self.st.random.next_float() * 20.0;
+        let v = self.p.velocity;
+        let k = -power * 0.5;
+        self.p.velocity = Vec3::new(v.x * k, v.y * k, v.z * k);
+        self.p.yaw += rotation;
+        if self.p.velocity.length_squared() < 1.0e-7 {
+            if self.st.pickup == Pickup::Allowed {
+                self.st.events.push(ArrowEvent::Drop);
+            }
+            self.st.removed = true;
+        }
     }
     /// `AbstractArrow.onHitBlock`: back off the face by 0.05 along each axis
     /// it moved on, stop, and stick.
@@ -1055,8 +1001,7 @@ impl Ticker<'_, '_, '_, '_> {
         // BlockState.onProjectileHit still sees the deltaMovement it hit at.
         self.st.hit_speed = self.p.velocity.length();
         // Projectile.onHitBlock: BlockState.onProjectileHit.
-        if !self.client
-            && self.st.on_fire()
+        if self.st.on_fire()
             && let Some(reaction) = self.block_reaction(state)
         {
             self.st.events.push(ArrowEvent::Block {
@@ -1080,17 +1025,9 @@ impl Ticker<'_, '_, '_, '_> {
         self.st.pierce = 0;
         self.st.pierced.clear();
     }
-    /// `Projectile.mayInteract`: an arrow owned by anything but a player needs `mob_griefing`.
+    /// `Projectile.mayInteract`: a mob's arrows need `mob_griefing`.
     fn may_interact(&self) -> bool {
-        let by_entity = match self.p.owner {
-            Some(Who::Mob(_)) => true,
-            Some(Who::Player) => false,
-            None => self
-                .p
-                .owner_uuid
-                .is_some_and(|u| self.scene.owners.non_player_entity(u)),
-        };
-        !by_entity || self.scene.mob_griefing
+        !matches!(self.p.owner, Some(Who::Mob(_))) || self.scene.mob_griefing
     }
     /// `onProjectileHit` of the blocks a burning projectile lights.
     fn block_reaction(&self, state: BlockStateId) -> Option<BlockReaction> {
@@ -1318,15 +1255,15 @@ impl ArrowScene<'_, '_> {
             }
             if inside_fluid {
                 effects.advance(step);
-                match fluid.kind().template() {
+                match fluid.kind() {
                     // WaterFluid.entityInside.
-                    FluidTemplate::Water => effects.apply(Effect::Extinguish),
+                    FluidKind::Water | FluidKind::FlowingWater => effects.apply(Effect::Extinguish),
                     // LavaFluid.entityInside (lavaHurt does nothing to arrows).
-                    FluidTemplate::Lava => {
+                    FluidKind::Lava | FluidKind::FlowingLava => {
                         effects.apply(Effect::ClearFreeze);
                         effects.apply(Effect::LavaIgnite);
                     }
-                    FluidTemplate::Empty => {}
+                    FluidKind::Empty => {}
                 }
             }
         }
@@ -1608,13 +1545,7 @@ impl WaterSplashWorld for Ticker<'_, '_, '_, '_> {
         Ok(())
     }
     fn splash_event(&mut self) -> Result<(), Error> {
-        if !self.client {
-            self.st.events.push(ArrowEvent::SplashEvent);
-        }
+        self.st.events.push(ArrowEvent::SplashEvent);
         Ok(())
     }
 }
-
-#[cfg(test)]
-#[path = "arrows_client_tests.rs"]
-mod client_tests;

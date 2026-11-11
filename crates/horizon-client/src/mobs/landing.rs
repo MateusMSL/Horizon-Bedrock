@@ -91,12 +91,6 @@ impl BlockLandingWorld for MobLanding<'_, '_> {
     fn mob_griefing(&mut self) -> Result<bool, String> {
         Ok(self.w.mob_griefing)
     }
-    fn trample_allowed(&mut self, position: BlockPos, distance: f64) -> Result<bool, String> {
-        let (id, kind) = (self.mob.id as i32, &self.mob.kind.id);
-        Ok(crate::block_contact::trample_allowed(
-            id, kind, position, distance,
-        ))
-    }
     fn entity_dimensions(&self) -> (f32, f32) {
         (self.mob.width(), self.mob.height())
     }
@@ -129,7 +123,7 @@ impl BlockLandingWorld for MobLanding<'_, '_> {
         match sound {
             LandingSound::HoneySlide => Some("block.honey_block.slide"),
             LandingSound::HoneyFall => Some("block.honey_block.fall"),
-            LandingSound::TurtleEggBreak => Some("entity.turtle.egg_break"),
+            LandingSound::TurtleEggBreak => Some("block.turtle_egg.break"),
             LandingSound::ShelfMushroomBounce => None,
         }
     }
@@ -189,19 +183,7 @@ impl BlockLandingWorld for MobLanding<'_, '_> {
             .registry
             .default_state("minecraft:air")
             .ok_or("missing air")?;
-        let broken = self.w.world.block(position.x, position.y, position.z);
-        let written = self.set_block(position, air, 3)?;
-        // `Level.destroyBlock`: a destroy that happened is followed by
-        // BLOCK_DESTROY with no source (`TurtleEggBlock.decreaseEggs`' last egg).
-        if written {
-            self.events.push(MobEvent::LandingGameEvent {
-                event: "minecraft:block_destroy",
-                at: [position.x, position.y, position.z],
-                source: None,
-                state: broken,
-            });
-        }
-        Ok(written)
+        self.set_block(position, air, 3)
     }
     fn set_block(
         &mut self,
@@ -216,25 +198,13 @@ impl BlockLandingWorld for MobLanding<'_, '_> {
         Ok(true)
     }
     // Neighbour updates and the break particles ride on the host's SetBlock.
-    // `FarmlandBlock.turnToBaseBlock` (BLOCK_CHANGE from the trampling mob) and
-    // `TurtleEggBlock.decreaseEggs` (BLOCK_DESTROY with no source) post a game
-    // event after the write.
     fn block_event(
         &mut self,
-        kind: LandingEvent,
-        position: BlockPos,
-        state: BlockStateId,
-        with_entity: bool,
+        _: LandingEvent,
+        _: BlockPos,
+        _: BlockStateId,
+        _: bool,
     ) -> Result<(), String> {
-        self.events.push(MobEvent::LandingGameEvent {
-            event: match kind {
-                LandingEvent::BlockChange => "minecraft:block_change",
-                LandingEvent::BlockDestroy => "minecraft:block_destroy",
-            },
-            at: [position.x, position.y, position.z],
-            source: with_entity.then_some(self.mob.id),
-            state,
-        });
         Ok(())
     }
     fn level_event(&mut self, _: i32, _: BlockPos, _: i32) -> Result<(), String> {

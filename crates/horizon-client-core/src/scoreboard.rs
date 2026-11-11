@@ -529,13 +529,10 @@ impl Team {
             None => t,
         }
     }
-    /// `PlayerTeam.getFormattedDisplayName`: the display name in the team's
-    /// `displayNameStyle`, which its constructor makes the team's name on hover
-    /// (`ShowText`) and as insertion.
+    /// `PlayerTeam.getFormattedDisplayName`.
     pub fn formatted_display_name(&self) -> Text {
         let inner = hover_name(comp_text(&self.display_name), &self.name).with_style(&Style {
             click: None,
-            insertion: Some(self.name.clone()),
             ..Style::default()
         });
         self.apply_color(bracketed(inner))
@@ -966,10 +963,6 @@ impl Scoreboard {
     /// `getTrackedPlayers` (`playerScores.keySet().stream()`).
     pub fn tracked(&self) -> Vec<String> {
         self.holder_order.stream().map(str::to_owned).collect()
-    }
-    /// Every holder on a team (`teamsByPlayer.keySet()`).
-    pub fn team_members(&self) -> impl Iterator<Item = &str> {
-        self.team_of.keys().map(String::as_str)
     }
 
     // teams
@@ -1414,21 +1407,6 @@ fn finish(node: &mut serde_json::Map<String, Value>, extra: Vec<Comp>) -> Comp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    /// #14279: `PlayerTeam`'s `displayNameStyle` puts the team's name on hover
-    /// and as insertion; `getFormattedDisplayName` brackets the name in it.
-    #[test]
-    fn a_teams_formatted_name_inserts_the_team_name() {
-        let team = Team::new("reds");
-        let c = team.formatted_display_name().component();
-        assert_eq!(c["translate"], "chat.square_brackets");
-        let inner = &c["with"][0];
-        assert_eq!(inner["text"], "reds");
-        assert_eq!(inner["insertion"], "reds");
-        assert_eq!(inner["hover_event"]["action"], "show_text");
-        // `{"text":"reds"}` or its short form `"reds"`: the same component.
-        let value = &inner["hover_event"]["value"];
-        assert!(value == "reds" || value["text"] == "reds", "{value}");
-    }
 
     fn board() -> Scoreboard {
         let mut sb = Scoreboard::default();

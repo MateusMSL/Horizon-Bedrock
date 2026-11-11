@@ -1,18 +1,16 @@
 //! Cargo-facing generation and the launcher's trait injection boundary.
-use super::{
-    RENDER_HOOKS, Target, catalog_hooks, free_function_source, render_hooks_current, sources,
-};
+use super::{Target, catalog_hooks, free_function_source, sources};
 use quote::ToTokens;
 use std::{collections::HashSet, fs, path::Path};
 
 /// Generate only this crate's files, tracking every source read by the generator.
 /// `root` is supplied at run time by the consuming crate's build script.
 pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), String> {
-    track(root, target)?;
+    track(root)?;
     let generated = sources(root, super::FillMode::Require)?;
     let outputs = match target {
+        Target::Render => vec![("native_render_generated.rs", generated.render)],
         Target::Client => {
-            render_hooks_current(root, &generated.render)?;
             println!("cargo:rerun-if-env-changed=HORIZON_MOD_API_INJECTIONS");
             let hooks = if let Some(path) = std::env::var_os("HORIZON_MOD_API_INJECTIONS") {
                 let path = Path::new(&path);
@@ -37,7 +35,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
     Ok(())
 }
 
-pub(super) fn track(root: &Path, target: Target) -> Result<(), String> {
+pub(super) fn track(root: &Path) -> Result<(), String> {
     fn directory(path: &Path, extension: &str, recursive: bool) -> Result<(), String> {
         // Track the directory as well: adding a helper source or fragment changes the inputs.
         println!("cargo:rerun-if-changed={}", path.display());
@@ -55,17 +53,7 @@ pub(super) fn track(root: &Path, target: Target) -> Result<(), String> {
         println!("cargo:rerun-if-changed={}", root.join(path).display());
     }
     directory(&root.join("tools/native-hook-fragments"), "json", false)?;
-    match target {
-        // The host API is made from every `impl Game` method under game/; the render hooks are
-        // checked against their committed file.
-        Target::Client => {
-            directory(&root.join("crates/horizon-client/src/game"), "rs", true)?;
-            println!(
-                "cargo:rerun-if-changed={}",
-                root.join(RENDER_HOOKS).display()
-            );
-        }
-    }
+    directory(&root.join("crates/horizon-client/src/game"), "rs", true)?;
     let catalog = serde_json::from_str(
         &fs::read_to_string(root.join("native-hooks.json")).map_err(|e| e.to_string())?,
     )

@@ -117,11 +117,11 @@ def main():
     for index, selection in enumerate(SELECTIONS):
         # One run per selection: the input's first line names the packs, bottom first.
         def make(build, selection=selection):
-            folder = build / "resource packs"
+            folder = build / "resourcepacks"
             packs(folder)
             vanilla = lab.RESOURCES
             path = build / "inputs.txt"
-            path.write_text(json.dumps(["root", str(vanilla), str(folder), *selection]) + "\n"
+            path.write_text(f"root {vanilla} {folder} {' '.join(selection)}".rstrip() + "\n"
                             + "".join(q + "\n" for q in QUERIES))
             return path, len(QUERIES)
         harness.differential(f"resource-pack-parity-{index}", "VanillaPackResourcesOracle",

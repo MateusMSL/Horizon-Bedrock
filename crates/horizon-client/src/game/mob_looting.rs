@@ -28,26 +28,18 @@ impl Game<'_> {
         let mut near = super::item_areas::ItemAreas::default();
         for i in 0..self.mobs.len() {
             let m = &self.mobs[i];
-            if !m.can_pick_up_loot()
-                || !m.alive()
-                || m.removed
-                || !self.creatures.ticked.contains(&m.id)
-            {
+            if !m.can_pick_up_loot() || !m.alive() || m.removed {
                 continue;
             }
             // `Mob.ITEM_PICKUP_REACH`.
             let reach = m.bounds().inflate(Vec3::new(1.0, 0.0, 1.0));
-            let mut scan = near.scan(&self.dropped, self.next_entity, reach);
-            if scan.is_empty() {
+            if !near.may_meet(&self.dropped, self.next_entity, reach) {
                 continue;
             }
             let (species, baby, passenger) = (m.species(), m.is_baby(), m.extra.passenger);
             let mut j = 0;
-            loop {
-                j = scan.next_from(j, self.dropped.len());
-                let Some(e) = self.dropped.get(j) else {
-                    break;
-                };
+            while j < self.dropped.len() {
+                let e = &self.dropped[j];
                 if e.pickup_delay > 0 || !reach.intersects(e.bounds()) {
                     j += 1;
                     continue;
@@ -78,7 +70,6 @@ impl Game<'_> {
                 e.stack.count -= taken;
                 if e.stack.count == 0 {
                     self.remove_dropped(j);
-                    scan.removed(j);
                 } else {
                     j += 1;
                 }
@@ -123,11 +114,9 @@ impl Game<'_> {
         set_drop_chance(m, slot.index(), 2.0);
         m.persistent = true;
         let at = [m.position.x, m.position.y, m.position.z];
-        let id = m.id;
         if drop_old && let Some(old) = old {
-            self.spawn_item_own(old, at, 10);
+            self.spawn_item(old, at, super::dispenser::new_item_motion(), 10);
         }
-        self.mob_equip_event(id, at, true);
         Some(taken)
     }
 
@@ -143,22 +132,8 @@ impl Game<'_> {
         if species == Species::Drowned && &*current == "minecraft:nautilus_shell" {
             return false;
         }
-        let new = self.stack_facts(m, stack, slot);
-        let worn = self.stack_facts(m, &worn_stack, slot);
-        let preferred = equip::preferred_weapon_tag(species).map(|tag| {
-            (
-                self.items().item_in_tag(tag, &stack.item),
-                self.items().item_in_tag(tag, &current),
-            )
-        });
-        equip::can_replace_current_item(&new, Some(&worn), slot, preferred)
-    }
-
-    /// The numbers `Mob.compareArmor` and `compareWeapons` read off `stack`
-    /// in `slot` for the mob `m`.
-    pub(super) fn stack_facts(&self, m: &Mob, stack: &ItemStack, slot: Slot) -> Facts {
-        let (armor, toughness, attack) = self.attributes(m, stack, slot);
-        Facts {
+        let (armor, toughness, attack) = self.attributes(m, &stack.item, slot);
+        let new = Facts {
             armor,
             armor_toughness: toughness,
             attack_damage: attack,
@@ -168,23 +143,44 @@ impl Game<'_> {
             // `EnchantmentEffectComponents.PREVENT_ARMOR_CHANGE` is the Curse of
             // Binding's, the only enchantment that carries one.
             prevents_armor_change: stack.enchantment_level("minecraft:binding_curse") > 0,
-        }
+        };
+        let (armor, toughness, attack) = self.attributes(m, &current, slot);
+        let worn = Facts {
+            armor,
+            armor_toughness: toughness,
+            attack_damage: attack,
+            enchantments: worn_stack.enchantments().len(),
+            damage: worn_stack.damage as i32,
+            custom_name: worn_stack.custom_name().is_some(),
+            prevents_armor_change: worn_stack.enchantment_level("minecraft:binding_curse") > 0,
+        };
+        let preferred = equip::preferred_weapon_tag(species).map(|tag| {
+            (
+                self.items().item_in_tag(tag, &stack.item),
+                self.items().item_in_tag(tag, &current),
+            )
+        });
+        equip::can_replace_current_item(&new, Some(&worn), slot, preferred)
     }
 
     /// `Mob.getApproximateAttributeWith` for the item `id` in `slot`: each
     /// attribute starts from the mob's own value. (armour, toughness, damage)
-    fn attributes(&self, m: &Mob, stack: &ItemStack, slot: Slot) -> (f64, f64, f64) {
-        let modifiers = self.items().attribute_modifiers(stack);
+    fn attributes(&self, m: &Mob, id: &str, slot: Slot) -> (f64, f64, f64) {
+        let empty: &[(String, String, f64, String, String)] = &[];
+        let modifiers = self
+            .items()
+            .get(id)
+            .map_or(empty, |i| i.modifiers.as_slice());
         (
-            equip::attribute_with(&modifiers, "minecraft:armor", f64::from(m.kind.armor), slot),
+            equip::attribute_with(modifiers, "minecraft:armor", f64::from(m.kind.armor), slot),
             equip::attribute_with(
-                &modifiers,
+                modifiers,
                 "minecraft:armor_toughness",
                 f64::from(m.kind.armor_toughness),
                 slot,
             ),
             equip::attribute_with(
-                &modifiers,
+                modifiers,
                 "minecraft:attack_damage",
                 f64::from(m.attrs.attack_damage),
                 slot,

@@ -162,7 +162,6 @@ pub fn install(
     home: &Path,
     progress: &dyn Fn(&str, f32),
 ) -> Result<Vec<Entry>, String> {
-    let _lock = super::lock_home(home);
     let steps = plan(source, target, project)?;
     let folder = |kind| target.folder(kind).expect("plan checks every kind");
     let was = Installed::load(home).entries;
@@ -175,8 +174,8 @@ pub fn install(
         else {
             continue;
         };
-        if let Some(file) = off(home, old).filter(|_| old.file != e.file) {
-            let _ = fs::remove_file(file);
+        if old.file != e.file {
+            let _ = fs::remove_file(off(home, old));
         }
         set_on(home, e, false)?;
     }
@@ -187,29 +186,24 @@ pub fn install(
 /// the `.jar` files in `mods/`.
 const OFF: &str = ".disabled";
 
-/// `None` for an entry outside the folders the browser installs into ([`installed::in_folders`]).
-fn off(home: &Path, entry: &Entry) -> Option<std::path::PathBuf> {
-    entry.path(home)?;
-    Some(home.join(format!("{}{OFF}", entry.file)))
+fn off(home: &Path, entry: &Entry) -> std::path::PathBuf {
+    home.join(format!("{}{OFF}", entry.file))
 }
 
 /// Whether the game loads `entry`: everything but a mod turned off.
 pub fn is_on(home: &Path, entry: &Entry) -> bool {
-    entry.kind != Kind::Mod || !off(home, entry).is_some_and(|o| o.is_file())
+    entry.kind != Kind::Mod || !off(home, entry).is_file()
 }
 
 /// Turns the mod `entry` on or off by renaming its file; it stays installed.
 pub fn set_on(home: &Path, entry: &Entry, on: bool) -> Result<(), String> {
-    let _lock = super::lock_home(home);
     if entry.kind != Kind::Mod {
         return Err(format!(
             "{} isn't a mod: only mods turn on and off.",
             entry.title
         ));
     }
-    let (Some(jar), Some(off)) = (entry.path(home), off(home, entry)) else {
-        return Err(format!("{:?} isn't a plain file name.", entry.file));
-    };
+    let (jar, off) = (home.join(&entry.file), off(home, entry));
     let (from, to) = if on { (off, jar) } else { (jar, off) };
     if !from.exists() && to.is_file() {
         return Ok(());
@@ -233,13 +227,12 @@ pub fn update_for(
 
 /// Removes what the browser installed in the instance for `name` (a project id or slug).
 pub fn remove(home: &Path, name: &str) -> Result<Entry, String> {
-    let _lock = super::lock_home(home);
     let mut installed = Installed::load(home);
     let entry = installed
         .lookup(name)
         .cloned()
         .ok_or_else(|| format!("{name} wasn't installed by the browser."))?;
-    for path in [entry.path(home), off(home, &entry)].into_iter().flatten() {
+    for path in [home.join(&entry.file), off(home, &entry)] {
         match fs::remove_file(&path) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}

@@ -12,9 +12,7 @@ struct Params {
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
-// A depth view bound as unfilterable float: naga's GLSL backend cannot
-// `textureLoad` a depth texture, and the texel is the same value.
-@group(0) @binding(1) var depth: texture_2d<f32>;
+@group(0) @binding(1) var depth: texture_depth_2d;
 @group(0) @binding(2) var atlas: texture_2d<f32>;
 @group(0) @binding(3) var atlas_sampler: sampler;
 
@@ -40,7 +38,7 @@ struct Out {
 
 // xy: the motion vector in UV (to where the pixel was last frame, FSR's convention), z: 1.
 @fragment fn fs_motion(in: Out) -> @location(0) vec4<f32> {
-    let stored = textureLoad(depth, vec2<i32>(in.clip.xy), 0).r;
+    let stored = textureLoad(depth, vec2<i32>(in.clip.xy), 0);
     let tolerance = stored * 1e-3 + 1e-7;
     // Not what the world shows here: a transparent texel, or behind something.
     if in.translucent != 0u {

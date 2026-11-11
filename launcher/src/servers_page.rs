@@ -7,7 +7,6 @@ use horizon_launcher::heads;
 use horizon_launcher::servers::{
     self, Applied, Backup, Entry, Fix, NewServer, Problem, Status, World,
 };
-use horizon_theme::glass::radius;
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -59,11 +58,11 @@ pub(super) enum Field {
     PostExit,
     /// Home's memory row (`launch_page.rs`).
     MemoryLimit,
+    /// Settings' new offline name (`switch_page.rs`).
+    OfflineName,
     DeleteServer,
     /// Settings' accent as hex (`themes_page.rs`).
     AccentHex,
-    /// The Shop's gift recipient (`wardrobe_page/shop/basket.rs`).
-    ShopGift,
 }
 
 impl Field {
@@ -89,9 +88,9 @@ impl Field {
         Field::LaunchEnv,
         Field::PostExit,
         Field::MemoryLimit,
+        Field::OfflineName,
         Field::DeleteServer,
         Field::AccentHex,
-        Field::ShopGift,
     ];
 }
 
@@ -174,17 +173,6 @@ pub(super) struct Create {
 /// What the sidebar shows of the Servers page: its list once the page has read it, and whether
 /// a server answers.
 impl Servers {
-    pub(super) fn location_busy(&self) -> bool {
-        self.busy.is_some()
-            || self.creating
-            || self.applying
-            || !self.queued.is_empty()
-            || self
-                .statuses
-                .values()
-                .any(|s| matches!(s.phase.as_str(), "running" | "starting" | "stopping"))
-    }
-
     /// A stopped server's line in the list: "Survival · stopped", as the mockup's. The open
     /// server's mode is the one its settings show now, once read; the others' (and the open one's
     /// until then) come from their files.
@@ -324,15 +312,6 @@ impl Servers {
         self.texts.get(&f).map_or("", LineEdit::text)
     }
 
-    /// Mark a field invalid without an explanatory message, or clear its previous error.
-    pub(super) fn set_field_invalid(&mut self, field: Field, invalid: bool) {
-        if invalid {
-            self.invalid = Some((field, ""));
-        } else if self.invalid.is_some_and(|(current, _)| current == field) {
-            self.invalid = None;
-        }
-    }
-
     /// Whether this field has the keyboard, as of this frame.
     pub(super) fn has_focus(&self, f: Field) -> bool {
         self.focused == Some(f)
@@ -392,16 +371,13 @@ pub(super) fn stop_on_quit() {
     }
 }
 
-/// Update closes the window to open the new launcher at once: a server is its own process and the
-/// new window finds it running, so an update doesn't end anyone's game. It stays up when that new
-/// window closes too, until it is stopped on the Servers page.
-pub(super) fn keep_running_through_update() {
-    STARTED_HERE.lock().unwrap().clear();
-}
-
-/// The player's own name, to let them in on a friends-only server: the Microsoft account that plays.
+/// The player's own name, to let them in on a friends-only server: the Microsoft account that plays,
+/// else the name the game made up for them (`horizon-player.txt`).
 fn own_name(accounts: &Accounts) -> Option<String> {
-    accounts.selected().map(|a| a.name.clone())
+    accounts
+        .selected()
+        .map(|a| a.name.clone())
+        .or_else(crate::offline_name)
 }
 
 fn bytes(n: u64) -> String {
@@ -468,17 +444,7 @@ impl Launcher {
             let log = move |l: String| {
                 let _ = lines.send(Event::Line(l));
             };
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| job(&log)))
-                .unwrap_or_else(|panic| {
-                    let error = (panic.downcast_ref::<&str>().map(|s| s.to_string()))
-                        .or_else(|| panic.downcast_ref::<String>().cloned())
-                        .unwrap_or_default();
-                    Err(Problem::plain(trf(
-                        "Could not run {program}: {error}",
-                        &[("program", "horizon-server"), ("error", &error)],
-                    )))
-                });
-            let _ = tx.send(Event::Done(result));
+            let _ = tx.send(Event::Done(job(&log)));
         });
     }
 
@@ -547,7 +513,8 @@ impl Launcher {
             && (self.servers.tab == Tab::Overview || self.theme.glass);
         let mut changed = self.internet_tick(overview);
         while let Ok(event) = self.servers.rx.try_recv() {
-            changed |= self.servers_event(event);
+            changed = true;
+            self.servers_event(event);
         }
         if self.page != Page::Servers || self.servers.polling || !self.servers.loaded {
             return changed;
@@ -601,24 +568,21 @@ impl Launcher {
         changed
     }
 
-    fn servers_event(&mut self, event: Event) -> bool {
+    fn servers_event(&mut self, event: Event) {
         let s = &mut self.servers;
         match event {
             Event::Polled { dir, status, logs } => {
                 s.polling = false;
-                let mut changed = false;
                 let was = s.statuses.get(&dir).map(|st| st.phase.clone());
                 if was.as_deref() != Some("running") && status.phase == "running" {
                     // A fresh start took every saved setting.
                     s.restart_needed.clear();
                     s.pvp = None;
-                    changed = true;
                 }
                 if let Some((next, lines)) = logs {
                     if s.log_dir.as_ref() != Some(&dir) {
                         s.log.clear();
                         s.log_dir = Some(dir.clone());
-                        changed = true;
                     }
                     if !lines.is_empty() {
                         s.log.extend(lines);
@@ -626,38 +590,24 @@ impl Launcher {
                             s.log.pop_front();
                         }
                         s.console_scroll.handle.scroll_to_bottom();
-                        changed = true;
                     }
                     s.log_next = next;
                 }
                 let read_pvp = status.phase == "running" && s.pvp.is_none();
-                if s.statuses.get(&dir) != Some(&status) {
-                    s.statuses.insert(dir, *status);
-                    changed = true;
-                }
+                s.statuses.insert(dir, *status);
                 if read_pvp {
                     self.read_pvp();
-                    changed = true;
                 }
-                changed
             }
             Event::Statuses(all) => {
                 s.polling = false;
-                let mut changed = false;
-                for (dir, status) in all {
-                    if s.statuses.get(&dir) != Some(&status) {
-                        s.statuses.insert(dir, status);
-                        changed = true;
-                    }
-                }
-                changed
+                s.statuses.extend(all);
             }
             Event::Line(line) => {
                 s.job_log.push_back(line);
                 while s.job_log.len() > 6 {
                     s.job_log.pop_front();
                 }
-                true
             }
             Event::Done(result) => {
                 s.busy = None;
@@ -668,7 +618,6 @@ impl Launcher {
                     Err(p) => s.problem = Some(p),
                 }
                 self.load_details();
-                true
             }
             Event::Created(result) => {
                 s.creating = false;
@@ -686,7 +635,6 @@ impl Launcher {
                     }
                     Err(p) => s.problem = Some(p),
                 }
-                true
             }
             Event::Details {
                 dir,
@@ -698,9 +646,6 @@ impl Launcher {
                     s.config = config;
                     s.backups = backups;
                     s.service = Some(service);
-                    true
-                } else {
-                    false
                 }
             }
             Event::Deleted { dir, result } => {
@@ -721,7 +666,6 @@ impl Launcher {
                     Ok(()) => s.note = Some("Server moved to the trash.".into()),
                     Err(e) => s.problem = Some(Problem::plain(e)),
                 }
-                true
             }
             Event::Applied(result) => {
                 s.applying = false;
@@ -735,24 +679,16 @@ impl Launcher {
                 } else {
                     self.apply_settings();
                 }
-                true
             }
-            Event::Pvp(on) => {
-                s.pvp = on;
-                true
-            }
+            Event::Pvp(on) => s.pvp = on,
             Event::UpdateCheck(result) => {
                 s.checking = false;
                 match result {
                     Ok(v) => s.update = Some(v),
                     Err(p) => s.problem = Some(p),
                 }
-                true
             }
-            Event::Failed(e) => {
-                s.problem = Some(Problem::plain(e));
-                true
-            }
+            Event::Failed(e) => s.problem = Some(Problem::plain(e)),
         }
     }
 
@@ -845,49 +781,8 @@ impl Launcher {
         STARTED_HERE.lock().unwrap().push(dir.clone());
         self.servers.restart_needed.clear();
         self.server_job("Starting", move |log| {
-            if let Some(api) = servers::Api::open(&dir) {
-                if let Ok(status) = api.call("GET", "/api/v1/status", None) {
-                    if status["phase"] == "stopped"
-                        && api.call("POST", "/api/v1/start", None).is_ok()
-                    {
-                        return Ok(String::new());
-                    }
-                }
-            }
             log("A new world takes a minute the first time".into());
             servers::run_streamed(&dir, &["start"], log).map(|_| String::new())
-        });
-    }
-
-    fn stop_server(&mut self) {
-        let Some(dir) = self.servers.open.clone() else {
-            return;
-        };
-        self.server_job("Stopping", move |log| {
-            // The running server's API first; when it can't be reached or refuses, the CLI,
-            // whose error is the job's.
-            let via_api = servers::Api::open(&dir)
-                .is_some_and(|api| api.call("POST", "/api/v1/stop", None).is_ok());
-            if via_api {
-                return Ok(String::new());
-            }
-            servers::run_streamed(&dir, &["stop"], log).map(|_| String::new())
-        });
-    }
-
-    fn restart_server(&mut self) {
-        let Some(dir) = self.servers.open.clone() else {
-            return;
-        };
-        self.server_job("Restarting", move |log| {
-            // The running server's API first; when it can't be reached or refuses, the CLI,
-            // whose error is the job's.
-            let via_api = servers::Api::open(&dir)
-                .is_some_and(|api| api.call("POST", "/api/v1/restart", None).is_ok());
-            if via_api {
-                return Ok(String::new());
-            }
-            servers::run_streamed(&dir, &["restart"], log).map(|_| String::new())
         });
     }
 
@@ -1085,17 +980,8 @@ impl Launcher {
             // tall as they are.
             crate::glass_ui::field(focused, invalid)
                 .when(
-                    matches!(
-                        f,
-                        Field::InstanceModsFilter
-                            | Field::ConsoleSearch
-                            | Field::Motd
-                            | Field::Port
-                            | Field::Token
-                            | Field::AddPlayer
-                            | Field::DeleteServer
-                    ),
-                    |d| d.h(px(36.)).px(px(12.)).rounded(px(radius::CONTROL)),
+                    matches!(f, Field::InstanceModsFilter | Field::ConsoleSearch),
+                    |d| d.h(px(36.)).px(px(12.)).rounded(px(10.)),
                 )
                 // The instance dialog's are the large `FIELD_LG`: 48 px, 15 px text, white at 6 %,
                 // 10 % while typed in.
@@ -1119,12 +1005,12 @@ impl Launcher {
                 .when(f == Field::AccentHex, |d| {
                     d.h(px(36.))
                         .px(px(12.))
-                        .rounded(px(radius::CONTROL))
+                        .rounded(px(10.))
                         .text_size(px(13.))
                         .font_weight(FontWeight::MEDIUM)
                 })
                 // The friend field sits in its chip, on the chip's fill.
-                .when(matches!(f, Field::Players), |d| {
+                .when(matches!(f, Field::Players | Field::OfflineName), |d| {
                     d.h_full().px(px(14.)).bg(gpui::transparent_black())
                 })
                 // The server's command line: the field is the line's middle, on its fill, in mono.
@@ -1139,24 +1025,15 @@ impl Launcher {
                 // The mockup's focus ring (`:focus-visible`, 2 px of the accent's soft shade) on a
                 // field of its own, drawn inside its edge: GPUI has no outline.
                 .when(
-                    focused && !invalid && !matches!(f, Field::Players | Field::Command),
+                    focused
+                        && !invalid
+                        && !matches!(f, Field::Players | Field::OfflineName | Field::Command),
                     |d| {
                         let small = matches!(
                             f,
-                            Field::InstanceModsFilter
-                                | Field::ConsoleSearch
-                                | Field::AccentHex
-                                | Field::Motd
-                                | Field::Port
-                                | Field::Token
-                                | Field::AddPlayer
-                                | Field::DeleteServer
+                            Field::InstanceModsFilter | Field::ConsoleSearch | Field::AccentHex
                         );
-                        d.child(crate::glass_ui::focus_ring(if small {
-                            radius::CONTROL
-                        } else {
-                            radius::ROW
-                        }))
+                        d.child(crate::glass_ui::focus_ring(if small { 10. } else { 12. }))
                     },
                 )
         } else {
@@ -1284,7 +1161,7 @@ impl Launcher {
                 self.save_launch()
             }
             Field::MemoryLimit => self.memory_enter(),
-            Field::ShopGift => self.shop.find_soon = true,
+            Field::OfflineName => self.offline_name_enter(),
             Field::ServerName | Field::ServerAddress => self.add_server(),
         }
     }
@@ -1557,11 +1434,7 @@ impl Launcher {
                 if !dir.join("server.toml").is_file() {
                     servers::run(&dir, &["init", "--yes"])?;
                 }
-                let entry = Entry {
-                    name,
-                    dir,
-                    host: None,
-                };
+                let entry = Entry { name, dir };
                 servers::add(entry.clone()).map_err(Problem::plain)?;
                 Ok(entry)
             })();
@@ -1641,7 +1514,7 @@ impl Launcher {
                     .flex()
                     .items_center()
                     .gap(px(10.))
-                    .child(div().size(px(8.)).bg(dot))
+                    .child(div().size(px(8.)).rounded_full().bg(dot))
                     .child(caps(phase_label(&status)).text_color(t.muted))
                     .when_some(status.uptime.filter(|_| running), |d, up| {
                         d.child(caps(format!("· up {}", uptime(up))).text_color(t.muted))
@@ -1683,7 +1556,7 @@ impl Launcher {
             disabled(start)
         } else if running {
             start.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                this.stop_server();
+                this.server_command("Stopping", vec!["stop".into()]);
                 cx.notify();
             }))
         } else {
@@ -1696,7 +1569,7 @@ impl Launcher {
         let restart = if idle && running {
             restart.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                 this.servers.restart_needed.clear();
-                this.restart_server();
+                this.server_command("Restarting", vec!["restart".into()]);
                 cx.notify();
             }))
         } else {
@@ -1762,7 +1635,7 @@ impl Launcher {
                     .items_center()
                     .gap(px(12.))
                     .p(px(16.))
-                    .child(div().flex_none().size(px(6.)).bg(t.success))
+                    .child(div().flex_none().size(px(6.)).rounded_full().bg(t.success))
                     .child(
                         div()
                             .flex_1()
@@ -1785,7 +1658,7 @@ impl Launcher {
                     .items_center()
                     .gap(px(12.))
                     .p(px(16.))
-                    .child(div().flex_none().size(px(6.)).bg(t.accent))
+                    .child(div().flex_none().size(px(6.)).rounded_full().bg(t.accent))
                     .child(
                         div()
                             .flex_1()
@@ -1802,7 +1675,7 @@ impl Launcher {
                         if idle {
                             b.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                                 this.servers.restart_needed.clear();
-                                this.restart_server();
+                                this.server_command("Restarting", vec!["restart".into()]);
                                 cx.notify();
                             }))
                         } else {
@@ -2500,14 +2373,12 @@ impl Launcher {
         };
         let motd = div()
             .flex()
-            .items_center()
             .gap(px(8.))
             .child(self.field(Field::Motd, tr("A Minecraft Server"), 260., cx))
             .child(save("motd-save", Field::Motd, cx))
             .into_any_element();
         let port = div()
             .flex()
-            .items_center()
             .gap(px(8.))
             .child(self.field(Field::Port, "25565", 100., cx))
             .child(save("port-save", Field::Port, cx))
@@ -3125,6 +2996,7 @@ impl Launcher {
                         .child(
                             div()
                                 .size(px(12.))
+                                .rounded_full()
                                 .border_1()
                                 .border_color(if chosen { t.accent } else { t.muted })
                                 .when(chosen, |d| d.bg(t.accent)),
@@ -3198,6 +3070,7 @@ impl Launcher {
                 .id(id)
                 .flex_none()
                 .size(px(18.))
+                .rounded(px(4.))
                 .border_1()
                 .border_color(if on { t.accent } else { t.muted })
                 .bg(if on { t.accent } else { t.surface })

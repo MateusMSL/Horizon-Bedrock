@@ -607,14 +607,7 @@ impl RulesScreen {
         {
             let hover = active && ui::hovered(cursor, bx, by, 150.0, 20.0);
             let label = Text::translate(key, &[]);
-            let action = if key == "gui.done" {
-                crate::widgets::Action::Done
-            } else {
-                crate::widgets::Action::Cancel
-            };
-            ui::action_button(
-                batch, atlas, action, bx, by, 150.0, 20.0, &label, active, hover,
-            );
+            ui::button(batch, atlas, bx, by, 150.0, 20.0, &label, active, hover);
         }
         // The hovered rule's tooltip: its id, description and default.
         if let Some(Row::Rule(r)) = hovered.map(|i| rows[i]) {

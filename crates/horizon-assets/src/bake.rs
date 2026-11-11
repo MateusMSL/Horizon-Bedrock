@@ -34,8 +34,6 @@ pub struct ModelQuad {
 /// NeoForge's `render_type` names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RenderType {
-    /// A declared render type unknown to this baker; distinct from an absent default.
-    Unsupported,
     Solid,
     Cutout,
     CutoutMipped,
@@ -236,10 +234,7 @@ fn bake_into(
     skip_flat: bool,
     output: &mut Vec<ModelQuad>,
 ) -> Result<()> {
-    let render_type = model
-        .render_type
-        .as_deref()
-        .map(|name| RenderType::by_name(name).unwrap_or(RenderType::Unsupported));
+    let render_type = model.render_type.as_deref().and_then(RenderType::by_name);
     for element in model.elements() {
         let element = element
             .as_ref()
@@ -297,10 +292,7 @@ fn bake_obj(
     transform: BlockModelTransform,
     output: &mut Vec<ModelQuad>,
 ) -> Result<()> {
-    let render_type = model
-        .render_type
-        .as_deref()
-        .map(|name| RenderType::by_name(name).unwrap_or(RenderType::Unsupported));
+    let render_type = model.render_type.as_deref().and_then(RenderType::by_name);
     for face in obj.faces.iter().filter(|f| !hidden.contains(&f.object)) {
         let slot = match obj.materials.get(&face.material) {
             Some(MtlTexture::Sprite(sprite)) => {
