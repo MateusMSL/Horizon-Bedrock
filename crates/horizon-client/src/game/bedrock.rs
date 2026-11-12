@@ -25,6 +25,7 @@ impl Game<'_> {
         };
         let sprites = &self.gui.atlas.sprites;
         let lookup = |name: &str| sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
+        horizon_client::mobs::render::set_first_person_arm_heights(self.heights.interpolated(alpha));
         horizon_client::mobs::render::first_person_item(
             player,
             item,

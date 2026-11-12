@@ -115,6 +115,23 @@ fn main() {
         format!("{:?}", b.block_defs.keys().collect::<Vec<_>>())
     });
 
+    c.check("esponja: textura do blocks.json em block/sponge", out.join("assets/minecraft/textures/block/sponge.png").is_file(), || {
+        "block/sponge.png nao escrito".into()
+    });
+    for (code, key, want) in [
+        ("en_us", "item.minecraft.paper", "Paper (test axes)"),
+        ("pt_br", "item.minecraft.paper", "Papel (eixos de teste)"),
+        ("pt_br", "item.minecraft.stick", "Graveto (animação de teste)"),
+        ("pt_br", "block.minecraft.sponge", "Esponja (teste)"),
+        ("pt_br", "entity.minecraft.pig", "Porco (teste)"),
+    ] {
+        let got = std::fs::read(out.join(format!("assets/minecraft/lang/{code}.json")))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+            .and_then(|v| v.get(key)?.as_str().map(str::to_owned));
+        c.check(&format!("texto {code} {key}"), got.as_deref() == Some(want), || format!("{got:?}"));
+    }
+
     let _ = std::fs::remove_dir_all(&out);
     println!("{} falha(s)", c.failed);
     std::process::exit(i32::from(c.failed > 0));

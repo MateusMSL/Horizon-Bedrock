@@ -40,7 +40,7 @@ física, inventário) continua sendo a do Java; o motor Bedrock só lê o estado
 | `src/settings.rs` | Opções do pack (`settings` do manifest: toggles, dropdowns) e as respostas de `q.is_pack_setting_enabled/selected`. |
 | `src/jsonc.rs` | JSON do Bedrock (comentários, vírgula sobrando, BOM) ➜ JSON normal. |
 | `src/brarchive.rs` | Formato `.brarchive` (vários JSON num arquivo, usado pelo vanilla do Bedrock). |
-| `src/convert.rs` | Converte o pack Bedrock num pack Java em disco: texturas (`textures/...` ➜ `entity/bedrock/...`, itens ➜ `item/...`), sons, idiomas, cópia dos JSON que o motor lê. |
+| `src/convert.rs` | Converte o pack Bedrock num pack Java em disco: texturas (`textures/...` ➜ `entity/bedrock/...`, itens ➜ `item/...`), sons, `blocks.json` (textura trocada ➜ `block/<id>`), `texts/*.lang` ➜ `lang/*.json` (nomes de item, bloco, entidade), cópia dos JSON que o motor lê. |
 | `src/bundle.rs` | Lê o pack convertido para a memória (`Bundle`): entidades, attachables, geometrias, animações, partículas, materiais, sons. Empilha vários packs (o de cima vence) via `order.txt`. Ajusta os sprites de `texture_meshes` ao tamanho real das texturas. |
 | `src/geometry.rs` | Modelos (`models/entity/*.json`): ossos, cubos, UVs, `texture_meshes` (itens 2D virando caixinhas), pivôs. Converte para o formato de partes do Java. |
 | `src/entity.rs` | Client entities, attachables e render controllers: qual modelo/textura/material, quais animações rodam, `pre_animation`, `parent_setup`, part_visibility. Monta a pose do quadro (`Frame`), resolve rotações `relative_to entity` e as consultas `q.bone_origin`/`bone_orientation_trs`. |

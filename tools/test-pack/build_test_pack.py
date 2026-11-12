@@ -12,7 +12,7 @@ shapes and colours, so the same pack can be checked in Bedrock and in Horizon si
   * player interaction particles + sound: a splash when entering water, a ring when landing
     (also after flying in creative), both with a "blip" sound
   * custom block look: sponge with a magenta/black checker texture (blocks.json)
-  * modified entity: minecraft:pig with its own model (box body, head with axes, spinning
+  * modified entity: minecraft:pig (file format 1.26.30: Bedrock keeps the newest format) with its own model (box body, head with axes, spinning
     head), its own particles (green aura every 4 s from the `top` locator) and sound
   * name tags: a pig named "Teste" turns cyan (render controller reads q.is_name_any)
   * texts: item/entity names changed (texts/*.lang)
@@ -125,8 +125,10 @@ def cube(origin, size, texel):
 def geometry(identifier, bones, w=9):
     return {"format_version": "1.16.0", "minecraft:geometry": [{
         "description": {"identifier": identifier, "texture_width": w, "texture_height": 1,
-                        "visible_bounds_width": 4, "visible_bounds_height": 4,
-                        "visible_bounds_offset": [0, 1, 0]},
+                        # Wide bounds: Bedrock skips a model whose bounds leave the view, and
+                        # an item held out in front can leave small ones.
+                        "visible_bounds_width": 8, "visible_bounds_height": 8,
+                        "visible_bounds_offset": [0, 2, 0]},
         "bones": bones}]}
 
 
@@ -148,11 +150,14 @@ def build():
         "name": "item", "pivot": [0, 0, 0], "binding": BINDING,
         "cubes": axes() + [cube([-1.5, 22.5, -1.5], [3, 3, 3], YELLOW),
                            cube([-0.5, 9, -0.5], [1, 13.5, 1], BLACK)]}])
+    # Modelled at the hand: Bedrock puts the model's y = 24 on the hand bone, so the stick
+    # starts there (cyan) and hangs down the model's -y (away from the hand, as the paper's
+    # black rod does), its bone turning about the hand.
     files["models/entity/fptest_stick.geo.json"] = geometry("geometry.fptest.stick", [{
-        "name": "item", "pivot": [0, 0, 0], "binding": BINDING,
-        "cubes": [cube([-1, -1, -1], [2, 2, 2], CYAN),
-                  cube([-0.5, 1, -0.5], [1, 14, 1], BLACK),
-                  cube([-1.5, 15, -1.5], [3, 3, 3], MAGENTA)]}])
+        "name": "item", "pivot": [0, 24, 0], "binding": BINDING,
+        "cubes": [cube([-1, 23, -1], [2, 2, 2], CYAN),
+                  cube([-0.5, 9, -0.5], [1, 14, 1], BLACK),
+                  cube([-1.5, 6, -1.5], [3, 3, 3], MAGENTA)]}])
     for item, geo, extra in (("paper", "geometry.fptest.axes", {}),
                              ("stick", "geometry.fptest.stick", {
                                  "animations": {"first_person": "animation.fptest.stick.first_person",
@@ -167,12 +172,13 @@ def build():
         desc.update(extra)
         files["attachables/fptest_%s.json" % item] = {"format_version": "1.10.0", "minecraft:attachable": {"description": desc}}
     files["animations/fptest_stick.animation.json"] = {"format_version": "1.8.0", "animations": {
-        "animation.fptest.stick.first_person": {"loop": True, "bones": {"item": {"rotation": [-45, 0, 0], "position": [0, 4, 0]}}},
+        "animation.fptest.stick.first_person": {"loop": True, "bones": {"item": {"rotation": [-30, 0, 0]}}},
         "animation.fptest.stick.third_person": {"loop": True, "bones": {"item": {"rotation": [90, 0, 0]}}}}}
     files["render_controllers/fptest.render_controllers.json"] = {"format_version": "1.8.0", "render_controllers": {
         "controller.render.fptest.simple": {"geometry": "Geometry.default", "materials": [{"*": "Material.default"}], "textures": ["Texture.default"]},
-        "controller.render.fptest.pig": {"geometry": "Geometry.default", "materials": [{"*": "Material.default"}],
-                                         "textures": ["q.is_name_any('Teste') ? Texture.named : Texture.default"]}}}
+        "controller.render.fptest.pig": {"arrays": {"textures": {"Array.skins": ["Texture.default", "Texture.named"]}},
+                                         "geometry": "Geometry.default", "materials": [{"*": "Material.default"}],
+                                         "textures": ["Array.skins[q.is_name_any('Teste')]"]}}}
 
     # Player events: splash in water, ring on landing, each with the blip.
     files["animation_controllers/fptest_player.animation_controllers.json"] = {"format_version": "1.10.0", "animation_controllers": {
@@ -180,7 +186,9 @@ def build():
             "default": {"transitions": [{"in_water": "q.is_in_water"}, {"air": "!q.is_on_ground"}]},
             "in_water": {"particle_effects": [{"effect": "fptest_splash"}], "sound_effects": [{"effect": "fptest_blip"}],
                          "transitions": [{"default": "!q.is_in_water"}]},
-            "air": {"transitions": [{"in_water": "q.is_in_water"}, {"landed": "q.is_on_ground"}]},
+            "air": {"transitions": [{"in_water": "q.is_in_water"},
+                                    {"landed": "q.is_on_ground && q.state_time > 1.0"},
+                                    {"default": "q.is_on_ground"}]},
             "landed": {"particle_effects": [{"effect": "fptest_land"}], "sound_effects": [{"effect": "fptest_blip"}],
                        "transitions": [{"default": "1"}]}}}}}
 
@@ -197,8 +205,11 @@ def build():
          "cubes": [cube([-4, 8, -14], [8, 8, 8], PIG)] + axes((0, 16, -10), 6)},
     ]
     files["models/entity/fptest_pig.geo.json"] = geometry("geometry.fptest.pig", pig_bones)
-    files["entity/fptest_pig.entity.json"] = {"format_version": "1.10.0", "minecraft:client_entity": {"description": {
+    files["entity/pig.entity.json"] = {"format_version": "1.26.30", "minecraft:client_entity": {"description": {
         "identifier": "minecraft:pig",
+        # Bedrock keeps the client entity with the newest file `format_version` (vanilla's
+        # pig is 1.10.0; Actions & Stuff's, which wins in the game, is 1.26.30).
+        "min_engine_version": "1.8.0",
         "materials": {"default": "entity_alphatest"},
         "textures": {"default": "textures/fptest/pig", "named": "textures/fptest/pig_named"},
         "geometry": {"default": "geometry.fptest.pig"},
@@ -267,8 +278,8 @@ def build():
                                                          for x in range(16)] for y in range(16)])
     files["manifest.json"] = {"format_version": 2, "header": {
         "name": "Horizon Test Pack", "description": "Teste do motor Bedrock: 1a/3a pessoa, particulas, bloco, entidade, sons, etiquetas",
-        "uuid": PACK_UUID, "version": [1, 0, 0], "min_engine_version": [1, 20, 0]},
-        "modules": [{"type": "resources", "uuid": MODULE_UUID, "version": [1, 0, 0]}]}
+        "uuid": PACK_UUID, "version": [1, 0, 5], "min_engine_version": [1, 20, 0]},
+        "modules": [{"type": "resources", "uuid": MODULE_UUID, "version": [1, 0, 5]}]}
     return files
 
 

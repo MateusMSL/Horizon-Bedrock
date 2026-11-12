@@ -370,9 +370,17 @@ fn render_bedrock(
         base
     };
     let scale = bedrock_scale(&frame, m, alpha);
-    // Scaled about the feet: a model's ground is 1.501 blocks below its origin.
+    // Scaled about the feet: a model's ground is 1.501 blocks below its origin. The
+    // first-person view model is scaled about the eye instead (the camera, `eye_height` above
+    // the feet), so its eye stays at the camera: Bedrock's vanilla player (`scale` 0.9375)
+    // holds the item about 0.1 block higher than one scaled about the feet, the hand at the
+    // bottom of the screen as in the game.
+    let pivot = match FP_EYE.with(std::cell::Cell::get) {
+        Some(eye) if m.extra.first_person => 1.501 - eye,
+        _ => 1.501,
+    };
     let base = if (scale - glam::Vec3::ONE).abs().max_element() > 1e-4 {
-        let feet = glam::Mat4::from_translation(glam::Vec3::new(0.0, 1.501, 0.0));
+        let feet = glam::Mat4::from_translation(glam::Vec3::new(0.0, pivot, 0.0));
         base * feet * glam::Mat4::from_scale(scale) * feet.inverse()
     } else {
         base
@@ -400,6 +408,20 @@ fn render_bedrock(
                 .iter()
                 .any(|n| layer.layer.bone_visible(n))
         {
+            // Its bones still carry what is held: Bedrock's vanilla first-person player hides
+            // every part (`*: false`) while it holds an item, and the attachable still hangs
+            // from its hand bone.
+            if holder.is_empty() && !frame.attached.is_empty() {
+                poses.reset(&layer.built.part);
+                super::bedrock::apply_pose(&frame.pose, &layer.built.names, &mut poses);
+                if m.extra.first_person {
+                    let arms = ["rightarm".to_owned(), "leftarm".to_owned()];
+                    for att in &frame.attached {
+                        super::bedrock::apply_pose(&att.pose, &arms, &mut poses);
+                    }
+                }
+                bone_matrices(&layer.built.part, &poses, &mut holder);
+            }
             continue;
         }
         if hidden_layer(&layer.texture)
@@ -838,7 +860,9 @@ fn render_bedrock(
                 .any(|a| a.slot == "torso" && !a.layers.is_empty()),
         }));
     }
-    if !drew {
+    // Nothing of the body drawn: the mob is the game's, unless the pack still hangs what it
+    // holds from its (hidden) bones.
+    if !drew && (holder.is_empty() || frame.attached.is_empty()) {
         return false;
     }
     // What the stencil masks that draw no colour (the shine bands) cover on the screen, by the
@@ -929,7 +953,7 @@ fn render_bedrock(
                 // (`held_anchor_of`) shifts the model by the hand's height off its rest, which
                 // the first-person arm, turned over before the camera, throws off the screen.
                 let fp_anchor = super::bedrock_debug::settings().fp_held_anchor.to_ascii_lowercase();
-                if m.extra.first_person && matches!(fp_anchor.as_str(), "" | "holder") {
+                if m.extra.first_person && fp_anchor == "holder" {
                     return Some(
                         base * *now
                             * super::bedrock_debug::settings().worn_matrix(att.slot)
@@ -1568,9 +1592,27 @@ thread_local! {
     /// into the camera's own (for the `fp-view` trace).
     static FP_VIEW: std::cell::Cell<Option<glam::Quat>> = const { std::cell::Cell::new(None) };
 }
+thread_local! {
+    /// While the first-person view model draws: the eye height its feet stand below the camera.
+    static FP_EYE: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
+}
 /// Whether the first-person view model is being drawn now.
 pub fn in_first_person_view() -> bool {
     FP_VIEW.with(|v| v.get().is_some())
+}
+thread_local! {
+    /// How far each hand is raised in the first-person view, 0 lowered to 1 up (Java's
+    /// `mainHandHeight` / `offHandHeight`, interpolated): Bedrock's `v.player_arm_height` and
+    /// `c.player_offhand_arm_height`.
+    static FP_ARM_HEIGHTS: std::cell::Cell<[f32; 2]> = const { std::cell::Cell::new([1.0, 1.0]) };
+}
+/// Sets the hands' heights the next first-person view models read (`FP_ARM_HEIGHTS`).
+pub fn set_first_person_arm_heights(heights: [f32; 2]) {
+    FP_ARM_HEIGHTS.with(|h| h.set(heights));
+}
+/// The hands' heights in the first-person view (main, off), 1 when raised.
+pub fn first_person_arm_heights() -> [f32; 2] {
+    FP_ARM_HEIGHTS.with(std::cell::Cell::get)
 }
 /// Ids of the local player's two first-person copies (one per hand), apart from every mob's.
 const FIRST_PERSON_IDS: [u32; 2] = [u32::MAX - 2, u32::MAX - 3];
@@ -1640,6 +1682,7 @@ pub fn first_person_item(
     let level = glam::Quat::from_rotation_y(std::f32::consts::PI - yaw.to_radians());
     let tilt = level * glam::Quat::from_rotation_x(-pitch.to_radians()) * level.inverse();
     let start = out.len();
+    FP_EYE.with(|v| v.set(Some(eye_height)));
     FP_VIEW.with(|v| {
         v.set(Some(
             glam::Quat::from_euler(
@@ -1668,6 +1711,7 @@ pub fn first_person_item(
         out,
     );
     FP_VIEW.with(|v| v.set(None));
+    FP_EYE.with(|v| v.set(None));
     let drawn = out.len() - start;
     if bedrock_debug() {
         let inverse = hand.inverse();

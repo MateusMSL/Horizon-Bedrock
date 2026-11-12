@@ -657,7 +657,7 @@ fn common_query(name: &str, args: &[Value]) -> Value {
 
 /// The engine's build, logged once with `HORIZON_BEDROCK_DEBUG`: tells whether the game runs the
 /// files the last overlay carried.
-pub const ENGINE_BUILD: &str = "v202-fp-rot-signs";
+pub const ENGINE_BUILD: &str = "v207-fp-scale-about-eye";
 
 /// `HORIZON_BEDROCK_DUMP=skeleton,creeper`: the kinds (by part of the id) whose state is logged
 /// once a second while within twelve blocks of the camera.
@@ -946,6 +946,14 @@ fn wrap_degrees(a: f32) -> f32 {
 }
 
 impl Host for MobHost<'_> {
+    fn context(&mut self, name: &str) -> Value {
+        match name {
+            // The off hand's `v.player_arm_height` (vanilla `swap_item`).
+            "player_offhand_arm_height" => Value::Num(super::render::first_person_arm_heights()[1]),
+            "is_first_person" => Value::bool(self.m.extra.first_person),
+            _ => Value::Null,
+        }
+    }
     fn variables(&mut self) -> Vec<(&'static str, Value)> {
         let m = self.m;
         // The swing's progress, 0 at rest to 1 at its end, as the Java mob keeps it.
@@ -991,14 +999,25 @@ impl Host for MobHost<'_> {
             ("liedownamount", Value::Num(0.0)),
             ("is_enchanted", Value::Num(0.0)),
             ("is_first_person", Value::bool(m.extra.first_person)),
+            // The hand raised (1) or lowered while the item is swapped (`swap_item`: the arm
+            // drops 10 px at 0). Undefined, it read 0 and the vanilla view model held every
+            // item 10 px too low.
+            ("player_arm_height", Value::Num(super::render::first_person_arm_heights()[0])),
             // Using what the main hand holds: the spyglass up to the eye, the brush, the horn.
             ("is_holding_spyglass", Value::bool(using("spyglass"))),
             ("is_using_brush", Value::bool(using("brush"))),
             ("is_tooting_goat_horn", Value::bool(using("goat_horn"))),
             ("goat_has_left_horn", Value::Num(1.0)),
             ("goat_has_right_horn", Value::Num(1.0)),
-            // Blocks a tick: what the elytra's pack animations slow their wing beat by.
-            ("gliding_speed_value", Value::Num(m.velocity.length() as f32)),
+            // What the walk swing (`v.tcos0 = cos(..) * q.modified_move_speed /
+            // v.gliding_speed_value`) is divided by: 1 on foot, more while gliding fast
+            // (HumanoidModel.setupAnim: `(speed² / 0.2)³`, never below 1). The speed itself
+            // made the swing huge standing still (0 or nearly).
+            ("gliding_speed_value", Value::Num(if m.extra.fall_flying {
+                ((m.velocity.length_squared() as f32 / 0.2).powi(3)).max(1.0)
+            } else {
+                1.0
+            })),
             // Arms out in front: a zombie, a skeleton or a husk with something to attack.
             ("raise_arms", Value::bool(m.ai.target.is_some() || {
                 let id: &str = &m.kind.id;

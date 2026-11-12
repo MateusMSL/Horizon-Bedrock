@@ -185,9 +185,9 @@ pub struct Settings {
     /// themselves) and the bone's pivot for one under a parent bone; `"pivot"` and `"frame"`
     /// force one of the two.
     pub held_anchor: String,
-    /// The same for the first-person hand: `"holder"` (default) keeps the attachable where the
-    /// holder's bone carries a point of the holder's own model (Bedrock's binding: the bone
-    /// follows the hand's change from rest); `"third"` uses `held_anchor`'s choice; `"frame"`,
+    /// The same for the first-person hand: by default (or `"third"`) `held_anchor`'s choice, as
+    /// in third person; `"holder"` keeps the attachable where the holder's bone carries a point
+    /// of the holder's own model (the bone follows the hand's change from rest); `"frame"`,
     /// `"origin"` or `"pivot"` force one.
     pub fp_held_anchor: String,
     /// Signs multiplied into the animated turns (x, y, z) while the first-person view model
@@ -320,8 +320,11 @@ impl Settings {
             "pivot" => HeldAnchor::Pivot,
             "origin" => HeldAnchor::Origin,
             _ => {
-                let in_frame = floor.is_some_and(|y| y >= 12.0)
-                    || (!has_parent && (pivot_height - 24.0).abs() < 0.5);
+                // A top-level bound bone: Bedrock puts the model's 24-pixel point on the hand
+                // whatever its pivot (the test pack's paper, pivot 0, hangs its origin 1.5
+                // blocks off the hand in Bedrock, first and third person).
+                let _ = pivot_height;
+                let in_frame = floor.is_some_and(|y| y >= 12.0) || !has_parent;
                 if in_frame { HeldAnchor::Frame } else { HeldAnchor::Origin }
             }
         }
