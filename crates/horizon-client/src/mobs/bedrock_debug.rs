@@ -185,6 +185,14 @@ pub struct Settings {
     /// themselves) and the bone's pivot for one under a parent bone; `"pivot"` and `"frame"`
     /// force one of the two.
     pub held_anchor: String,
+    /// The same for the first-person hand: `"holder"` (default) keeps the attachable where the
+    /// holder's bone carries a point of the holder's own model (Bedrock's binding: the bone
+    /// follows the hand's change from rest); `"third"` uses `held_anchor`'s choice; `"frame"`,
+    /// `"origin"` or `"pivot"` force one.
+    pub fp_held_anchor: String,
+    /// Signs multiplied into the animated turns (x, y, z) while the first-person view model
+    /// draws: to test which turn convention matches Bedrock's for the large first-person poses.
+    pub fp_rot_signs: Vec<f32>,
     /// `true` leaves the first-person hand on the game's own item models (the pack's attachable
     /// draws it by default).
     pub first_person_off: bool,

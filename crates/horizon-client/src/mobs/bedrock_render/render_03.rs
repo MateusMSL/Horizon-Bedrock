@@ -864,6 +864,7 @@ fn render_bedrock(
         });
     }
     for att in &frame.attached {
+        let att_start = out.len();
         // A bone the pack scaled to nothing hides what is bound to it (the sulfur cube's pack
         // hides the held block so for the blocks its own core draws).
         if att
@@ -921,7 +922,28 @@ fn render_bedrock(
                     .iter()
                     .filter_map(|l| rest_floor(&l.built.part, bone))
                     .reduce(f32::min);
-                let pivot = match super::bedrock_debug::settings().held_anchor_of(has_parent, height, floor) {
+                // First person (`fp_held_anchor`): Bedrock binds the bone to the hand the way
+                // a child bone hangs from its parent, so the model keeps its place against the
+                // holder's own model and follows the hand's change from rest (`rest` inverted),
+                // as worn pieces do. The third-person guess from the pivot height
+                // (`held_anchor_of`) shifts the model by the hand's height off its rest, which
+                // the first-person arm, turned over before the camera, throws off the screen.
+                let fp_anchor = super::bedrock_debug::settings().fp_held_anchor.to_ascii_lowercase();
+                if m.extra.first_person && matches!(fp_anchor.as_str(), "" | "holder") {
+                    return Some(
+                        base * *now
+                            * super::bedrock_debug::settings().worn_matrix(att.slot)
+                            * held
+                            * rest.inverse(),
+                    );
+                }
+                let anchor_kind = match (m.extra.first_person, fp_anchor.as_str()) {
+                    (true, "frame") => super::bedrock_debug::HeldAnchor::Frame,
+                    (true, "origin") => super::bedrock_debug::HeldAnchor::Origin,
+                    (true, "pivot") => super::bedrock_debug::HeldAnchor::Pivot,
+                    _ => super::bedrock_debug::settings().held_anchor_of(has_parent, height, floor),
+                };
+                let pivot = match anchor_kind {
                     super::bedrock_debug::HeldAnchor::Frame => glam::Vec3::ZERO,
                     super::bedrock_debug::HeldAnchor::Origin => glam::Vec3::new(0.0, MODEL_FEET, 0.0),
                     super::bedrock_debug::HeldAnchor::Pivot => rest_at,
@@ -981,6 +1003,58 @@ fn render_bedrock(
                     m.kind.id, m.id, att.slot, att.binds, bt.x, bt.y, bt.z, be.0.to_degrees(),
                     show("rightitem"), show("3dg4c"), show("bodyq"),
                     anchor.map(|a| { let (s, r, t) = a.to_scale_rotation_translation(); let e = r.to_euler(glam::EulerRot::YXZ); (t.to_array(), s.to_array(), [e.0.to_degrees(), e.1.to_degrees(), e.2.to_degrees()]) })
+                )
+            });
+        }
+        if m.extra.first_person && in_hand && super::bedrock_debug::settings().trace_fp {
+            // `fp-attach`: the attachable's bone poses as the first-person frame left them, and
+            // where its bound bones land, once a second.
+            let secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            log_bedrock_once(format!("fp-attach/{}/{secs}", att.slot), || {
+                let mut bones: Vec<_> = att.pose.bones.iter().collect();
+                bones.sort_by(|a, b| a.0.cmp(b.0));
+                let poses: Vec<String> = bones
+                    .iter()
+                    .filter(|(_, b)| {
+                        b.rotation != [0.0; 3]
+                            || b.rotation_entity != [0.0; 3]
+                            || b.entity_frame
+                            || b.position != [0.0; 3]
+                            || b.scale != [1.0; 3]
+                    })
+                    .map(|(n, b)| {
+                        format!(
+                            "{n}: rot={:.1?} rot_entity={:.1?} entity_frame={} pos={:.2?} scale={:.2?}",
+                            b.rotation, b.rotation_entity, b.entity_frame, b.position, b.scale
+                        )
+                    })
+                    .collect();
+                let bound: Vec<String> = att
+                    .binds
+                    .keys()
+                    .filter_map(|k| {
+                        base_of(k).map(|a| {
+                            let (s, r, t) = a.to_scale_rotation_translation();
+                            let e = r.to_euler(glam::EulerRot::YXZ);
+                            format!(
+                                "{k}: t={:.2?} s={:.2?} yxz=[{:.1},{:.1},{:.1}]",
+                                t.to_array(),
+                                s.to_array(),
+                                e.0.to_degrees(),
+                                e.1.to_degrees(),
+                                e.2.to_degrees()
+                            )
+                        })
+                    })
+                    .collect();
+                format!(
+                    "fp-attach {} hand_scale={hand_scale} binds={:?} | poses: {} | bound: {}",
+                    att.slot,
+                    att.binds,
+                    poses.join(" ; "),
+                    bound.join(" ; ")
                 )
             });
         }
@@ -1427,6 +1501,47 @@ fn render_bedrock(
                 }
             }
         }
+        if m.extra.first_person && in_hand && super::bedrock_debug::settings().trace_fp {
+            // `fp-view`: the bound bone's frame and what the attachable drew, in the camera's
+            // space (x right, y up, -z ahead), to compare with Bedrock's screen.
+            if let Some(view) = FP_VIEW.with(|v| v.get()) {
+                let secs = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs());
+                let (mut lo, mut hi) = (glam::Vec3::splat(f32::MAX), glam::Vec3::splat(f32::MIN));
+                for v in &out[att_start..] {
+                    let p = view * glam::Vec3::from_array(v.pos);
+                    lo = lo.min(p);
+                    hi = hi.max(p);
+                }
+                let frames: Vec<String> = att
+                    .binds
+                    .keys()
+                    .filter_map(|k| {
+                        base_of(k).map(|a| {
+                            let a = glam::Mat4::from_quat(view) * a;
+                            let f = |v: glam::Vec4| [v.x, v.y, v.z].map(|c| (c * 100.0).round() / 100.0);
+                            format!(
+                                "{k}: t={:?} x={:?} y={:?} z={:?}",
+                                f(a.w_axis),
+                                f(a.x_axis),
+                                f(a.y_axis),
+                                f(a.z_axis)
+                            )
+                        })
+                    })
+                    .collect();
+                log_bedrock_once(format!("fp-view/{}/{secs}", att.slot), || {
+                    format!(
+                        "fp-view {} item vertices {} x {:.2}..{:.2} y {:.2}..{:.2} z {:.2}..{:.2} | {}",
+                        att.slot,
+                        out.len() - att_start,
+                        lo.x, hi.x, lo.y, hi.y, lo.z, hi.z,
+                        frames.join(" ; ")
+                    )
+                });
+            }
+        }
     }
     // A body the pack laid down rests on the ground and, as the fall ends, on the spot where the
     // mob stood: the pack's own offsets assume its geometry and queries, which the game answers
@@ -1447,6 +1562,15 @@ fn render_bedrock(
         }
     }
     drew
+}
+thread_local! {
+    /// While the first-person view model draws: the turn from the game's camera-relative space
+    /// into the camera's own (for the `fp-view` trace).
+    static FP_VIEW: std::cell::Cell<Option<glam::Quat>> = const { std::cell::Cell::new(None) };
+}
+/// Whether the first-person view model is being drawn now.
+pub fn in_first_person_view() -> bool {
+    FP_VIEW.with(|v| v.get().is_some())
 }
 /// Ids of the local player's two first-person copies (one per hand), apart from every mob's.
 const FIRST_PERSON_IDS: [u32; 2] = [u32::MAX - 2, u32::MAX - 3];
@@ -1516,6 +1640,17 @@ pub fn first_person_item(
     let level = glam::Quat::from_rotation_y(std::f32::consts::PI - yaw.to_radians());
     let tilt = level * glam::Quat::from_rotation_x(-pitch.to_radians()) * level.inverse();
     let start = out.len();
+    FP_VIEW.with(|v| {
+        v.set(Some(
+            glam::Quat::from_euler(
+                glam::EulerRot::YXZ,
+                std::f32::consts::PI - yaw.to_radians(),
+                -pitch.to_radians(),
+                0.0,
+            )
+            .inverse(),
+        ))
+    });
     render_bedrock(
         &copy,
         alpha,
@@ -1532,6 +1667,7 @@ pub fn first_person_item(
         data,
         out,
     );
+    FP_VIEW.with(|v| v.set(None));
     let drawn = out.len() - start;
     if bedrock_debug() {
         let inverse = hand.inverse();
@@ -1542,14 +1678,32 @@ pub fn first_person_item(
             hi = hi.max(p);
         }
         let size = ((hi - lo).max_element() * 10.0) as i32;
+        // The same vertices in the camera's own space (x right, y up, z ahead as the camera
+        // sees them): `camera_rotation` is rotationYXZ(π - yaw, -pitch, 0), and the screen
+        // position of a point follows from these (x/z, y/z against the field of view).
+        let to_view = glam::Quat::from_euler(
+            glam::EulerRot::YXZ,
+            std::f32::consts::PI - yaw.to_radians(),
+            -pitch.to_radians(),
+            0.0,
+        )
+        .inverse();
+        let (mut vlo, mut vhi) = (glam::Vec3::splat(f32::MAX), glam::Vec3::splat(f32::MIN));
+        for v in &out[start..] {
+            let p = to_view * glam::Vec3::from_array(v.pos);
+            vlo = vlo.min(p);
+            vhi = vhi.max(p);
+        }
         log_bedrock_once(format!("first-person/{item}/{off_hand}/{size}"), || {
             if drawn == 0 {
                 format!("first person {item}: no attachable of the pack draws it")
             } else {
                 format!(
-                    "first person {item} ({}): {drawn} vertices, from the hand: x {:.2}..{:.2} y {:.2}..{:.2} z {:.2}..{:.2}",
+                    "first person {item} ({}): {drawn} vertices, from the hand: x {:.2}..{:.2} y {:.2}..{:.2} z {:.2}..{:.2}; \
+                     in the camera's space (yaw {yaw:.0} pitch {pitch:.0}): x {:.2}..{:.2} y {:.2}..{:.2} z {:.2}..{:.2}",
                     if off_hand { "off hand" } else { "main hand" },
-                    lo.x, hi.x, lo.y, hi.y, lo.z, hi.z
+                    lo.x, hi.x, lo.y, hi.y, lo.z, hi.z,
+                    vlo.x, vhi.x, vlo.y, vhi.y, vlo.z, vhi.z
                 )
             }
         });

@@ -657,7 +657,7 @@ fn common_query(name: &str, args: &[Value]) -> Value {
 
 /// The engine's build, logged once with `HORIZON_BEDROCK_DEBUG`: tells whether the game runs the
 /// files the last overlay carried.
-pub const ENGINE_BUILD: &str = "v196-attachable-both-arms";
+pub const ENGINE_BUILD: &str = "v202-fp-rot-signs";
 
 /// `HORIZON_BEDROCK_DUMP=skeleton,creeper`: the kinds (by part of the id) whose state is logged
 /// once a second while within twelve blocks of the camera.
@@ -3166,10 +3166,16 @@ pub fn apply_pose(pose: &Pose, names: &[String], poses: &mut super::anim::Poses)
     for name in names {
         let Some(b) = pose.get(name) else { continue };
         let p = poses.get(name);
+        let signs = if super::render::in_first_person_view() {
+            let s = &super::bedrock_debug::settings().fp_rot_signs;
+            [0, 1, 2].map(|i| s.get(i).copied().unwrap_or(1.0))
+        } else {
+            [1.0; 3]
+        };
         let r = geometry::rotation_to_java([
-            b.rotation[0] + b.rotation_entity[0],
-            b.rotation[1] + b.rotation_entity[1],
-            b.rotation[2] + b.rotation_entity[2],
+            (b.rotation[0] + b.rotation_entity[0]) * signs[0],
+            (b.rotation[1] + b.rotation_entity[1]) * signs[1],
+            (b.rotation[2] + b.rotation_entity[2]) * signs[2],
         ]);
         p[0] += b.position[0];
         p[1] -= b.position[1];
