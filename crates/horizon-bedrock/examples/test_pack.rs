@@ -69,6 +69,42 @@ fn main() {
         }
     }
 
+    // Texture meshes: bare (brick) and laid out as A&S's 3D tools (flint).
+    for (item, geo, bone) in [
+        ("minecraft:brick", "geometry.fptest.mesh", "item"),
+        ("minecraft:flint", "geometry.fptest.mesh_ans", "sword"),
+    ] {
+        let att = b.attachables.get(item);
+        c.check(&format!("attachable {item}"), att.is_some(), || "nao carregado".into());
+        let mesh = b
+            .geometries
+            .get(geo)
+            .and_then(|g| g.bones.iter().find(|x| x.name == bone))
+            .is_some_and(|x| x.binding.is_some() && !x.texture_meshes.is_empty());
+        c.check(&format!("{item}: osso `{bone}` ligado com texture_meshes"), mesh, || {
+            format!("modelo {geo} sem o osso, binding ou malha")
+        });
+    }
+
+    // A&S-like features: stencil window (clock), two hands (shears), holder variable (rod).
+    for (item, geo) in [
+        ("minecraft:clock", "geometry.fptest.clock"),
+        ("minecraft:shears", "geometry.fptest.shears"),
+        ("minecraft:fishing_rod", "geometry.fptest.rod"),
+    ] {
+        let att = b.attachables.get(item);
+        c.check(&format!("attachable {item}"), att.is_some_and(|a| a.geometry.get("default").map(String::as_str) == Some(geo)), || {
+            format!("{:?}", att.map(|a| &a.geometry))
+        });
+        c.check(&format!("{item}: modelo {geo}"), b.geometries.contains_key(geo), || "ausente".into());
+    }
+    c.check(
+        "player: controlador de duas maos",
+        b.render_controllers.contains_key("controller.render.fptest.two_hands")
+            && b.library.animations.contains_key("animation.fptest.two_hands"),
+        || "render controller ou animacao ausente".into(),
+    );
+
     // Player: the vanilla entity with the test's events.
     let player = b.entities.get("minecraft:player");
     c.check("entidade minecraft:player", player.is_some(), || "nao carregada".into());

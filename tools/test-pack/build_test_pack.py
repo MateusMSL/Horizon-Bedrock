@@ -9,6 +9,20 @@ shapes and colours, so the same pack can be checked in Bedrock and in Horizon si
                             no animation (shows the bare binding rule)
       - minecraft:stick  -> a rod with a magenta tip, animated differently in 1st person
                             (tilted -45 on x, lifted 4 px) and 3rd person (pointing forward)
+      - minecraft:brick  -> texture mesh (`texture_meshes`), no rotation: the bare plane a
+                            sprite is extruded in (orientation sprite: red top row, green left
+                            column, white diagonal, blue block at the bottom right)
+      - minecraft:flint  -> texture mesh laid out as Actions & Stuff lays its 3D tools: bone
+                            under `root`, mesh at [-11.31, -11.31, 0.5] turned [-90, 0, -45],
+                            bone animated [90, 0, -90] / [0, -2, 4]
+      - minecraft:clock  -> stencil window as A&S's clock: a frame, an invisible window that
+                            writes the stencil, and a face (checker, larger than the window)
+                            drawn only where the window is
+      - minecraft:shears -> two-handed hold as A&S's shears: `parent_setup` sets a variable on
+                            the holder, the player's first person shows and poses both arms by it
+      - minecraft:fishing_rod -> holder variable read back as A&S's rod: `parent_setup` sets it,
+                            the attachable reads `c.owning_entity->v...` and scales its rod by
+                            it (0 hides the rod)
   * player interaction particles + sound: a splash when entering water, a ring when landing
     (also after flying in creative), both with a "blip" sound
   * custom block look: sponge with a magenta/black checker texture (blocks.json)
@@ -87,6 +101,12 @@ def player_files(v):
     desc.setdefault("sound_effects", {}).update({"fptest_blip": "fptest.blip"})
     desc["animations"]["fptest_events"] = "controller.animation.fptest.player_events"
     desc["scripts"].setdefault("animate", []).append("fptest_events")
+    # Two-handed hold (shears): reset each frame, set by the held item's `parent_setup`; the
+    # first person poses and shows the left arm too.
+    desc["scripts"].setdefault("pre_animation", []).insert(0, "v.fptest_two_hands = 0;")
+    desc["animations"]["fptest_two_hands"] = "animation.fptest.two_hands"
+    desc["scripts"]["animate"].append({"fptest_two_hands": "v.is_first_person && v.fptest_two_hands"})
+    desc["render_controllers"].append({"controller.render.fptest.two_hands": "v.is_first_person && v.fptest_two_hands"})
     out["entity/player.entity.json"] = player
     return out
 
@@ -143,6 +163,22 @@ def axes(at=(0, 0, 0), length=8):
             cube([x - 0.5, y - 0.5, z + 1], [1, 1, length], BLUE)]
 
 
+def sprite_pixels():
+    """16×16 orientation sprite: red top row, green left column (over the red), white diagonal
+    from the bottom left to the top right, blue 4×4 block at the bottom right; the rest clear."""
+    rows = [[(0, 0, 0, 0)] * 16 for _ in range(16)]
+    for x in range(16):
+        rows[0][x] = (230, 30, 30, 255)
+    for y in range(16):
+        rows[y][0] = (30, 200, 30, 255)
+    for x in range(2, 12):
+        rows[15 - x][x] = (255, 255, 255, 255)
+    for y in range(12, 16):
+        for x in range(12, 16):
+            rows[y][x] = (40, 80, 255, 255)
+    return rows
+
+
 def build():
     files = {}
     # Attachables.
@@ -171,10 +207,105 @@ def build():
                 "render_controllers": ["controller.render.fptest.simple"]}
         desc.update(extra)
         files["attachables/fptest_%s.json" % item] = {"format_version": "1.10.0", "minecraft:attachable": {"description": desc}}
+    # Texture meshes: the plane Bedrock extrudes a sprite in, bare (brick) and as A&S's 3D
+    # tools place it (flint).
+    files["models/entity/fptest_mesh.geo.json"] = {"format_version": "1.21.0", "minecraft:geometry": [
+        {"description": {"identifier": "geometry.fptest.mesh", "texture_width": 16, "texture_height": 16,
+                         "visible_bounds_width": 8, "visible_bounds_height": 8, "visible_bounds_offset": [0, 2, 0]},
+         "bones": [{"name": "item", "pivot": [0, 24, 0], "binding": BINDING,
+                    "texture_meshes": [{"texture": "sprite", "position": [0, 24, 0], "rotation": [0, 0, 0]}]}]},
+        {"description": {"identifier": "geometry.fptest.mesh_ans", "texture_width": 16, "texture_height": 16,
+                         "visible_bounds_width": 8, "visible_bounds_height": 8, "visible_bounds_offset": [0, 2, 0]},
+         "bones": [{"name": "root", "pivot": [0, 0, 0]},
+                   {"name": "sword", "parent": "root", "pivot": [0, 0, 0], "binding": BINDING,
+                    "texture_meshes": [{"texture": "sprite", "position": [-11.31, -11.31, 0.5], "rotation": [-90, 0, -45]}]}]}]}
+    for item, geo, extra in (("brick", "geometry.fptest.mesh", {}),
+                             ("flint", "geometry.fptest.mesh_ans", {
+                                 "animations": {"hold": "animation.fptest.mesh_ans.hold"},
+                                 "scripts": {"animate": ["hold"]}})):
+        desc = {"identifier": "minecraft:" + item,
+                "materials": {"default": "entity_alphatest"},
+                "textures": {"default": "textures/fptest/sprite", "sprite": "textures/fptest/sprite"},
+                "geometry": {"default": geo},
+                "render_controllers": ["controller.render.fptest.sprite"]}
+        desc.update(extra)
+        files["attachables/fptest_%s.json" % item] = {"format_version": "1.10.0", "minecraft:attachable": {"description": desc}}
+    files["animations/fptest_mesh.animation.json"] = {"format_version": "1.8.0", "animations": {
+        "animation.fptest.mesh_ans.hold": {"loop": True, "bones": {"sword": {"rotation": [90, 0, -90], "position": [0, -2, 4]}}}}}
+    files["textures/fptest/sprite.png"] = png(16, 16, sprite_pixels())
+    # A&S-like features: stencil window (clock), holder variables (shears, rod).
+    face_tex = [cube([-5, 19, -0.5], [10, 10, 1], MAGENTA)]
+    files["models/entity/fptest_ans.geo.json"] = {"format_version": "1.16.0", "minecraft:geometry": [
+        {"description": {"identifier": "geometry.fptest.clock", "texture_width": 9, "texture_height": 1,
+                         "visible_bounds_width": 8, "visible_bounds_height": 8, "visible_bounds_offset": [0, 2, 0]},
+         "bones": [{"name": "item", "pivot": [0, 24, 0], "binding": BINDING},
+                   {"name": "frame", "parent": "item", "pivot": [0, 24, 0],
+                    "cubes": [cube([-4, 27, -1], [8, 1, 2], YELLOW), cube([-4, 20, -1], [8, 1, 2], YELLOW),
+                              cube([-4, 21, -1], [1, 6, 2], YELLOW), cube([3, 21, -1], [1, 6, 2], YELLOW)]},
+                   {"name": "window", "parent": "item", "pivot": [0, 24, 0],
+                    "cubes": [cube([-3, 21, -1.5], [6, 6, 0.5], WHITE)]},
+                   {"name": "face", "parent": "item", "pivot": [0, 24, 0],
+                    "cubes": face_tex + [cube([-2, 22, -1.2], [4, 4, 0.5], CYAN)]}]},
+        {"description": {"identifier": "geometry.fptest.shears", "texture_width": 9, "texture_height": 1,
+                         "visible_bounds_width": 8, "visible_bounds_height": 8, "visible_bounds_offset": [0, 2, 0]},
+         "bones": [{"name": "item", "pivot": [0, 24, 0], "binding": BINDING,
+                    "cubes": [cube([-1, 23, -1], [2, 2, 2], CYAN), cube([-0.5, 15, -0.5], [1, 8, 1], RED),
+                              cube([-3.5, 18.5, -0.5], [7, 1, 1], GREEN)]}]},
+        {"description": {"identifier": "geometry.fptest.rod", "texture_width": 9, "texture_height": 1,
+                         "visible_bounds_width": 8, "visible_bounds_height": 8, "visible_bounds_offset": [0, 2, 0]},
+         "bones": [{"name": "item", "pivot": [0, 24, 0], "binding": BINDING,
+                    "cubes": [cube([-1, 23, -1], [2, 2, 2], CYAN)]},
+                   {"name": "rod", "parent": "item", "pivot": [0, 24, 0],
+                    "cubes": [cube([-0.5, 6, -0.5], [1, 17, 1], BLUE), cube([-1.5, 3, -1.5], [3, 3, 3], YELLOW)]}]}]}
+    files["materials/entity.material"] = {"materials": {"version": "1.0.0",
+        # As A&S's clock (`oreville_migzni` / `oreville_vgjfwj`): the window writes stencil 3 and
+        # nothing else; the face draws only where the stencil is 3.
+        "fptest_window:entity_alphatest": {
+            "+states": ["EnableStencilTest", "StencilWrite", "DisableColorWrite", "DisableAlphaWrite"],
+            "frontFace": {"stencilFunc": "Always", "stencilPassOp": "Replace"},
+            "backFace": {"stencilFunc": "Always", "stencilPassOp": "Replace"}, "stencilRef": 3},
+        "fptest_face:entity_alphatest": {
+            "+states": ["EnableStencilTest"],
+            "frontFace": {"stencilFunc": "Equal"}, "backFace": {"stencilFunc": "Equal"}, "stencilRef": 3}}}
+    ans = {
+        "clock": {"geometry": {"default": "geometry.fptest.clock"},
+                  "materials": {"default": "entity_alphatest", "window": "fptest_window", "face": "fptest_face"},
+                  "render_controllers": ["controller.render.fptest.clock"]},
+        "shears": {"geometry": {"default": "geometry.fptest.shears"},
+                   "materials": {"default": "entity_alphatest"},
+                   "render_controllers": ["controller.render.fptest.simple"],
+                   "scripts": {"parent_setup": "v.fptest_two_hands = 1;"}},
+        "fishing_rod": {"geometry": {"default": "geometry.fptest.rod"},
+                        "materials": {"default": "entity_alphatest"},
+                        "render_controllers": ["controller.render.fptest.simple"],
+                        "animations": {"rod": "animation.fptest.rod"},
+                        "scripts": {"parent_setup": "v.fptest_rod = 1;",
+                                    "pre_animation": ["v.rod = c.owning_entity->v.fptest_rod ?? 0;"],
+                                    "animate": ["rod"]}},
+    }
+    for item, extra in ans.items():
+        desc = {"identifier": "minecraft:" + item, "textures": {"default": "textures/fptest/palette"}}
+        desc.update(extra)
+        files["attachables/fptest_%s.json" % item] = {"format_version": "1.10.0", "minecraft:attachable": {"description": desc}}
+    files["animations/fptest_ans.animation.json"] = {"format_version": "1.8.0", "animations": {
+        "animation.fptest.rod": {"loop": True, "bones": {"rod": {"scale": [1, "v.rod", 1]}}},
+        # The left arm mirrored from vanilla's `first_person.empty_hand` right arm.
+        "animation.fptest.two_hands": {"loop": True, "bones": {
+            "leftarm": {"position": [-13.5, -10, 12], "rotation": [95, 45, -115]}}}}}
     files["animations/fptest_stick.animation.json"] = {"format_version": "1.8.0", "animations": {
         "animation.fptest.stick.first_person": {"loop": True, "bones": {"item": {"rotation": [-30, 0, 0]}}},
         "animation.fptest.stick.third_person": {"loop": True, "bones": {"item": {"rotation": [90, 0, 0]}}}}}
     files["render_controllers/fptest.render_controllers.json"] = {"format_version": "1.8.0", "render_controllers": {
+        "controller.render.fptest.clock": {"geometry": "Geometry.default", "textures": ["Texture.default"],
+                                           "materials": [{"*": "Material.default"}, {"window": "Material.window"},
+                                                         {"face": "Material.face"}]},
+        # Both arms in first person while the holder's `v.fptest_two_hands` is set.
+        "controller.render.fptest.two_hands": {"geometry": "Geometry.default", "textures": ["Texture.default"],
+                                               "materials": [{"*": "Material.default"}],
+                                               "part_visibility": [{"*": False}, {"*rightarm*": True}, {"*leftarm*": True},
+                                                                   {"*rightArm*": True}, {"*leftArm*": True},
+                                                                   {"*Sleeve*": True}, {"*sleeve*": True}]},
+        "controller.render.fptest.sprite": {"geometry": "Geometry.default", "materials": [{"*": "Material.default"}], "textures": ["Texture.sprite"]},
         "controller.render.fptest.simple": {"geometry": "Geometry.default", "materials": [{"*": "Material.default"}], "textures": ["Texture.default"]},
         "controller.render.fptest.pig": {"arrays": {"textures": {"Array.skins": ["Texture.default", "Texture.named"]}},
                                          "geometry": "Geometry.default", "materials": [{"*": "Material.default"}],
@@ -265,9 +396,13 @@ def build():
                                               "texture_data": {"fptest_sponge": {"textures": "textures/fptest/sponge"}}}
     files["texts/languages.json"] = ["en_US", "pt_BR"]
     files["texts/en_US.lang"] = ("item.paper.name=Paper (test axes)\nitem.stick.name=Stick (test animation)\n"
-                                 "entity.pig.name=Pig (test)\ntile.sponge.name=Sponge (test)\n")
+                                 "entity.pig.name=Pig (test)\ntile.sponge.name=Sponge (test)\n"
+                                 "item.brick.name=Brick (texture mesh)\nitem.flint.name=Flint (mesh as A&S)\n"
+                                 "item.clock.name=Clock (stencil window)\nitem.shears.name=Shears (two hands)\nitem.fishing_rod.name=Fishing Rod (holder variable)\n")
     files["texts/pt_BR.lang"] = ("item.paper.name=Papel (eixos de teste)\nitem.stick.name=Graveto (animação de teste)\n"
-                                 "entity.pig.name=Porco (teste)\ntile.sponge.name=Esponja (teste)\n")
+                                 "entity.pig.name=Porco (teste)\ntile.sponge.name=Esponja (teste)\n"
+                                 "item.brick.name=Tijolo (malha de textura)\nitem.flint.name=Sílex (malha como o A&S)\n"
+                                 "item.clock.name=Relógio (janela de stencil)\nitem.shears.name=Tesoura (duas mãos)\nitem.fishing_rod.name=Vara (variável do jogador)\n")
 
     # Images.
     files["textures/fptest/palette.png"] = palette(PALETTE[WHITE])
@@ -278,8 +413,8 @@ def build():
                                                          for x in range(16)] for y in range(16)])
     files["manifest.json"] = {"format_version": 2, "header": {
         "name": "Horizon Test Pack", "description": "Teste do motor Bedrock: 1a/3a pessoa, particulas, bloco, entidade, sons, etiquetas",
-        "uuid": PACK_UUID, "version": [1, 0, 5], "min_engine_version": [1, 20, 0]},
-        "modules": [{"type": "resources", "uuid": MODULE_UUID, "version": [1, 0, 5]}]}
+        "uuid": PACK_UUID, "version": [1, 0, 7], "min_engine_version": [1, 20, 0]},
+        "modules": [{"type": "resources", "uuid": MODULE_UUID, "version": [1, 0, 7]}]}
     return files
 
 

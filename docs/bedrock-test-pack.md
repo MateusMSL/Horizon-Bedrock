@@ -23,6 +23,10 @@ não no Horizon, o defeito é do motor, não do A&S.
 | 1 | 1ª pessoa, regra pura de ligação na mão | **Papel** vira eixos: +X vermelho, +Y verde, +Z azul, origem branca, cubo amarelo no ponto y = 24 px, haste preta ligando os dois. Sem animação. |
 | 2 | 3ª pessoa e 3ª de frente | Os mesmos eixos, vistos pelo F5. |
 | 3 | Animação diferente em 1ª e 3ª pessoa | **Graveto**: cubo ciano na mão, haste preta, ponta magenta. 1ª pessoa: inclinado 30°. 3ª pessoa: aponta para a frente. |
+| 3b | Malha de textura (`texture_meshes`) | **Tijolo**: sprite de orientação (linha de cima vermelha, coluna da esquerda verde, diagonal branca, bloco azul embaixo à direita) extrudado sem rotação: mostra o plano em que o Bedrock deita a textura. **Sílex**: o mesmo sprite montado como as ferramentas 3D do A&S (osso `sword` dentro de `root`, malha em [-11.31, -11.31, 0.5] girada [-90, 0, -45], osso animado [90, 0, -90] / [0, -2, 4]). |
+| 3c | Janela de stencil (como o relógio do A&S) | **Relógio**: moldura amarela; uma janela invisível grava o stencil; o rosto (quadrado magenta 10×10 com centro ciano) só aparece dentro da janela 6×6. Sem stencil, o magenta passa da moldura. |
+| 3d | Duas mãos (como a tesoura do A&S) | **Tesoura**: `parent_setup` liga `v.fptest_two_hands` no jogador; em 1ª pessoa os dois braços aparecem, o esquerdo espelhado do direito. |
+| 3e | Variável do jogador lida pelo item (como a vara do A&S) | **Vara**: `parent_setup` liga `v.fptest_rod`; o item lê `c.owning_entity->v.fptest_rod` e escala a vara azul por ela (0 some com a vara, só o cubo ciano fica). |
 | 4 | Partícula + som de interação do jogador | Respingo azul ao entrar na água; anel laranja ao pousar depois de mais de 1 s no ar (voo); "blip" nos dois. |
 | 5 | Bloco customizado | **Esponja** com textura xadrez magenta/preto (`blocks.json` + `terrain_texture.json`). |
 | 6 | Entidade modificada | **Porco** de caixas, cabeça com eixos girando 90°/s. |
@@ -80,6 +84,8 @@ texturas aparecem como faltando e são esperadas: `steve` (no jogo vira a skin d
 | 1.0.3 | Bounds maiores (graveto de frente); porco com `min_engine_version` (não resolveu). |
 | 1.0.4 | Ovelha no lugar do porco (tentativa, revertida). |
 | 1.0.5 | Porco com `format_version` 1.26.30: funciona. |
+| 1.0.6 | Tijolo e sílex com `texture_meshes` (isolar a picareta torta do A&S: textura carregava, a malha ficava em outro plano/ângulo). |
+| 1.0.7 | Relógio (stencil), tesoura (duas mãos), vara (variável do jogador): os três defeitos do A&S que sobraram (rosto do relógio some, braços gigantes na câmera, vara invisível). |
 
 ## 6. Resultado no Bedrock (1.0.5)
 
@@ -99,6 +105,7 @@ texturas aparecem como faltando e são esperadas: `steve` (no jogo vira a skin d
 |---|---|---|---|---|
 | 1–2 | Papel 1ª / 3ª / 3ª de frente | 1ª: papel Java; 3ª: invertido (amarelo 1,5 bloco acima da mão) | aparece nas três; amarelo na mão; ângulos um pouco diferentes do Bedrock | 1ª: mais baixo e menor que no Bedrock (braço 10 px abaixo): v206 |
 | 3 | Graveto nas três vistas | 1ª: graveto Java; 3ª ok | aparece nas três; ângulos um pouco diferentes | 1ª: idem papel: v206 |
+| 3b | Tijolo / sílex (`texture_meshes`) | — | — | tijolo ok; sílex deslocado (v208) |
 | — | Ovo do porco (`spawn_egg` com cores) | — | — | ícone padrão; no Bedrock vira o ovo de pintas: v206 |
 | 4 | Água e pouso | ok | ok | — |
 | 5 | Esponja | textura vanilla | textura vanilla | seca ok; molhada vanilla (no Bedrock também muda): v205 |
@@ -119,6 +126,9 @@ Causas corrigidas:
   10 px em 1ª pessoa; `spawn_egg` do client entity não era convertido.
 - **v207:** em 1ª pessoa o modelo era escalado (0,9375) em volta dos pés; o Bedrock mantém o olho
   na câmera, e o item ficava ~0,1 bloco mais baixo (mão fora da tela).
+- **v208:** tijolo igual ao Bedrock (plano da malha certo); sílex deslocado ao lado do corpo e fora
+  da tela em 1ª pessoa: o y de `position` da malha conta para baixo a partir do pivô do osso
+  (regra do Blockbench), não para cima.
 
 ## 8. Contexto: a investigação de 1ª pessoa que motivou o pack
 

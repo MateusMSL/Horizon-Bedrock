@@ -116,6 +116,13 @@ pub fn mesh_id(geometry: &str, key: &str) -> String {
     format!("{geometry}#mesh:{}", key.to_ascii_lowercase())
 }
 
+/// The id of a geometry's sprites drawn with texture `key` cut to the file `path` (its size and
+/// silhouette): one per file, since many items share a geometry and a key (Actions & Stuff's
+/// tools all draw `mqnsmu` with their own `rcvngv`), each with its own picture.
+pub fn fitted_mesh_id(geometry: &str, key: &str, path: &str) -> String {
+    format!("{}@{}", mesh_id(geometry, key), path.to_ascii_lowercase())
+}
+
 impl Geometry {
     /// Each bone with a parent: its pivot less the parent's, in the model's own axes (pixels).
     /// A bone named in an earlier model keeps that one's.
@@ -169,20 +176,22 @@ impl Geometry {
                     .iter()
                     .filter(|m| m.texture.eq_ignore_ascii_case(key))
                 {
-                    // Bedrock's texture mesh: the texture lies flat (u along x, v along z, its
-                    // depth along y), its `local_pivot` (texture space) is turned by `rotation`
-                    // and put at `position` (the model's space). Texture point t lands at
-                    // position + R (t - local_pivot).
+                    // Bedrock's texture mesh (as Blockbench imports it, `bedrock.js` and
+                    // `texture_mesh.js`): the texture lies flat (u along x, v along z), one
+                    // texel deep below its plane (y from -1 to 0, times `scale`), moved by
+                    // `local_pivot` (x and z taken off, y added), turned by `rotation` and put
+                    // at `position`, whose y counts down from the bone's pivot: the point is
+                    // [px, 2 * pivot_y - py, pz] in the model. A mesh at the bone's pivot
+                    // height (the test pack's brick) is where it was before this; Actions &
+                    // Stuff's 3D tools (`position` y -11.31 under a bone at 0) sit 22.6 px
+                    // higher, centred on the hand as in the game.
                     let (sx, sy, sz) = (k * m.scale[0], m.scale[1], k * m.scale[2]);
                     let lp = [m.local_pivot[0] * k, m.local_pivot[1], m.local_pivot[2] * k];
+                    let origin = [m.position[0], 2.0 * b.pivot[1] - m.position[1], m.position[2]];
                     let at = |x: f32, y: f32, z: f32| -> [f32; 3] {
-                        [
-                            m.position[0] + x - lp[0],
-                            m.position[1] + y - lp[1],
-                            m.position[2] + z - lp[2],
-                        ]
+                        [origin[0] + x - lp[0], origin[1] + y + lp[1], origin[2] + z - lp[2]]
                     };
-                    let pivot = Some(m.position);
+                    let pivot = Some(origin);
                     let solid = sprite.filter(|_| m.pixel_depth);
                     let depth = if solid.is_some() { sy.max(0.01) } else { SPRITE_DEPTH };
                     let mut push =
@@ -205,7 +214,7 @@ impl Geometry {
                     };
                     match solid {
                         None => push(
-                            at(0.0, -depth / 2.0, 0.0),
+                            at(0.0, -depth, 0.0),
                             [wf * sx, depth, hf * sz],
                             [
                                 None,
@@ -232,7 +241,7 @@ impl Geometry {
                                     let len = (col - start) as f32;
                                     let (u, v) = (start as f32, row as f32);
                                     push(
-                                        at(u * sx, -depth / 2.0, v * sz),
+                                        at(u * sx, -depth, v * sz),
                                         [len * sx, depth, sz],
                                         [
                                             face(u, v, len, 1.0),
@@ -904,11 +913,32 @@ mod tests {
         assert!(cubes.iter().all(|c| c.size == [4.0, 1.0, 4.0]));
         let xs: Vec<f32> = cubes.iter().map(|c| c.origin[0]).collect();
         assert_eq!(xs, [0.0, 4.0, 12.0]);
-        assert_eq!(cubes[0].origin, [0.0, -0.5, 0.0]);
+        // One texel deep below the plane (Blockbench: y from -1 to 0).
+        assert_eq!(cubes[0].origin, [0.0, -1.0, 0.0]);
         let flat = g.mesh_variant("b", Some(&sprite));
         assert_eq!(flat.bones[0].cubes.len(), 1);
         assert_eq!(flat.bones[0].cubes[0].size[0], 16.0);
         assert_eq!(flat.bones[0].cubes[0].size[2], 8.0);
+    }
+
+    #[test]
+    fn a_texture_mesh_position_counts_down_from_the_bone_pivot() {
+        // Actions & Stuff's 3D tools: y -11.31 under a bone at 0 is 11.31 up; the test pack's
+        // brick (y 24 under a bone at 24) stays at 24.
+        let src = r#"{"minecraft:geometry":[{"description":{"identifier":"geometry.t"},
+          "bones":[{"name":"a","pivot":[0,0,0],
+            "texture_meshes":[{"texture":"t","position":[-11.31,-11.31,0.5],"rotation":[-90,0,-45]}]},
+                   {"name":"b","pivot":[0,24,0],
+            "texture_meshes":[{"texture":"t","position":[0,24,0]}]},
+                   {"name":"c","pivot":[0,0,0],
+            "texture_meshes":[{"texture":"t","local_pivot":[0,0.5,0]}]}]}]}"#;
+        let g = parse_file(&jsonc::parse(src).unwrap()).unwrap().remove(0);
+        let v = g.mesh_variant("t", None);
+        assert_eq!(v.bones[0].cubes[0].pivot, Some([-11.31, 11.31, 0.5]));
+        assert_eq!(v.bones[1].cubes[0].pivot, Some([0.0, 24.0, 0.0]));
+        // Vanilla's spear: `local_pivot` y 0.5 centres the depth on the plane.
+        let c = &v.bones[2].cubes[0];
+        assert!((c.origin[1] + c.size[1] / 2.0 - 0.5).abs() < 1e-4 || c.size[1] < 0.1);
     }
 
     fn geo() -> Geometry {

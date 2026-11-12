@@ -1332,7 +1332,12 @@ impl Instance {
         // The flat sprites the model's bones show, each in the texture it names.
         if let (Some(models), Some(first)) = (models, out.get(start).cloned()) {
             for (key, path) in &def.textures {
-                let id = crate::geometry::mesh_id(geometry, key);
+                let fitted = crate::geometry::fitted_mesh_id(geometry, key, path);
+                let id = if models.contains_key(&fitted) {
+                    fitted
+                } else {
+                    crate::geometry::mesh_id(geometry, key)
+                };
                 if models.contains_key(&id) {
                     out.push(Layer {
                         geometry: id,

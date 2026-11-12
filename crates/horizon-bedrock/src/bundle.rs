@@ -281,7 +281,10 @@ impl Bundle {
     }
 
     /// Gives each `texture_meshes` sprite its texture's real size and, for `use_pixel_depth`
-    /// ones, its silhouette, read from the converted PNGs.
+    /// ones, its silhouette, read from the converted PNGs: one model per texture file
+    /// (`fitted_mesh_id`). Keyed by the texture's name alone, the items sharing a geometry
+    /// (A&S's tools) all took the silhouette of the last one read: a sword cut to a pickaxe's
+    /// shape lost its guard.
     fn fit_sprites(&mut self, root: &Path) {
         let mut fitted: Vec<Geometry> = Vec::new();
         for def in self.entities.values().chain(self.attachables.values()) {
@@ -301,7 +304,9 @@ impl Bundle {
                         crate::convert::atlas_name(path)
                     ));
                     if let Some(sprite) = read_sprite(&png) {
-                        fitted.push(base.mesh_variant(key, Some(&sprite)));
+                        let mut g = base.mesh_variant(key, Some(&sprite));
+                        g.id = geometry::fitted_mesh_id(geometry, key, path);
+                        fitted.push(g);
                     }
                 }
             }
