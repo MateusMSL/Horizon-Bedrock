@@ -103,7 +103,10 @@ def player_files(v):
     desc["scripts"].setdefault("animate", []).append("fptest_events")
     # Two-handed hold (shears): reset each frame, set by the held item's `parent_setup`; the
     # first person poses and shows the left arm too.
-    desc["scripts"].setdefault("pre_animation", []).insert(0, "v.fptest_two_hands = 0;")
+    # As A&S's player: reset once (`initialize`), the variables the held items read back
+    # declared public (`c.owning_entity->v...` reads only public ones).
+    desc["scripts"].setdefault("initialize", []).append("v.fptest_two_hands = 0; v.fptest_rod = 0;")
+    desc["scripts"].setdefault("variables", {}).update({"variable.fptest_two_hands": "public", "variable.fptest_rod": "public"})
     desc["animations"]["fptest_two_hands"] = "animation.fptest.two_hands"
     desc["scripts"]["animate"].append({"fptest_two_hands": "v.is_first_person && v.fptest_two_hands"})
     desc["render_controllers"].append({"controller.render.fptest.two_hands": "v.is_first_person && v.fptest_two_hands"})
@@ -234,7 +237,6 @@ def build():
         "animation.fptest.mesh_ans.hold": {"loop": True, "bones": {"sword": {"rotation": [90, 0, -90], "position": [0, -2, 4]}}}}}
     files["textures/fptest/sprite.png"] = png(16, 16, sprite_pixels())
     # A&S-like features: stencil window (clock), holder variables (shears, rod).
-    face_tex = [cube([-5, 19, -0.5], [10, 10, 1], MAGENTA)]
     files["models/entity/fptest_ans.geo.json"] = {"format_version": "1.16.0", "minecraft:geometry": [
         {"description": {"identifier": "geometry.fptest.clock", "texture_width": 9, "texture_height": 1,
                          "visible_bounds_width": 8, "visible_bounds_height": 8, "visible_bounds_offset": [0, 2, 0]},
@@ -242,10 +244,13 @@ def build():
                    {"name": "frame", "parent": "item", "pivot": [0, 24, 0],
                     "cubes": [cube([-4, 27, -1], [8, 1, 2], YELLOW), cube([-4, 20, -1], [8, 1, 2], YELLOW),
                               cube([-4, 21, -1], [1, 6, 2], YELLOW), cube([3, 21, -1], [1, 6, 2], YELLOW)]},
-                   {"name": "window", "parent": "item", "pivot": [0, 24, 0],
-                    "cubes": [cube([-3, 21, -1.5], [6, 6, 0.5], WHITE)]},
+                   # As A&S's clock (`ntjtva`): the face before the window in the bone list,
+                   # flat planes; the window a plane in the frame, one face plane just in front
+                   # of it (cyan) and one deep behind it (magenta, larger than the window).
                    {"name": "face", "parent": "item", "pivot": [0, 24, 0],
-                    "cubes": face_tex + [cube([-2, 22, -1.2], [4, 4, 0.5], CYAN)]}]},
+                    "cubes": [cube([-1, 23, -1.1], [2, 2, 0], CYAN), cube([-5, 19, 1.5], [10, 10, 0], MAGENTA)]},
+                   {"name": "window", "parent": "item", "pivot": [0, 24, 0],
+                    "cubes": [cube([-3, 21, -1], [6, 6, 0], WHITE)]}]},
         {"description": {"identifier": "geometry.fptest.shears", "texture_width": 9, "texture_height": 1,
                          "visible_bounds_width": 8, "visible_bounds_height": 8, "visible_bounds_offset": [0, 2, 0]},
          "bones": [{"name": "item", "pivot": [0, 24, 0], "binding": BINDING,
@@ -280,7 +285,7 @@ def build():
                         "render_controllers": ["controller.render.fptest.simple"],
                         "animations": {"rod": "animation.fptest.rod"},
                         "scripts": {"parent_setup": "v.fptest_rod = 1;",
-                                    "pre_animation": ["v.rod = c.owning_entity->v.fptest_rod ?? 0;"],
+                                    "pre_animation": ["v.rod = c.owning_entity->v.fptest_rod;"],
                                     "animate": ["rod"]}},
     }
     for item, extra in ans.items():
@@ -413,8 +418,8 @@ def build():
                                                          for x in range(16)] for y in range(16)])
     files["manifest.json"] = {"format_version": 2, "header": {
         "name": "Horizon Test Pack", "description": "Teste do motor Bedrock: 1a/3a pessoa, particulas, bloco, entidade, sons, etiquetas",
-        "uuid": PACK_UUID, "version": [1, 0, 7], "min_engine_version": [1, 20, 0]},
-        "modules": [{"type": "resources", "uuid": MODULE_UUID, "version": [1, 0, 7]}]}
+        "uuid": PACK_UUID, "version": [1, 0, 8], "min_engine_version": [1, 20, 0]},
+        "modules": [{"type": "resources", "uuid": MODULE_UUID, "version": [1, 0, 8]}]}
     return files
 
 

@@ -86,6 +86,7 @@ texturas aparecem como faltando e são esperadas: `steve` (no jogo vira a skin d
 | 1.0.5 | Porco com `format_version` 1.26.30: funciona. |
 | 1.0.6 | Tijolo e sílex com `texture_meshes` (isolar a picareta torta do A&S: textura carregava, a malha ficava em outro plano/ângulo). |
 | 1.0.7 | Relógio (stencil), tesoura (duas mãos), vara (variável do jogador): os três defeitos do A&S que sobraram (rosto do relógio some, braços gigantes na câmera, vara invisível). |
+| 1.0.8 | No Bedrock a 1.0.7 falhou nos três: relógio só moldura (janela grossa na frente do rosto tapava pela profundidade), tesoura sem braços e vara sem a haste (variáveis do jogador zeradas a cada quadro e não públicas). Agora como o A&S: rosto antes da janela, planos finos; variáveis zeradas só no `initialize` e declaradas `public`. |
 
 ## 6. Resultado no Bedrock (1.0.5)
 
@@ -106,6 +107,7 @@ texturas aparecem como faltando e são esperadas: `steve` (no jogo vira a skin d
 | 1–2 | Papel 1ª / 3ª / 3ª de frente | 1ª: papel Java; 3ª: invertido (amarelo 1,5 bloco acima da mão) | aparece nas três; amarelo na mão; ângulos um pouco diferentes do Bedrock | 1ª: mais baixo e menor que no Bedrock (braço 10 px abaixo): v206 |
 | 3 | Graveto nas três vistas | 1ª: graveto Java; 3ª ok | aparece nas três; ângulos um pouco diferentes | 1ª: idem papel: v206 |
 | 3b | Tijolo / sílex (`texture_meshes`) | — | — | tijolo ok; sílex deslocado (v208) |
+| 3c–3e | Relógio / tesoura / vara (1.0.8) | — | — | relógio só moldura (Bedrock: moldura + ciano) → v210; tesoura e vara iguais ao Bedrock |
 | — | Ovo do porco (`spawn_egg` com cores) | — | — | ícone padrão; no Bedrock vira o ovo de pintas: v206 |
 | 4 | Água e pouso | ok | ok | — |
 | 5 | Esponja | textura vanilla | textura vanilla | seca ok; molhada vanilla (no Bedrock também muda): v205 |

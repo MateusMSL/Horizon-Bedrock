@@ -71,8 +71,8 @@ fn lift_toward_camera(vertices: &mut [Vertex], push: f32) {
 /// through the camera (the origin: the vertices are camera-relative) and the face's edges, their
 /// normals pointing in. A point is on a pixel the face covers when it is inside all four. The two
 /// sides of a flat shape cover the same pixels and count once.
-fn screen_shapes(quads: &[Vertex]) -> Vec<[glam::Vec3; 4]> {
-    let mut shapes: Vec<[glam::Vec3; 4]> = Vec::new();
+fn screen_shapes(quads: &[Vertex]) -> Vec<ScreenShape> {
+    let mut shapes: Vec<ScreenShape> = Vec::new();
     let mut seen: Vec<glam::Vec3> = Vec::new();
     for q in quads.chunks_exact(4) {
         let p: [glam::Vec3; 4] = std::array::from_fn(|i| glam::Vec3::from_array(q[i].pos));
@@ -95,7 +95,18 @@ fn screen_shapes(quads: &[Vertex]) -> Vec<[glam::Vec3; 4]> {
             }
         }
         seen.push(direction);
-        shapes.push(planes);
+        // The face's own plane, positive on the camera's side: the mask writes depth too, so
+        // what tests for its value shows only in front of it.
+        let mut n = (p[1] - p[0]).cross(p[2] - p[0]);
+        if n.length_squared() < 1e-12 {
+            n = (p[2] - p[0]).cross(p[3] - p[0]);
+        }
+        let n = n.normalize_or_zero();
+        let mut face = n.extend(-n.dot(p[0]));
+        if face.w < 0.0 {
+            face = -face;
+        }
+        shapes.push((planes, face));
     }
     shapes
 }
@@ -103,7 +114,15 @@ fn screen_shapes(quads: &[Vertex]) -> Vec<[glam::Vec3; 4]> {
 /// Cuts the quads from `start` on to the pixels the shapes cover (`screen_shapes`): what a
 /// stencil test for the shape's value kept. Each quad's part inside a shape is laid out as
 /// triangles (a quad of three distinct corners and a repeated one), its attributes interpolated.
-fn clip_to_screen_shapes(vertices: &mut Vec<Vertex>, start: usize, shapes: &[[glam::Vec3; 4]]) {
+/// A mask face's screen region (`screen_shapes`): the four planes through the camera and its
+/// edges, and the face's own plane (xyz normal, w offset; positive on the camera's side).
+type ScreenShape = ([glam::Vec3; 4], glam::Vec4);
+
+/// How far behind a mask's face a piece still shows (blocks): a piece on the face itself (an
+/// armour's shine, drawn on the band's own surface) is not cut.
+const MASK_DEPTH_SLACK: f32 = 0.002;
+
+fn clip_to_screen_shapes(vertices: &mut Vec<Vertex>, start: usize, shapes: &[ScreenShape]) {
     fn mix(a: &Vertex, b: &Vertex, t: f32) -> Vertex {
         let mut v = *a;
         v.pos = (glam::Vec3::from_array(a.pos).lerp(glam::Vec3::from_array(b.pos), t)).to_array();
@@ -117,12 +136,17 @@ fn clip_to_screen_shapes(vertices: &mut Vec<Vertex>, start: usize, shapes: &[[gl
     for shape in shapes {
         for quad in tail.chunks_exact(4) {
             let mut poly: Vec<Vertex> = quad.to_vec();
-            for n in shape {
+            // The four edge planes through the camera, then the face's own plane: what is
+            // behind the mask fails its depth (Bedrock's masks write depth, colour off).
+            let planes = shape.0.map(|n| n.extend(0.0)).into_iter().chain(std::iter::once(
+                shape.1 + glam::Vec4::new(0.0, 0.0, 0.0, MASK_DEPTH_SLACK),
+            ));
+            for n in planes {
                 let mut next: Vec<Vertex> = Vec::with_capacity(poly.len() + 1);
                 for i in 0..poly.len() {
                     let (a, b) = (&poly[i], &poly[(i + 1) % poly.len()]);
-                    let da = n.dot(glam::Vec3::from_array(a.pos));
-                    let db = n.dot(glam::Vec3::from_array(b.pos));
+                    let da = n.truncate().dot(glam::Vec3::from_array(a.pos)) + n.w;
+                    let db = n.truncate().dot(glam::Vec3::from_array(b.pos)) + n.w;
                     if da >= 0.0 {
                         next.push(*a);
                     }
@@ -867,7 +891,7 @@ fn render_bedrock(
     }
     // What the stencil masks that draw no colour (the shine bands) cover on the screen, by the
     // value they write: the layers drawn after them that test for it are cut to it.
-    let mut bands: Vec<(u8, [glam::Vec3; 4])> = Vec::new();
+    let mut bands: Vec<(u8, ScreenShape)> = Vec::new();
     // What the mob holds and wears follows the holder's bones.
     if super::bedrock_debug::settings().dumps(&m.kind.id) {
         let secs = std::time::SystemTime::now()
@@ -1388,14 +1412,15 @@ fn render_bedrock(
                     }
                 }
                 if banded {
-                    // In front of the rim it lights, behind the piece; only inside the band.
-                    lift_toward_camera(&mut out[start..], -(BEDROCK_REAR_BIAS - BEDROCK_BAND_LIFT));
-                    let shapes: Vec<[glam::Vec3; 4]> = bands
+                    // Only inside the band and in front of it (cut before the shift, at the
+                    // depth it is drawn at); then in front of the rim it lights, behind the piece.
+                    let shapes: Vec<ScreenShape> = bands
                         .iter()
                         .filter(|(value, _)| *value == flags.stencil_equal)
                         .map(|(_, shape)| *shape)
                         .collect();
                     clip_to_screen_shapes(out, start, &shapes);
+                    lift_toward_camera(&mut out[start..], -(BEDROCK_REAR_BIAS - BEDROCK_BAND_LIFT));
                 } else if behind {
                     lift_toward_camera(&mut out[start..], -BEDROCK_REAR_BIAS);
                 } else if layers_on > 0 {
@@ -1593,6 +1618,11 @@ thread_local! {
     static FP_VIEW: std::cell::Cell<Option<glam::Quat>> = const { std::cell::Cell::new(None) };
 }
 thread_local! {
+    /// The player's standing eye height, last seen standing: what the view model stands below
+    /// the camera by while sneaking.
+    static FP_STAND_EYE: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
+}
+thread_local! {
     /// While the first-person view model draws: the eye height its feet stand below the camera.
     static FP_EYE: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
 }
@@ -1669,6 +1699,17 @@ pub fn first_person_item(
     // (`q.target_x_rotation`) is then level, so a pose that turns the body with it
     // (`base_pose`) does not turn it twice.
     let [yaw, pitch, eye_height] = look;
+    // The view model stands below the camera by the standing eye height, crouched or not: the
+    // camera drops when sneaking, the arms in front of it stay where they were (Bedrock). With
+    // the crouched eye the model rose 0.35 block toward the camera and the arms came up.
+    let eye_height = FP_STAND_EYE.with(|stand| {
+        if player.extra.crouching || player.extra.sneaking {
+            stand.get().unwrap_or(eye_height)
+        } else {
+            stand.set(Some(eye_height));
+            eye_height
+        }
+    });
     copy.yaw = yaw;
     copy.previous_yaw = yaw;
     copy.body_yaw = yaw;

@@ -29,7 +29,10 @@ fn material_groups(
     }
     // The translucent looks go last, as the game sorts them after the opaque ones: a shell
     // drawn before the core inside it would cover the core's depth and hide it.
-    groups.sort_by_key(|g| g.0.blend);
+    // A stencil mask (writes a value, no colour) goes first, whatever its bone's place: the
+    // pieces that test for its value draw only once it is written. The test pack's clock (face
+    // bone before its window) and Actions & Stuff's clock showed only the frame.
+    groups.sort_by_key(|g| (!(g.0.no_color && g.0.stencil_write != 0), g.0.blend));
     groups
 }
 
