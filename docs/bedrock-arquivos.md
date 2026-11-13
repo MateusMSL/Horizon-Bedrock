@@ -86,7 +86,7 @@ física, inventário) continua sendo a do Java; o motor Bedrock só lê o estado
 | `docs/bedrock-roadmap.md` | Histórico de cada versão do motor (`ENGINE_BUILD`): o que mudou e por quê. |
 | `docs/bedrock-instalacao.md` | Compilar, importar no launcher, instalar add-ons (dev). |
 | `docs/bedrock.md`, `bedrock-status.md`, `bedrock-coverage.md` | Visão geral, estado e cobertura do formato Bedrock. |
-| `docs/bedrock-debug-notes.md`, `bedrock-first-person-tuning.md`, `bedrock-player-animations.md`, `bedrock-items-3d.md`, `bedrock-validation.md` | Notas de depuração de temas específicos. |
+| `docs/bedrock-debug-notes.md`, `bedrock-first-person-tuning.md`, `bedrock-player-animations.md`, `bedrock-items-3d.md`, `bedrock-itens-checklist.md` (gerado por `tools/bedrock/items_checklist.py`), `bedrock-validation.md` | Notas de depuração de temas específicos. |
 | `tools/check-hooks.ps1` + `tools/bedrock-hooks.txt` | Confere, depois de atualizar do upstream, se os ganchos continuam nos arquivos originais. |
 | `patches/bedrock-hooks.patch` | Reaplica ganchos perdidos (`git apply --3way`). |
 | `tools/fp-test/fp-axes-test.mcpack` | Pack de teste antigo (só os eixos no papel). |

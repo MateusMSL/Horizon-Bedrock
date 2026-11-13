@@ -929,7 +929,10 @@ fn render_bedrock(
         }
         let bound_only = !att.binds.is_empty();
         let in_hand = matches!(att.slot, "main_hand" | "off_hand");
-        let hand_scale = if in_hand { frame.held.scale } else { 1.0 };
+        // `held_item_scale` sizes the game's own model of the held item, not an attachable: Actions
+        // & Stuff's player sets it to 0.001 while holding a fishing rod (to hide the vanilla rod)
+        // and its rod attachable still shows in Bedrock.
+        let hand_scale = 1.0_f32;
         let base_of = |bone: &str| -> Option<glam::Mat4> {
             // A bone the pack binds follows that bone of the holder; with no bindings at all, a
             // bone follows the holder's bone of its own name (worn armour on the arm it covers).

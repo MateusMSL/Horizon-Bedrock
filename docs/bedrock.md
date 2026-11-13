@@ -104,6 +104,6 @@ a running game; read a mob's model first with a pack you know.
 - Exemplos: `probe_death`, `probe_layers` (camadas por tick).
 - Passe por material: bone de outro material só deixa de desenhar os próprios cubos (filhos continuam); antes escondia a subárvore (olhos do villager, casca do slime).
 - `relative_to: { rotation: "entity" }`: `resolve_entity_rotations` gira o bone no espaço da entidade (ignora a rotação dos bones acima). Braço do esqueleto ao mirar.
-- `scalex/y/z`, `held_item_scale`, `held_item_ignores_lighting`, `hide_held_items` lidos e desenhados; `hide_armor`, `models.bone.reset` sem efeito (documentado).
+- `scalex/y/z`, `held_item_scale` (só no modelo do jogo, não em attachable), `held_item_ignores_lighting`, `hide_held_items` lidos e desenhados; `hide_armor`, `models.bone.reset` sem efeito (documentado).
 - `overlay_color` e `on_fire_color` entram na cor da camada (`Layer::tint`); `is_hurt_color` fica com o flash vermelho do jogo.
 - `query.standing_scale`: escala real do urso polar.
