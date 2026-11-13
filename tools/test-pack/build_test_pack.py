@@ -271,7 +271,76 @@ def build():
             "backFace": {"stencilFunc": "Always", "stencilPassOp": "Replace"}, "stencilRef": 3},
         "fptest_face:entity_alphatest": {
             "+states": ["EnableStencilTest"],
+            "frontFace": {"stencilFunc": "Equal"}, "backFace": {"stencilFunc": "Equal"}, "stencilRef": 3},
+        # Actions & Stuff's clock, material for material: the case writes 0 with colour
+        # (`oreville_khgpgi`), the window writes 3 without colour from `entity`
+        # (`oreville_migzni`, here `fptest_win_e`) or `entity_alphatest` (`fptest_win_a`), the
+        # dial draws where 3 is (`oreville_vgjfwj`).
+        "fptest_case:entity_alphatest": {
+            "+states": ["EnableStencilTest", "StencilWrite"],
+            "frontFace": {"stencilFunc": "Always", "stencilPassOp": "Replace"},
+            "backFace": {"stencilFunc": "Always", "stencilPassOp": "Replace"}, "stencilRef": 0},
+        "fptest_win_e:entity": {
+            "+states": ["EnableStencilTest", "StencilWrite", "DisableColorWrite", "DisableAlphaWrite"],
+            "frontFace": {"stencilFunc": "Always", "stencilPassOp": "Replace"},
+            "backFace": {"stencilFunc": "Always", "stencilPassOp": "Replace"}, "stencilRef": 3},
+        "fptest_win_a:entity_alphatest": {
+            "+states": ["EnableStencilTest", "StencilWrite", "DisableColorWrite", "DisableAlphaWrite"],
+            "frontFace": {"stencilFunc": "Always", "stencilPassOp": "Replace"},
+            "backFace": {"stencilFunc": "Always", "stencilPassOp": "Replace"}, "stencilRef": 3},
+        "fptest_dial:entity_alphatest": {
+            "+states": ["EnableStencilTest"],
             "frontFace": {"stencilFunc": "Equal"}, "backFace": {"stencilFunc": "Equal"}, "stencilRef": 3}}}
+    # The A&S clock's model (`geometry.oreville_ans.ntjtva`), raised to the hand: a case 10x3x10
+    # whose top is open (a yellow rim, clear inside) and bottom closed (dark), a window plane
+    # 1 px under the top, two small icons (cyan) 0.1 px over the window and the dial (magenta)
+    # 1.4 px under it. Three windows: `entity` with a clear texel (exactly A&S: compass),
+    # `entity` with an opaque texel (recovery compass), `entity_alphatest` with a clear texel
+    # (echo shard).
+    def clock_rep(identifier, window_uv):
+        top = {"uv": [0, 0], "uv_size": [10, 10]}
+        side = {"uv": [0, 10], "uv_size": [10, 3]}
+        return {"description": {"identifier": identifier, "texture_width": 32, "texture_height": 32,
+                                "visible_bounds_width": 8, "visible_bounds_height": 8, "visible_bounds_offset": [0, 2, 0]},
+                "bones": [
+                    {"name": "item", "pivot": [0, 24, 0], "binding": BINDING},
+                    {"name": "case", "parent": "item", "pivot": [0, 24, 0],
+                     "cubes": [{"origin": [-5, 21, -5], "size": [10, 3, 10],
+                                "uv": {"up": top, "down": {"uv": [10, 0], "uv_size": [10, 10]},
+                                       "north": side, "south": side, "east": side, "west": side}}]},
+                    {"name": "icons", "parent": "item", "pivot": [0, 24, 0],
+                     "cubes": [{"origin": [-1.5, 23.1, 1], "size": [3, 0, 3], "uv": {"up": {"uv": [20, 10], "uv_size": [3, 3]}}},
+                               {"origin": [-1.5, 23.1, -4], "size": [3, 0, 3], "uv": {"up": {"uv": [20, 10], "uv_size": [3, 3]}}},
+                               {"origin": [-4.5, 21.6, -4.5], "size": [9, 0, 9], "uv": {"up": {"uv": [20, 0], "uv_size": [9, 9]}}}]},
+                    {"name": "window", "parent": "item", "pivot": [0, 24, 0],
+                     "cubes": [{"origin": [-4.75, 23, -4.75], "size": [9.25, 0, 9.5],
+                                "uv": {"up": {"uv": window_uv, "uv_size": [1, 1]}}}]}]}
+    files["models/entity/fptest_clockrep.geo.json"] = {"format_version": "1.16.0", "minecraft:geometry": [
+        clock_rep("geometry.fptest.clockrep_clear", [31, 31]),
+        clock_rep("geometry.fptest.clockrep_opaque", [30, 31])]}
+    rep = [[(0, 0, 0, 0)] * 32 for _ in range(32)]
+    for y in range(10):
+        for x in range(10):
+            rep[y][x] = (255, 200, 30, 255) if x in (0, 9) or y in (0, 9) else (0, 0, 0, 0)
+            rep[y][10 + x] = (120, 80, 10, 255)
+            if x < 9 and y < 9:
+                rep[y][20 + x] = (255, 0, 255, 255)
+    for y in range(10, 13):
+        for x in range(10):
+            rep[y][x] = (255, 200, 30, 255)
+        for x in range(20, 23):
+            rep[y][x] = (0, 220, 220, 255)
+    rep[31][30] = (255, 255, 255, 255)
+    files["textures/fptest/clockrep.png"] = png(32, 32, rep)
+    for item, geo, window in (("compass", "clockrep_clear", "fptest_win_e"),
+                              ("recovery_compass", "clockrep_opaque", "fptest_win_e"),
+                              ("echo_shard", "clockrep_clear", "fptest_win_a")):
+        files["attachables/fptest_rep_%s.json" % item] = {"format_version": "1.10.0", "minecraft:attachable": {"description": {
+            "identifier": "minecraft:" + item,
+            "materials": {"default": "fptest_case", "window": window, "dial": "fptest_dial"},
+            "textures": {"default": "textures/fptest/clockrep"},
+            "geometry": {"default": "geometry.fptest." + geo},
+            "render_controllers": ["controller.render.fptest.clockrep"]}}}
     ans = {
         "clock": {"geometry": {"default": "geometry.fptest.clock"},
                   "materials": {"default": "entity_alphatest", "window": "fptest_window", "face": "fptest_face"},
@@ -301,6 +370,9 @@ def build():
         "animation.fptest.stick.first_person": {"loop": True, "bones": {"item": {"rotation": [-30, 0, 0]}}},
         "animation.fptest.stick.third_person": {"loop": True, "bones": {"item": {"rotation": [90, 0, 0]}}}}}
     files["render_controllers/fptest.render_controllers.json"] = {"format_version": "1.8.0", "render_controllers": {
+        "controller.render.fptest.clockrep": {"geometry": "Geometry.default", "textures": ["Texture.default"],
+                                              "materials": [{"*": "Material.default"}, {"window": "Material.window"},
+                                                            {"icons": "Material.dial"}]},
         "controller.render.fptest.clock": {"geometry": "Geometry.default", "textures": ["Texture.default"],
                                            "materials": [{"*": "Material.default"}, {"window": "Material.window"},
                                                          {"face": "Material.face"}]},
@@ -403,11 +475,11 @@ def build():
     files["texts/en_US.lang"] = ("item.paper.name=Paper (test axes)\nitem.stick.name=Stick (test animation)\n"
                                  "entity.pig.name=Pig (test)\ntile.sponge.name=Sponge (test)\n"
                                  "item.brick.name=Brick (texture mesh)\nitem.flint.name=Flint (mesh as A&S)\n"
-                                 "item.clock.name=Clock (stencil window)\nitem.shears.name=Shears (two hands)\nitem.fishing_rod.name=Fishing Rod (holder variable)\n")
+                                 "item.clock.name=Clock (stencil window)\nitem.compass.name=A&S clock (entity window, clear)\nitem.recovery_compass.name=A&S clock (entity window, opaque)\nitem.echo_shard.name=A&S clock (alphatest window, clear)\nitem.shears.name=Shears (two hands)\nitem.fishing_rod.name=Fishing Rod (holder variable)\n")
     files["texts/pt_BR.lang"] = ("item.paper.name=Papel (eixos de teste)\nitem.stick.name=Graveto (animação de teste)\n"
                                  "entity.pig.name=Porco (teste)\ntile.sponge.name=Esponja (teste)\n"
                                  "item.brick.name=Tijolo (malha de textura)\nitem.flint.name=Sílex (malha como o A&S)\n"
-                                 "item.clock.name=Relógio (janela de stencil)\nitem.shears.name=Tesoura (duas mãos)\nitem.fishing_rod.name=Vara (variável do jogador)\n")
+                                 "item.clock.name=Relógio (janela de stencil)\nitem.compass.name=Relógio A&S (janela entity, transparente)\nitem.recovery_compass.name=Relógio A&S (janela entity, opaca)\nitem.echo_shard.name=Relógio A&S (janela alphatest, transparente)\nitem.shears.name=Tesoura (duas mãos)\nitem.fishing_rod.name=Vara (variável do jogador)\n")
 
     # Images.
     files["textures/fptest/palette.png"] = palette(PALETTE[WHITE])
@@ -418,8 +490,8 @@ def build():
                                                          for x in range(16)] for y in range(16)])
     files["manifest.json"] = {"format_version": 2, "header": {
         "name": "Horizon Test Pack", "description": "Teste do motor Bedrock: 1a/3a pessoa, particulas, bloco, entidade, sons, etiquetas",
-        "uuid": PACK_UUID, "version": [1, 0, 8], "min_engine_version": [1, 20, 0]},
-        "modules": [{"type": "resources", "uuid": MODULE_UUID, "version": [1, 0, 8]}]}
+        "uuid": PACK_UUID, "version": [1, 0, 9], "min_engine_version": [1, 20, 0]},
+        "modules": [{"type": "resources", "uuid": MODULE_UUID, "version": [1, 0, 9]}]}
     return files
 
 

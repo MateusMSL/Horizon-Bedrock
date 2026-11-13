@@ -59,6 +59,12 @@ impl Game<'_> {
             return;
         }
         horizon_client::mobs::bedrock::set_camera_rotation(self.yaw, self.pitch);
+        // Spawn compasses point at the world spawn in the overworld and spin elsewhere.
+        horizon_client::mobs::bedrock::set_compass_target(
+            self.spawn
+                .filter(|_| self.dim.id() == "minecraft:overworld")
+                .map(|s| [s.x, s.z]),
+        );
         let mut pending = bedrock.take_emitted();
         let mut drawn = Vec::new();
         for _ in 0..CHAIN_LIMIT {

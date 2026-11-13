@@ -138,6 +138,7 @@ pub(super) async fn open_adapter(
         | cull::Cull::features(adapter)
         | oit::features(adapter)
         | ray_query::features(adapter)
+        | super::bedrock_stencil::features(adapter)
         | (adapter.features()
             & (wgpu::Features::INDIRECT_FIRST_INSTANCE
                 | wgpu::Features::MULTI_DRAW_INDIRECT_COUNT

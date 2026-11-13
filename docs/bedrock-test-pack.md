@@ -27,6 +27,7 @@ não no Horizon, o defeito é do motor, não do A&S.
 | 3c | Janela de stencil (como o relógio do A&S) | **Relógio**: moldura amarela; uma janela invisível grava o stencil; o rosto (quadrado magenta 10×10 com centro ciano) só aparece dentro da janela 6×6. Sem stencil, o magenta passa da moldura. |
 | 3d | Duas mãos (como a tesoura do A&S) | **Tesoura**: `parent_setup` liga `v.fptest_two_hands` no jogador; em 1ª pessoa os dois braços aparecem, o esquerdo espelhado do direito. |
 | 3e | Variável do jogador lida pelo item (como a vara do A&S) | **Vara**: `parent_setup` liga `v.fptest_rod`; o item lê `c.owning_entity->v.fptest_rod` e escala a vara azul por ela (0 some com a vara, só o cubo ciano fica). |
+| 3f | Relógio do A&S, material por material | Caixa 10×3×10 (grava 0, topo aberto com borda amarela, fundo marrom fechado), janela 1 px abaixo do topo (grava 3, sem cor), ícones ciano 0,1 px acima da janela e mostrador magenta 1,4 px abaixo dela (só onde há 3). **Bússola**: janela de `entity` com texel transparente (igual ao A&S). **Bússola de recuperação**: janela de `entity` com texel opaco. **Fragmento de eco**: janela de `entity_alphatest` com texel transparente. Serve para descobrir por que, no Bedrock, o mostrador do A&S aparece mesmo atrás da janela. |
 | 4 | Partícula + som de interação do jogador | Respingo azul ao entrar na água; anel laranja ao pousar depois de mais de 1 s no ar (voo); "blip" nos dois. |
 | 5 | Bloco customizado | **Esponja** com textura xadrez magenta/preto (`blocks.json` + `terrain_texture.json`). |
 | 6 | Entidade modificada | **Porco** de caixas, cabeça com eixos girando 90°/s. |
@@ -87,6 +88,7 @@ texturas aparecem como faltando e são esperadas: `steve` (no jogo vira a skin d
 | 1.0.6 | Tijolo e sílex com `texture_meshes` (isolar a picareta torta do A&S: textura carregava, a malha ficava em outro plano/ângulo). |
 | 1.0.7 | Relógio (stencil), tesoura (duas mãos), vara (variável do jogador): os três defeitos do A&S que sobraram (rosto do relógio some, braços gigantes na câmera, vara invisível). |
 | 1.0.8 | No Bedrock a 1.0.7 falhou nos três: relógio só moldura (janela grossa na frente do rosto tapava pela profundidade), tesoura sem braços e vara sem a haste (variáveis do jogador zeradas a cada quadro e não públicas). Agora como o A&S: rosto antes da janela, planos finos; variáveis zeradas só no `initialize` e declaradas `public`. |
+| 1.0.9 | Réplicas do relógio do A&S (bússola, bússola de recuperação, fragmento de eco) para isolar a regra da janela. |
 
 ## 6. Resultado no Bedrock (1.0.5)
 
@@ -145,3 +147,27 @@ Resumo do que já foi tentado no motor (detalhes em `docs/bedrock-roadmap.md`):
   certa (confere com o código do Blockbench).
 - Com o A&S, descontar a animação de equipar (`rikfbu`) do braço traz itens para a tela, mas ainda
   pequenos e deitados. Por isso a decisão de validar com o pack de teste, sem o A&S.
+
+## 9. Variantes do relógio do A&S (`horizon-clock-variants.mcpack`)
+
+Gerador: `python tools/test-pack/build_clock_variants.py saida.mcpack`. Pack separado (carregar
+sozinho no Bedrock). Cada item é uma cópia do relógio 3D do A&S (mesma geometria, mesmo lugar na
+textura, mesma cadeia de materiais, attachable 1.26.30, animações de 1ª/3ª pessoa) com uma
+diferença. O mostrador é o quadrado magenta com cruz amarela dentro da borda dourada.
+
+| Item | Variante |
+|---|---|
+| Relógio | V0: igual ao A&S |
+| Bússola | V1: attachable `format_version` 1.10.0 |
+| Bússola de recuperação | V2: materiais com `FANCY` |
+| Fragmento de eco | V3: sem animação de 1ª pessoa |
+| Fragmento de ametista | V4: sem osso `root` (item no topo) |
+| Fragmento de prismarinho | V5: janela de `entity_alphatest` |
+| Concha de náutilo | V6: janela antes do mostrador na lista de ossos |
+| Coração do mar | V7: no render controller, janela e mostrador antes de `*` |
+| Lágrima de ghast | V8: caixa sem stencil |
+| Vara de blaze | V9: janela abaixo do mostrador |
+| Estrela do Nether | V10: sem janela |
+
+Leitura: se V0 mostra o mostrador e uma variante não, aquela diferença é a regra. Se V10 mostra o
+mostrador, o teste `Equal 3` não está barrando nada (stencil de quadros anteriores ou ignorado).

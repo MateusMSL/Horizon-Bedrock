@@ -52,6 +52,12 @@ impl Host for World {
                 }
             }
         }
+        // `NAME=Halloween`: the name tag `query.is_name_any` compares.
+        if name == "is_name_any"
+            && let Ok(n) = std::env::var("NAME")
+        {
+            return Value::bool(args.iter().any(|a| matches!(a, Value::Str(s) if **s == *n)));
+        }
         if std::env::var_os("WALK").is_some() {
             match name {
                 "ground_speed" => return Value::Num(4.3),
@@ -712,6 +718,9 @@ fn main() {
                 && !layer.geometry.contains(o.as_str())
             {
                 continue;
+            }
+            if std::env::var("LAYERS").is_ok() {
+                println!("layer {} texture {} material {}", layer.geometry, layer.texture, layer.material);
             }
             let Some(g) = geos.get(&layer.geometry.to_ascii_lowercase()) else {
                 continue;

@@ -206,6 +206,15 @@ pub struct Settings {
     pub trace_rider: bool,
     /// Writes a line per frame (`fp-trace`: time, walk cycle, arm and item bone positions) while the first-person view model draws.
     pub trace_fp: bool,
+    /// Draws Bedrock packs' stencil with the CPU stand-ins instead of the stencil pass
+    /// (`bedrock_stencil`), to compare the two (looks, frame rate).
+    pub cpu_stencil: bool,
+    /// The stencil pass's masks without colour (a clock's window) leave depth alone: what is
+    /// behind them still draws where its stencil test passes. A test of which rule Bedrock
+    /// follows (Actions & Stuff's clock dial is 1.4 px behind its window and shows there).
+    pub stencil_masks_no_depth: bool,
+    /// The stencil pass's pieces that test the stencil (a clock's dial) skip the depth test.
+    pub stencil_tests_no_depth: bool,
     /// What a mob wears, moved from where its bone carries it, by slot.
     pub worn: HashMap<String, Worn>,
     /// Item ids (`"torch"`, `"minecraft:glass"`) whose inventory drawing is written to the log
@@ -243,6 +252,11 @@ pub struct Settings {
     /// Layers of what a mob holds or wears not drawn: `"main_hand"` (the slot's every layer) or
     /// `"main_hand:1"` (the second layer of that slot's attachable).
     pub hide_attached: Vec<String>,
+    /// Parts of a held or worn item not drawn, by item (part of its id, any case: `"clock"`):
+    /// bone names (part of the name: `"e2kc"`), material names (`"oreville_migzni"`: every bone
+    /// drawn with it) or layer numbers (`"L1"`: the attachable's second render controller).
+    /// `{"clock": ["khaf"]}` hides the clock's dial.
+    pub hide_item_parts: HashMap<String, Vec<String>>,
     /// Alpha multiplied into an attachable's layer: `{"main_hand": 0.5, "main_hand:1": 0.2}`.
     pub attached_alpha: HashMap<String, f32>,
     /// Which bone of the holder an attachable's bone follows, in place of the pack's own
@@ -404,6 +418,19 @@ impl Settings {
                 .map(|(_, v)| v.as_str())
         };
         find(&format!("{slot}:{bone}")).or_else(|| find(bone))
+    }
+
+    /// The debug file's `hide_item_parts` entries for `item`, lower case (empty when none).
+    pub fn item_parts(&self, item: &str) -> Vec<String> {
+        if self.hide_item_parts.is_empty() {
+            return Vec::new();
+        }
+        let item = item.to_ascii_lowercase();
+        self.hide_item_parts
+            .iter()
+            .filter(|(k, _)| item.contains(&k.to_ascii_lowercase()))
+            .flat_map(|(_, v)| v.iter().map(|p| p.to_ascii_lowercase()))
+            .collect()
     }
 
     pub fn hides_bone(&self, bone: &str) -> bool {

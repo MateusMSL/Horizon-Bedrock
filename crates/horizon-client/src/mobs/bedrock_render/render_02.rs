@@ -30,6 +30,12 @@ fn tag_bedrock_material(
 /// Whether a material draws a texture's alpha as nothing: without a blend, an add or an alpha test
 /// it paints every texel it samples, so a texel at alpha 157 or 2 (a charged creeper's skin and
 /// its white face) shows opaque, and an emissive-alpha one reads its alpha as glow, not as cover.
+/// A change-colour one (`USE_COLOR_MASK`) reads it as where the tint goes: a texel at alpha 2 is
+/// opaque and barely tinted.
 fn ignores_alpha(flags: &horizon_bedrock::material::MaterialFlags) -> bool {
-    !flags.blend && !flags.additive && (flags.emissive_alpha || !flags.alpha_test)
+    !flags.blend
+        && !flags.additive
+        && (flags.emissive_alpha
+            || !flags.alpha_test
+            || (flags.color_mask && !flags.armor_dye && !flags.multitexture))
 }

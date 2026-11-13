@@ -186,6 +186,8 @@ fn packed_wanted() -> bool {
 
 pub(crate) mod animate;
 mod arena;
+/// Bedrock packs' stencil in a pass of its own (`gfx/bedrock_stencil.rs`).
+pub mod bedrock_stencil;
 pub mod capture;
 pub mod compositor;
 pub(crate) mod core_lines;
@@ -1190,6 +1192,8 @@ pub struct Renderer {
     mirror_group: wgpu::BindGroup,
     mirror: Option<MirrorTarget>,
     entity_pipeline: wgpu::RenderPipeline,
+    /// Bedrock packs' stencil pieces, drawn in a pass of their own (`bedrock_stencil`).
+    bedrock_stencil: bedrock_stencil::Stencil,
     static_entity_pipeline: wgpu::RenderPipeline,
     static_entity_group: wgpu::BindGroup,
     static_entity_transform: wgpu::Buffer,
@@ -4325,6 +4329,13 @@ impl Renderer {
             alpha_blend,
             false,
         );
+        let bedrock_stencil = bedrock_stencil::Stencil::new(
+            &device,
+            &entity_shader,
+            &entity_layout,
+            entity_bias,
+            f64::from(u8::from(frame_format == LINEAR_FRAME)),
+        );
         // The hand as `entity_pipeline` draws it, in the overlays' format.
         let overlay_hand = (overlay_format != frame_format).then(|| {
             entity_pipeline_in(
@@ -5166,6 +5177,7 @@ impl Renderer {
             mirror_group,
             mirror: None,
             entity_pipeline,
+            bedrock_stencil,
             static_entity_pipeline,
             hdr_mark_pipeline,
             hdr_entity_mark_pipeline,
@@ -10118,7 +10130,12 @@ impl Renderer {
         // Post effects (a resource pack's chains, `use_depth_buffer`) read the world's depth
         // after the world pass, as `GameRenderer.render` hands them the main target's.
         let post_reads_depth = !frame.title && !frame.post_effects.effects.is_empty();
+        // Bedrock packs' stencil pieces: this frame's, uploaded; off under a shader pack.
+        self.bedrock_stencil.set_active(!pack_post);
+        self.bedrock_stencil.begin_frame(&self.queue);
         let keep_depth = pack_reads_world
+            // The world's Bedrock stencil pieces start from its depth.
+            || self.bedrock_stencil.has_world()
             || post_reads_depth
             || (taa && self.world_post.taa)
             || oit_on
@@ -10187,6 +10204,10 @@ impl Renderer {
         // `native_world_drawn`): one render pass fewer, ~10 µs of wgpu's encoding a frame.
         let hand_in_world = (frame.hand.len() / 4) > 0
             && !pack_draws_hand
+            // The hand's stencil pieces draw after the hand, in a pass of their own; the
+            // world's start from the world's depth, which the in-world hand resets.
+            && !self.bedrock_stencil.has_hand()
+            && !self.bedrock_stencil.has_world()
             && scaled.is_none()
             && self.hdr.is_none()
             // Frame generation draws the hand over the real and the made frame after the world.
@@ -11714,6 +11735,17 @@ impl Renderer {
                 self.draw_hand(&mut pass, hand_quads, world_quads + additive_quads);
             }
         }
+        // Bedrock packs' stencil pieces among the world's entities, over the world, with its
+        // depth (`bedrock_stencil`).
+        if self.bedrock_stencil.has_world() {
+            self.bedrock_stencil.draw_world(
+                &mut encoder,
+                world_view,
+                world_depth,
+                &self.entity_group,
+                &self.indices,
+            );
+        }
         if let Some((color, depth)) = &scaled
             && pack_post
             && let Some((dimension, Some(mut post))) = self.pack_post.take()
@@ -12228,6 +12260,15 @@ impl Renderer {
                 hdr.keep_world(encoder, timing.as_mut());
             }
         }
+        if overlay.hand_quads == 0 && self.bedrock_stencil.has_hand() {
+            self.bedrock_stencil.draw_hand_alone(
+                encoder,
+                view_target,
+                &self.depth,
+                &self.hand_group,
+                &self.indices,
+            );
+        }
         if overlay.hand_quads > 0 {
             let attachments = [Some(wgpu::RenderPassColorAttachment {
                 view: view_target,
@@ -12246,8 +12287,9 @@ impl Renderer {
                     view: &self.depth,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(0.0),
-                        // HDR output's hand marks test against it (below).
-                        store: if self.hdr.is_some() {
+                        // HDR output's hand marks test against it (below), and the hand's
+                        // Bedrock stencil pieces start from it.
+                        store: if self.hdr.is_some() || self.bedrock_stencil.has_hand() {
                             wgpu::StoreOp::Store
                         } else {
                             wgpu::StoreOp::Discard
@@ -12263,6 +12305,14 @@ impl Renderer {
             pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
             pass.draw_indexed(0..overlay.hand_quads * 6, overlay.first_hand_vertex, 0..1);
             drop(pass);
+            // The hand's Bedrock stencil pieces (a clock's face in its window), over the hand.
+            self.bedrock_stencil.draw_hand(
+                encoder,
+                view_target,
+                &self.depth,
+                &self.hand_group,
+                &self.indices,
+            );
             if let Some(hdr) = &self.hdr
                 && !no_pack_hdr_gain(layered, self.shader_pack_kind().is_some(), !frame.title)
             {

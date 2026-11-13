@@ -542,6 +542,10 @@ fn render_bedrock(
                 }
             }
             let (mut flags, bone_tint) = *group;
+            // With the stencil pass on (`bedrock_stencil`), the stand-ins below see no stencil:
+            // the piece draws whole and the pass applies its material's test and write.
+            let stencil_flags = flags;
+            flags = super::bedrock_stencil::emulated(flags);
             // The debug file's `layer_alpha` below 1 makes the layer a blended one, so the
             // alpha shows on an opaque material too.
             let fade = super::bedrock_debug::settings().layer_alpha_for(layer_no) < 1.0;
@@ -757,6 +761,7 @@ fn render_bedrock(
                 layer.layer.secondary,
                 layer.layer.color[3] < 1.0,
             );
+            super::bedrock_stencil::hand_over(&stencil_flags, out, start);
             if bedrock_debug() && gi == 0 {
                 let id = m.kind.id.clone();
                 let carried = m.extra.carried.is_some();
@@ -1112,6 +1117,11 @@ fn render_bedrock(
         let mut written: Vec<u8> = Vec::new();
         let mut glinted = false;
         for (layer_no, layer) in att.layers.iter().enumerate() {
+            // The debug file's `hide_item_parts`: this item's layers, bones or materials.
+            let hidden_parts = super::bedrock_debug::settings().item_parts(&att.item);
+            if hidden_parts.iter().any(|p| *p == format!("l{layer_no}")) {
+                continue;
+            }
             if super::bedrock_debug::settings().hides_attached(att.slot, layer_no) {
                 continue;
             }
@@ -1176,8 +1186,25 @@ fn render_bedrock(
                 for name in &layer.built.names {
                     // A hidden bone hides its own cubes only: its children follow their own rules
                     // (a pack hides every bone, then shows the ones it names under hidden parents).
+                    let part_hidden = !hidden_parts.is_empty() && {
+                        let lower = name.to_ascii_lowercase();
+                        let material = layer.layer.material_for(name).to_ascii_lowercase();
+                        let key = layer
+                            .layer
+                            .bone_materials
+                            .iter()
+                            .rev()
+                            .find(|(_, m)| m.eq_ignore_ascii_case(&material))
+                            .map(|(b, _)| b.to_ascii_lowercase());
+                        hidden_parts.iter().any(|p| {
+                            lower.contains(p.as_str())
+                                || material == *p
+                                || key.as_deref() == Some(p.as_str())
+                        })
+                    };
                     if !layer.layer.bone_visible(name)
                         || super::bedrock_debug::settings().hides_bone(name)
+                        || part_hidden
                     {
                         poses.skip_draw(name);
                     }
@@ -1203,7 +1230,9 @@ fn render_bedrock(
                         }
                     }
                 }
-                let mut flags = group.0;
+                // As on the mob's own layers: the stencil pass, when on, draws the stencil.
+                let stencil_flags = group.0;
+                let mut flags = super::bedrock_stencil::emulated(group.0);
                 if attached_alpha < 1.0 {
                     flags.blend = true;
                 }
@@ -1480,6 +1509,7 @@ fn render_bedrock(
                     layer.layer.secondary,
                     !behind && layer.layer.color[3] < 1.0,
                 );
+                super::bedrock_stencil::hand_over(&stencil_flags, out, start);
                 // Leather's faint texels (alpha 1) are the stitching and highlights the dye does not
                 // reach: drawn again over the dyed piece in the texture's own colours.
                 if flags.armor_dye

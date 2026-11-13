@@ -51,6 +51,81 @@ pub struct MaterialFlags {
     pub multitexture: bool,
     /// `armor_leather`: the worn piece's dye (`query.armor_color_slot`) multiplies the texture.
     pub armor_dye: bool,
+    /// `USE_COLOR_MASK` (`entity_alphatest_change_color`, `*_change_color`): the texture's alpha
+    /// is where the entity's change colour tints, not how see-through it is. Every texel that
+    /// is not clear is opaque (a ghost sheep's body at alpha 2).
+    pub color_mask: bool,
+    /// The material's stencil state exactly as the pack wrote it (`EnableStencilTest`), for a
+    /// renderer with a stencil buffer; the fields above are what the game draws without one.
+    pub stencil: Stencil,
+}
+
+/// A material's stencil test and write (`EnableStencilTest`, `StencilWrite`, `frontFace`,
+/// `stencilRef`, `stencilReadMask`, `stencilWriteMask`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Stencil {
+    /// `EnableStencilTest`: the material tests (and may write) the stencil.
+    pub enabled: bool,
+    /// `frontFace.stencilFunc`: when a pixel passes (`Always` when the pack names none).
+    pub func: StencilFunc,
+    /// `StencilWrite` with `frontFace.stencilPassOp` `Replace`: a pixel that passes takes the
+    /// reference.
+    pub replace: bool,
+    /// `stencilRef`.
+    pub reference: u8,
+    /// `stencilReadMask` (all bits when the pack names none).
+    pub read_mask: u8,
+    /// `stencilWriteMask` (all bits when the pack names none).
+    pub write_mask: u8,
+}
+
+impl Default for Stencil {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            func: StencilFunc::Always,
+            replace: false,
+            reference: 0,
+            read_mask: u8::MAX,
+            write_mask: u8::MAX,
+        }
+    }
+}
+
+impl Stencil {
+    /// Whether the stencil changes what is drawn or what later draws see.
+    pub fn matters(&self) -> bool {
+        self.enabled && (self.replace || self.func != StencilFunc::Always)
+    }
+}
+
+/// A stencil comparison (`stencilFunc`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum StencilFunc {
+    Always,
+    Never,
+    Less,
+    LessEqual,
+    Equal,
+    NotEqual,
+    Greater,
+    GreaterEqual,
+}
+
+impl StencilFunc {
+    fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "Always" => Self::Always,
+            "Never" => Self::Never,
+            "Less" => Self::Less,
+            "LessEqual" => Self::LessEqual,
+            "Equal" => Self::Equal,
+            "NotEqual" => Self::NotEqual,
+            "Greater" => Self::Greater,
+            "GreaterEqual" => Self::GreaterEqual,
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Debug, Default)]
@@ -66,6 +141,7 @@ struct Def {
     stencil_read_mask: Option<u8>,
     stencil_func: Option<String>,
     stencil_pass: Option<String>,
+    stencil_write_mask: Option<u8>,
 }
 
 /// The materials of a pack, by lower-case name.
@@ -129,6 +205,10 @@ impl Materials {
                     .pointer("/frontFace/stencilPassOp")
                     .and_then(Value::as_str)
                     .map(str::to_owned),
+                stencil_write_mask: body
+                    .get("stencilWriteMask")
+                    .and_then(Value::as_u64)
+                    .and_then(|r| u8::try_from(r).ok()),
             };
             self.defs.insert(name.to_ascii_lowercase(), def);
         }
@@ -197,6 +277,14 @@ impl Materials {
         f.no_depth_write = states.contains("DisableDepthWrite");
         f.no_depth_test = states.contains("DisableDepthTest");
         f.multitexture |= defines.contains("MASKED_MULTITEXTURE");
+        f.color_mask |= defines.contains("USE_COLOR_MASK");
+        if chain
+            .iter()
+            .any(|d| d.remove_defines.iter().any(|r| r == "USE_COLOR_MASK"))
+            && !defines.contains("USE_COLOR_MASK")
+        {
+            f.color_mask = false;
+        }
         if states.contains("EnableStencilTest") {
             let (mut func, mut pass, mut reference, mut read_mask) = (None, None, None, None);
             for d in chain.iter().rev() {
@@ -206,6 +294,15 @@ impl Materials {
                 read_mask = d.stencil_read_mask.or(read_mask);
             }
             f.stencil_mask = read_mask.unwrap_or(0);
+            let write_mask = chain.iter().rev().fold(None, |m, d| d.stencil_write_mask.or(m));
+            f.stencil = Stencil {
+                enabled: true,
+                func: func.and_then(StencilFunc::parse).unwrap_or(StencilFunc::Always),
+                replace: states.contains("StencilWrite") && pass == Some("Replace"),
+                reference: reference.unwrap_or(0),
+                read_mask: read_mask.unwrap_or(u8::MAX),
+                write_mask: write_mask.unwrap_or(u8::MAX),
+            };
             // Equal to 0 under a read mask that names bits other layers write: it draws only
             // where those layers did not (outside a body), which nothing here tracks per
             // pixel; drawn everywhere it would cover what it is kept away from.
@@ -286,11 +383,44 @@ fn vanilla(name: &str) -> MaterialFlags {
         // The villager's materials lay the profession over the biome texture.
         multitexture: has("multitexture") || has("villager_v2"),
         armor_dye: has("armor_leather"),
+        color_mask: has("change_color") || has("color_mask"),
+        stencil: Stencil::default(),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_change_color_material_reads_alpha_as_a_mask() {
+        let mut m = Materials::default();
+        m.add_file(&serde_json::json!({"materials": {
+            "ghost:entity_alphatest_change_color": {},
+            "tinted:entity": {"+defines": ["USE_COLOR_MASK"]},
+            "plain:entity_alphatest": {}
+        }}));
+        assert!(m.flags("ghost").color_mask && m.flags("ghost").alpha_test);
+        assert!(m.flags("tinted").color_mask);
+        assert!(!m.flags("plain").color_mask);
+    }
+
+    #[test]
+    fn stencil_state_is_kept_as_written() {
+        let mut m = Materials::default();
+        m.add_file(&serde_json::json!({"materials": {
+            "window:entity": {"+states": ["EnableStencilTest", "StencilWrite", "DisableColorWrite"],
+                "frontFace": {"stencilFunc": "Always", "stencilPassOp": "Replace"}, "stencilRef": 3},
+            "face:entity_alphatest": {"+states": ["EnableStencilTest"],
+                "frontFace": {"stencilFunc": "Equal"}, "stencilRef": 3, "stencilReadMask": 239},
+            "plain:entity": {}
+        }}));
+        let w = m.flags("window").stencil;
+        assert!(w.enabled && w.replace && w.func == super::StencilFunc::Always && w.reference == 3);
+        let f = m.flags("face").stencil;
+        assert!(f.enabled && !f.replace && f.func == super::StencilFunc::Equal);
+        assert_eq!((f.reference, f.read_mask, f.write_mask), (3, 239, 255));
+        assert!(w.matters() && f.matters() && !m.flags("plain").stencil.matters());
+    }
+
     #[test]
     fn stencil_materials_say_what_they_write_and_what_they_avoid() {
         let mut m = Materials::default();

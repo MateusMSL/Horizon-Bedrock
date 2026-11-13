@@ -78,6 +78,8 @@ impl Default for Held {
 /// A held or worn item's look: its layers, and the bone of the holder each of its bones follows.
 pub struct Attached {
     pub slot: &'static str,
+    /// The item (`minecraft:clock`, lower case), for the debug file's `hide_item_parts`.
+    pub item: String,
     pub layers: Vec<DrawLayer>,
     pub pose: Pose,
     /// The attachable's bone (lower case) to the holder's bone it follows.
@@ -511,11 +513,57 @@ pub fn is_avatar(id: &str) -> bool {
     matches!(id, "minecraft:player" | "minecraft:mannequin")
 }
 
-/// The frame of a held clock or compass, which a pack reads as `query.get_animation_frame`.
+static COMPASS_TARGET: std::sync::Mutex<Option<[f64; 2]>> = std::sync::Mutex::new(None);
+
+/// Where a spawn compass points (x and z of the world spawn), or None where it spins (another
+/// dimension): for `query.get_animation_frame` of a held compass.
+pub fn set_compass_target(target: Option<[f64; 2]>) {
+    *COMPASS_TARGET.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = target;
+}
+
+/// `CompassAngleState`: the needle's turn, 0..1 (0 points ahead of the holder), toward
+/// `target` for a holder at `pos` facing `yaw` degrees; spinning without one.
+fn compass_turn(pos: [f64; 2], yaw: f32, target: Option<[f64; 2]>) -> f64 {
+    let Some(t) = target else {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0.0, |d| d.as_secs_f64());
+        return (secs * 0.8).rem_euclid(1.0);
+    };
+    let facing = f64::from(yaw).rem_euclid(360.0) / 360.0;
+    let to_target = (t[1] - pos[1]).atan2(t[0] - pos[0]) / std::f64::consts::TAU;
+    (0.5 - (facing - 0.25 - to_target)).rem_euclid(1.0)
+}
+
+/// The compass texture's frame for a needle turn (the game's `compass` model: turn 0, ahead,
+/// is `compass_16`, each 1/32 turn the next frame).
+fn compass_frame(turn: f64) -> f32 {
+    (((turn * 32.0).round() as i64 + 16).rem_euclid(32)) as f32
+}
+
+/// The clock's frame at `day` ticks: the sun's angle (`DimensionType.timeOfDay`, 0 at noon) in 64
+/// steps, as the item's own texture turns. Noon is frame 0, the sun at the top of the dial;
+/// midnight is 32.
+fn clock_frame(day: i64) -> f32 {
+    let d = (day.rem_euclid(24000) as f64 / 24000.0 - 0.25).rem_euclid(1.0);
+    let eased = 0.5 - (d * std::f64::consts::PI).cos() / 2.0;
+    let angle = (d * 2.0 + eased) / 3.0;
+    ((angle * 64.0).floor() as i64).rem_euclid(64) as f32
+}
+
+/// The frame of a held clock or compass, which a pack reads as `query.get_animation_frame`:
+/// the clock's 64 frames by the time of day, the compass's 32 by the needle's turn (toward the
+/// world spawn; a recovery compass, whose death point the game does not keep here, spins).
 fn item_frame(m: &Mob, item: &str) -> f32 {
     let day = m.extra.surroundings.as_deref().map_or(0, |s| s.day_time);
+    let pos = [m.position.x, m.position.z];
     match item.trim_start_matches("minecraft:") {
-        "clock" => (((day + 6000).rem_euclid(24000)) as f32 / 24000.0 * 64.0).floor(),
+        "clock" => clock_frame(day),
+        "compass" => {
+            let target = *COMPASS_TARGET.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            compass_frame(compass_turn(pos, m.yaw, target))
+        }
+        "recovery_compass" => compass_frame(compass_turn(pos, m.yaw, None)),
         _ => 0.0,
     }
 }
@@ -657,7 +705,7 @@ fn common_query(name: &str, args: &[Value]) -> Value {
 
 /// The engine's build, logged once with `HORIZON_BEDROCK_DEBUG`: tells whether the game runs the
 /// files the last overlay carried.
-pub const ENGINE_BUILD: &str = "v212-fp-sneak-eye";
+pub const ENGINE_BUILD: &str = "v221-clock-frame-noon";
 
 /// `HORIZON_BEDROCK_DUMP=skeleton,creeper`: the kinds (by part of the id) whose state is logged
 /// once a second while within twelve blocks of the camera.
@@ -2841,6 +2889,7 @@ impl BedrockMobs {
             }
             out.push(Attached {
                 slot,
+                item: item_lc.clone(),
                 layers,
                 pose,
                 binds,
@@ -3308,6 +3357,25 @@ pub fn sprite_quads(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_clock_shows_the_sun_at_noon_and_the_moon_at_midnight() {
+        assert_eq!(clock_frame(6000), 0.0);
+        assert_eq!(clock_frame(18000), 32.0);
+        assert_eq!(clock_frame(30000), 0.0);
+    }
+
+    #[test]
+    fn a_compass_points_ahead_when_the_target_is_in_front() {
+        // Yaw 0 faces +z (south): a target due south is ahead, turn 0, frame 16.
+        let ahead = super::compass_turn([0.0, 0.0], 0.0, Some([0.0, 10.0]));
+        assert!(ahead.abs() < 1e-9 || (ahead - 1.0).abs() < 1e-9, "{ahead}");
+        assert_eq!(super::compass_frame(ahead), 16.0);
+        // Facing east (yaw -90), the same target is to the right: a quarter turn.
+        let right = super::compass_turn([0.0, 0.0], -90.0, Some([0.0, 10.0]));
+        assert!((right - 0.25).abs() < 1e-9, "{right}");
+        assert_eq!(super::compass_frame(right), 24.0);
+    }
+
     #[test]
     fn java_items_take_their_bedrock_names() {
         assert_eq!(super::bedrock_item_name("minecraft:magma_block"), "magma");

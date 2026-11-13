@@ -30,6 +30,8 @@ pub struct Quad {
 pub struct FaceUv {
     pub uv: [f32; 2],
     pub size: [f32; 2],
+    /// `uv_rotation` (format 1.21.0): the texture turned on the face by 90° steps (0..3).
+    pub turns: u8,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -210,6 +212,7 @@ impl Geometry {
                         Some(FaceUv {
                             uv: [u, v],
                             size: [du, dv],
+                            turns: 0,
                         })
                     };
                     match solid {
@@ -311,6 +314,8 @@ fn parse_uv(v: Option<&Value>) -> Option<Uv> {
                 Some(FaceUv {
                     uv: f32s::<2>(f.get("uv"))?,
                     size: f32s::<2>(f.get("uv_size")).unwrap_or([0.0, 0.0]),
+                    turns: f32_of(f.get("uv_rotation"))
+                        .map_or(0, |r| ((r / 90.0).round() as i32).rem_euclid(4) as u8),
                 })
             };
             Some(Uv::Faces([
@@ -628,18 +633,25 @@ impl Cube {
             Uv::Faces(faces) => faces
                 .map(|f| f.map(|f| [f.uv[0], f.uv[1], f.uv[0] + f.size[0], f.uv[1] + f.size[1]])),
         };
+        let turns: [u8; 6] = match &self.uv {
+            Uv::Box(_) => [0; 6],
+            Uv::Faces(faces) => faces.map(|f| f.map_or(0, |f| f.turns)),
+        };
         let corner = |i: usize| -> [f32; 3] {
             std::array::from_fn(|a| if CORNER[i][a] { hi[a] } else { lo[a] })
         };
         let mut out = Vec::with_capacity(6);
-        for ((corners, normal), rect) in FACES.iter().zip(rects) {
+        for (((corners, normal), rect), turn) in FACES.iter().zip(rects).zip(turns) {
             let Some([u1, v1, u2, v2]) = rect else {
                 continue;
             };
             if u1 == u2 && v1 == v2 {
                 continue;
             }
-            let uv = [(u2, v1), (u1, v1), (u1, v2), (u2, v2)];
+            let flat = [(u2, v1), (u1, v1), (u1, v2), (u2, v2)];
+            // `uv_rotation`: each corner takes the texture corner `turn` steps on (Blockbench's
+            // face rotation, clockwise).
+            let uv: [(f32, f32); 4] = std::array::from_fn(|k| flat[(k + usize::from(turn)) % 4]);
             let mut vertices: [[f32; 5]; 4] = std::array::from_fn(|k| {
                 let [x, y, z] = corner(corners[k]);
                 [x, y, z, uv[k].0 / texture[0], uv[k].1 / texture[1]]
@@ -919,6 +931,48 @@ mod tests {
         assert_eq!(flat.bones[0].cubes.len(), 1);
         assert_eq!(flat.bones[0].cubes[0].size[0], 16.0);
         assert_eq!(flat.bones[0].cubes[0].size[2], 8.0);
+    }
+
+    #[test]
+    fn uv_rotation_turns_the_face_texture_by_quarter_turns() {
+        let face = |turns: u8| -> Vec<(f32, f32)> {
+            let up = FaceUv { uv: [0.0, 0.0], size: [4.0, 4.0], turns };
+            let mut faces: [Option<FaceUv>; 6] = [None; 6];
+            faces[4] = Some(up);
+            let cube = Cube {
+                origin: [0.0; 3],
+                size: [4.0, 0.0, 4.0],
+                uv: Uv::Faces(faces),
+                inflate: None,
+                mirror: None,
+                pivot: None,
+                rotation: None,
+            };
+            let bone = Bone {
+                name: "b".into(),
+                parent: None,
+                pivot: [0.0; 3],
+                rotation: [0.0; 3],
+                mirror: false,
+                inflate: 0.0,
+                never_render: false,
+                binding: None,
+                cubes: Vec::new(),
+                locators: Vec::new(),
+                texture_meshes: Vec::new(),
+            };
+            let quads = cube.quads([0.0; 3], &bone, [16.0, 16.0]);
+            assert_eq!(quads.len(), 1);
+            quads[0].vertices.iter().map(|v| (v[3], v[4])).collect()
+        };
+        let still = face(0);
+        let turned = face(1);
+        assert_ne!(still, turned);
+        // A quarter turn hands each corner the next corner's texel; four come back round.
+        for k in 0..4 {
+            assert_eq!(turned[k], still[(k + 1) % 4]);
+        }
+        assert_eq!(face(2)[0], still[2]);
     }
 
     #[test]

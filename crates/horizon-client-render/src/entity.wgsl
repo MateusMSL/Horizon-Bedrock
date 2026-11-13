@@ -295,6 +295,11 @@ fn entity_written_color(in: Out, color: vec4<f32>) -> vec4<f32> {
     }
     return color;
 }
+// A Bedrock material without `ALPHA_TEST` in the stencil pass: every texel draws, a clear one
+// too (a mask that only fills the stencil).
+@fragment fn fs_entity_uncut(in: Out, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    return entity_written_color(in, entity_color_cut(in, front, -1.0));
+}
 @fragment fn fs_entity_unmarked(in: Out, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     return entity_color(in, front);
 }

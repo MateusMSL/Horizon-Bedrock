@@ -29,9 +29,33 @@ fn material_groups(
     }
     // The translucent looks go last, as the game sorts them after the opaque ones: a shell
     // drawn before the core inside it would cover the core's depth and hide it.
+    if super::bedrock_stencil::on() {
+        // With the stencil pass (`bedrock_stencil`), in the render controller's material order,
+        // as Bedrock draws them (`"*"` first, then each named rule): Actions & Stuff's clock is
+        // its case (writes 0), its window (writes 3) and its face (where 3 is). A mask moved
+        // before the case had its 3 written over by the case's 0, and the face never showed.
+        let rank = |g: &MatGroup| {
+            names
+                .iter()
+                .filter(|n| bone_group(layer, materials, n) == *g)
+                .map(|n| {
+                    let m = layer.material_for(n);
+                    layer
+                        .bone_materials
+                        .iter()
+                        .position(|(_, x)| x == m)
+                        .unwrap_or(0)
+                })
+                .min()
+                .unwrap_or(0)
+        };
+        groups.sort_by_cached_key(|g| (g.0.blend, rank(g)));
+        return groups;
+    }
     // A stencil mask (writes a value, no colour) goes first, whatever its bone's place: the
     // pieces that test for its value draw only once it is written. The test pack's clock (face
-    // bone before its window) and Actions & Stuff's clock showed only the frame.
+    // bone before its window) and Actions & Stuff's clock showed only the frame. (The CPU
+    // stand-in only: the stencil pass keeps the pack's order.)
     groups.sort_by_key(|g| (!(g.0.no_color && g.0.stencil_write != 0), g.0.blend));
     groups
 }
