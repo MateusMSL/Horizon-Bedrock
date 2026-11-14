@@ -84,6 +84,10 @@ pub struct Attached {
     pub pose: Pose,
     /// The attachable's bone (lower case) to the holder's bone it follows.
     pub binds: HashMap<String, String>,
+    /// What its animations set off this frame (an amethyst shard's sparkle, an ender pearl's
+    /// swirl, a sound), each with where on the holder it starts (blocks from the feet, in the
+    /// holder model's axes).
+    pub emits: Vec<(Emit, [f64; 3])>,
 }
 
 pub struct DrawLayer {
@@ -133,15 +137,44 @@ pub struct Follow {
     pub offset: [f64; 3],
 }
 
-/// A model-space offset of a mob standing at `pos` and turned `yaw` degrees, in the world.
+/// A model-space offset of a mob standing at `pos` and turned `yaw` degrees, in the world: as the
+/// model is drawn (`LivingEntityRenderer`: `rotateY(180 - yaw)`, `scale(-1, -1, 1)`, the Bedrock
+/// point in Java's frame), so the front (-z) is ahead and the right side (-x) is on the right.
+/// The turn and the mirror together are their own inverse.
 fn attach_point(pos: [f64; 3], offset: [f64; 3], yaw: f32) -> [f64; 3] {
+    let [x, y, z] = model_to_world(offset, yaw);
+    [pos[0] + x, pos[1] + y, pos[2] + z]
+}
+
+/// [`attach_point`] from the feet, without the position.
+fn model_to_world(offset: [f64; 3], yaw: f32) -> [f64; 3] {
     let yaw = f64::from(yaw).to_radians();
     let [x, y, z] = offset;
     [
-        pos[0] + x * yaw.cos() + z * yaw.sin(),
-        pos[1] + y,
-        pos[2] - x * yaw.sin() + z * yaw.cos(),
+        x * yaw.cos() + z * yaw.sin(),
+        y,
+        x * yaw.sin() - z * yaw.cos(),
     ]
+}
+
+/// An offset on the first-person view model (`render::first_person_item`) carried to where it
+/// shows in the world, as an offset from the player's feet in the body's axes (what [`Follow`]
+/// keeps). The view model stands with its feet `eye` below the camera, turned half round from
+/// the body (+z behind) and tilted with the look's pitch about the eye; a particle set off by the
+/// item in hand starts there, before the camera, as Bedrock shows it.
+fn first_person_offset(m: &Mob, offset: [f64; 3]) -> [f64; 3] {
+    let eye = f64::from(
+        super::render::first_person_eye().unwrap_or(m.kind.eye_height as f32 * m.model_scale()),
+    );
+    let (_, pitch) = camera_rotation();
+    let yaw = m.body_yaw;
+    let [x, y, z] = offset;
+    let q = attach_point([0.0, -eye, 0.0], [-x, y, -z], yaw);
+    let level = glam::DQuat::from_rotation_y(std::f64::consts::PI - f64::from(yaw).to_radians());
+    let tilt = level * glam::DQuat::from_rotation_x(-f64::from(pitch).to_radians()) * level.inverse();
+    let world = tilt * glam::DVec3::from_array(q) + glam::DVec3::new(0.0, eye, 0.0);
+    // Back into the body's axes (the turn and mirror undo themselves).
+    model_to_world(world.to_array(), yaw)
 }
 
 struct MobState {
@@ -155,6 +188,7 @@ struct MobState {
     /// The mob as the last frame saw it: what an effect that starts to follow it asks of it
     /// before the next frame (a trail's first segment would run from the world's origin).
     live: Option<Live>,
+    water: WaterEntry,
 }
 
 /// A held item's running animations.
@@ -205,18 +239,46 @@ struct Live {
     sneaking: bool,
     gliding: bool,
     from_camera: f32,
+    /// Blocks a second up (`q.vertical_speed`): a splash reads how fast the mob hit the water.
+    vertical_speed: f32,
 }
 
-/// The level an effect rides in: it knows the size of the mob that carries it.
-struct Carrier([f32; 2]);
+/// An effect's sprites for one frame.
+pub struct Drawn {
+    /// The atlas name of its texture.
+    pub texture: Arc<str>,
+    pub sprites: Vec<Sprite>,
+    /// Takes the light where it is (`particle_appearance_lighting`).
+    pub lit: bool,
+    /// Its material adds its colour to what is behind (`particles_add`), not covers it.
+    pub additive: bool,
+}
 
-impl World for Carrier {
+/// The blocks around the effects, as the game knows them: what a particle runs into
+/// (`particle_motion_collision`) and the block it is in (`particle_expire_if_in_blocks`).
+pub trait Ground {
+    /// Whether the point is inside a block that stops a particle.
+    fn solid(&self, p: [f64; 3]) -> bool;
+    /// The Bedrock name of the block at the point (`minecraft:water` for water).
+    fn block_id(&self, p: [f64; 3]) -> Option<String>;
+}
+
+/// The level an effect rides in: the size of the mob that carries it and the blocks around.
+struct Carrier<'a>([f32; 2], Option<&'a dyn Ground>);
+
+impl World for Carrier<'_> {
     fn entity_size(&self) -> [f32; 2] {
         if self.0[0] > 0.0 && self.0[1] > 0.0 {
             self.0
         } else {
             [0.6, 1.8]
         }
+    }
+    fn solid(&self, p: [f32; 3]) -> bool {
+        self.1.is_some_and(|g| g.solid(p.map(f64::from)))
+    }
+    fn block_id(&self, p: [f32; 3]) -> Option<String> {
+        self.1.and_then(|g| g.block_id(p.map(f64::from)))
     }
 }
 
@@ -229,6 +291,24 @@ fn builtin_scale(id: &str, baby: bool) -> f32 {
         "minecraft:rabbit" => 0.6,
         _ => 1.0,
     }
+}
+
+/// `q.vertical_speed`: blocks a second up. Gravity keeps pulling a mob on the ground (-0.0784 a
+/// tick, -1.57 a second) with nothing moving it: that is not a fall to the packs. A passenger
+/// rides, it does not fall.
+fn vertical_speed(m: &Mob) -> f32 {
+    if m.extra.passenger {
+        return 0.0;
+    }
+    let (v, d) = (m.velocity.y, m.position.y - m.previous.y);
+    let speed = if m.on_ground && v < 0.0 {
+        d
+    } else if v.abs() >= d.abs() {
+        v
+    } else {
+        d
+    };
+    speed as f32 * 20.0
 }
 
 /// A mob's box as `[width, height]`.
@@ -263,6 +343,7 @@ fn live_query(m: &Live, name: &str, args: &[Value]) -> Option<Value> {
         "is_sneaking" | "is_crouching" => Value::bool(m.sneaking),
         "is_gliding" => Value::bool(m.gliding),
         "distance_from_camera" => Value::Num(m.from_camera),
+        "vertical_speed" => Value::Num(m.vertical_speed),
         _ => return None,
     })
 }
@@ -705,7 +786,7 @@ fn common_query(name: &str, args: &[Value]) -> Value {
 
 /// The engine's build, logged once with `HORIZON_BEDROCK_DEBUG`: tells whether the game runs the
 /// files the last overlay carried.
-pub const ENGINE_BUILD: &str = "v222-held-scale-not-attachables";
+pub const ENGINE_BUILD: &str = "v233-start-log";
 
 /// `HORIZON_BEDROCK_DUMP=skeleton,creeper`: the kinds (by part of the id) whose state is logged
 /// once a second while within twelve blocks of the camera.
@@ -917,6 +998,40 @@ pub struct MobHost<'a> {
     pub dt: f32,
     /// The mob's position minus the camera's, in blocks.
     pub from_camera: [f32; 3],
+    /// `q.vertical_speed` in the tick the mob went into water ([`WaterEntry`]).
+    pub entry_speed: Option<f32>,
+}
+
+/// When a mob went into water and how fast. Bedrock knows a mob is in water in the tick that
+/// takes it there, so `q.vertical_speed` then is the speed it hit the water with (the A&S
+/// splash grows with it). The Java game finds the water at the start of the next tick, after
+/// the fall has stopped on the bottom of a shallow pool: the speed of the tick before stands in.
+#[derive(Default)]
+struct WaterEntry {
+    /// The mob's age at the last look.
+    tick: u32,
+    in_water: bool,
+    /// `q.vertical_speed` at the last look.
+    speed: f32,
+    /// The tick it went into water, and the speed it went in with.
+    entered: Option<(u32, f32)>,
+}
+
+impl WaterEntry {
+    /// Looks at a mob once a tick (its `age`, whether it is in water, its `q.vertical_speed`);
+    /// the speed it went into water with, during that tick.
+    fn look(&mut self, age: u32, in_water: bool, speed: f32) -> Option<f32> {
+        if age != self.tick {
+            if in_water && !self.in_water {
+                let hit = if self.speed.abs() > speed.abs() { self.speed } else { speed };
+                self.entered = Some((age, hit));
+            }
+            self.tick = age;
+            self.in_water = in_water;
+            self.speed = speed;
+        }
+        self.entered.filter(|&(t, _)| t == age).map(|(_, v)| v)
+    }
 }
 
 /// With `HORIZON_BEDROCK_DEBUG`, logs `what` the first `times` times it comes.
@@ -1186,20 +1301,7 @@ impl Host for MobHost<'_> {
                 };
                 Value::Num(speed as f32 * 20.0)
             }
-            "vertical_speed" if m.extra.passenger => Value::Num(0.0),
-            "vertical_speed" => {
-                let (v, d) = (m.velocity.y, m.position.y - m.previous.y);
-                // Gravity keeps pulling a mob on the ground (-0.0784 a tick, -1.57 a second) with
-                // nothing moving it: that is not a fall to the packs.
-                let speed = if m.on_ground && v < 0.0 {
-                    d
-                } else if v.abs() >= d.abs() {
-                    v
-                } else {
-                    d
-                };
-                Value::Num(speed as f32 * 20.0)
-            }
+            "vertical_speed" => Value::Num(self.entry_speed.unwrap_or_else(|| vertical_speed(m))),
             "body_y_rotation" => Value::Num(wrap_degrees(
                 m.previous_body_yaw + wrap_degrees(m.body_yaw - m.previous_body_yaw) * a,
             )),
@@ -2250,6 +2352,21 @@ impl BedrockMobs {
         self.bundle.is_empty()
     }
 
+    /// Hands the game's own particles that this pack draws itself (its
+    /// `minecraft:rain_splash_particle`) to it: once for the pack in use, every frame cheap.
+    pub fn take_game_particles(&self) {
+        let key = std::ptr::from_ref(self) as usize;
+        if let Some(ids) = horizon_client_render::bedrock_particles::install_for(key, |id| {
+            self.bundle.effects.get(id).is_some_and(|fx| fx.one_per_request())
+        }) {
+            log::info!(
+                "bedrock: {} game particles drawn by the pack: {}",
+                ids.len(),
+                ids.join(", ")
+            );
+        }
+    }
+
     pub fn bundle(&self) -> &Bundle {
         &self.bundle
     }
@@ -2355,6 +2472,7 @@ impl BedrockMobs {
             seen: Instant::now(),
             dumped: f32::NEG_INFINITY,
             live: None,
+            water: WaterEntry::default(),
         });
         let since = st.seen.elapsed().as_secs_f32();
         warm |= !gui && m.extra.first_person && since > 0.3;
@@ -2375,11 +2493,13 @@ impl BedrockMobs {
             render_controllers: &self.bundle.render_controllers,
             geometries: Some(&self.bundle.geometries),
         };
+        let entry_speed = if gui { None } else { st.water.look(m.age, m.fluids.in_water, vertical_speed(m)) };
         let mut host = MobHost {
             m,
             alpha,
             dt,
             from_camera,
+            entry_speed,
         };
         if warm {
             let mut host = MobHost {
@@ -2387,6 +2507,7 @@ impl BedrockMobs {
                 alpha,
                 dt: WARM_STEP,
                 from_camera,
+                entry_speed: None,
             };
             for _ in 0..WARM_STEPS {
                 st.instance.update(def, &assets, &mut host, WARM_STEP);
@@ -2519,88 +2640,24 @@ impl BedrockMobs {
             local_player: m.extra.local_player,
             sneaking: m.extra.crouching || m.extra.sneaking,
             gliding: m.extra.fall_flying,
+            vertical_speed: entry_speed.unwrap_or_else(|| vertical_speed(m)),
             from_camera: (cx * cx + cy * cy + cz * cz).sqrt(),
         };
         let pos = [m.position.x, m.position.y, m.position.z];
         let mut queue = lock(&self.queue);
         for e in frame.emits {
-            match e {
-                Emit::Sound(event) => {
-                    let event = if event.contains(':') {
-                        event.to_ascii_lowercase()
-                    } else {
-                        format!("bedrock:{}", event.to_ascii_lowercase())
-                    };
-                    queue.push(Emitted::Sound { event, at: pos });
-                }
-                Emit::Hold {
-                    effect,
-                    locator,
-                    pre,
-                } => {
-                    if !m.alive() {
-                        continue;
-                    }
-                    let offset = locator
-                        .as_deref()
-                        .and_then(|l| {
-                            layers.iter().find_map(|d| {
-                                self.bundle.geometries.get(&d.layer.geometry)?.locator(l)
-                            })
+            let offset = match &e {
+                Emit::Particle { locator, .. } | Emit::Hold { locator, .. } => locator
+                    .as_deref()
+                    .and_then(|l| {
+                        layers.iter().find_map(|d| {
+                            self.bundle.geometries.get(&d.layer.geometry)?.locator(l)
                         })
-                        .map_or([0.0; 3], |l| l.1.offset.map(|v| f64::from(v) / 16.0));
-                    self.hold_particle(
-                        &effect,
-                        attach_point(pos, offset, m.body_yaw),
-                        m.body_yaw,
-                        m.is_baby(),
-                        m.custom_name.clone(),
-                        box_size(m),
-                        Some(Follow {
-                            mob: m.id,
-                            locator,
-                            offset,
-                        }),
-                        Init {
-                            script: pre,
-                            seed: Default::default(),
-                        },
-                        // The mob's states are locked here: its live data comes from this frame.
-                        Some(live.clone()),
-                    );
-                }
-                Emit::Particle {
-                    effect,
-                    locator,
-                    pre,
-                } => {
-                    let offset = locator
-                        .as_deref()
-                        .and_then(|l| {
-                            layers.iter().find_map(|d| {
-                                self.bundle.geometries.get(&d.layer.geometry)?.locator(l)
-                            })
-                        })
-                        .map_or([0.0; 3], |l| l.1.offset.map(|v| f64::from(v) / 16.0));
-                    queue.push(Emitted::Particle {
-                        effect,
-                        at: attach_point(pos, offset, m.body_yaw),
-                        yaw: m.body_yaw,
-                        baby: m.is_baby(),
-                        name: m.custom_name.clone(),
-                        size: box_size(m),
-                        follow: Some(Follow {
-                            mob: m.id,
-                            locator,
-                            offset,
-                        }),
-                        init: Init {
-                            script: pre,
-                            seed: Default::default(),
-                        },
-                    });
-                }
-            }
+                    })
+                    .map_or([0.0; 3], |l| l.1.offset.map(|v| f64::from(v) / 16.0)),
+                Emit::Sound(_) => [0.0; 3],
+            };
+            self.send_emit(&mut queue, m, &live, e, offset, None);
         }
         let scale = frame.scale * builtin_scale(&m.kind.id, m.is_baby());
         let mut held = Held {
@@ -2613,6 +2670,11 @@ impl BedrockMobs {
         self.parent_setups(m, alpha, dt, from_camera, &mut st.instance.vars);
         let mut attached =
             self.attachments(m, alpha, dt, from_camera, &st.instance.vars, (&layers, &frame.pose));
+        for a in &mut attached {
+            for (e, offset) in std::mem::take(&mut a.emits) {
+                self.send_emit(&mut queue, m, &live, e, offset, Some(a.slot));
+            }
+        }
         let dressed = |slot: &str| attached.iter().any(|a| a.slot == slot && !a.layers.is_empty());
         held.main_replaced = dressed("main_hand");
         held.off_replaced = dressed("off_hand");
@@ -2666,6 +2728,91 @@ impl BedrockMobs {
             }
         }
         Some(out)
+    }
+
+    /// Plays or starts what a frame set off: a sound at the mob, a particle effect at `offset`
+    /// (blocks from the feet, in the model's axes) that then follows the mob. `slot` names the
+    /// held or worn item that set it off, so its effects and the mob's own stay apart.
+    fn send_emit(
+        &self,
+        queue: &mut Vec<Emitted>,
+        m: &Mob,
+        live: &Live,
+        e: Emit,
+        offset: [f64; 3],
+        slot: Option<&str>,
+    ) {
+        let pos = [m.position.x, m.position.y, m.position.z];
+        let offset = if m.extra.first_person {
+            first_person_offset(m, offset)
+        } else {
+            offset
+        };
+        let key = |locator: Option<String>| match slot {
+            Some(slot) => Some(format!("{slot}:{}", locator.unwrap_or_default())),
+            None => locator,
+        };
+        match e {
+            Emit::Sound(event) => {
+                let event = if event.contains(':') {
+                    event.to_ascii_lowercase()
+                } else {
+                    format!("bedrock:{}", event.to_ascii_lowercase())
+                };
+                queue.push(Emitted::Sound { event, at: pos });
+            }
+            Emit::Hold {
+                effect,
+                locator,
+                pre,
+            } => {
+                if !m.alive() {
+                    return;
+                }
+                self.hold_particle(
+                    &effect,
+                    attach_point(pos, offset, m.body_yaw),
+                    m.body_yaw,
+                    m.is_baby(),
+                    m.custom_name.clone(),
+                    box_size(m),
+                    Some(Follow {
+                        mob: m.id,
+                        locator: key(locator),
+                        offset,
+                    }),
+                    Init {
+                        script: pre,
+                        seed: Default::default(),
+                    },
+                    // The mob's states are locked here: its live data comes from this frame.
+                    Some(live.clone()),
+                );
+            }
+            Emit::Particle {
+                effect,
+                locator,
+                pre,
+            } => {
+                queue.push(Emitted::Particle {
+                    effect,
+                    at: attach_point(pos, offset, m.body_yaw),
+                    yaw: m.body_yaw,
+                    baby: m.is_baby(),
+                    name: m.custom_name.clone(),
+                    size: box_size(m),
+                    follow: Some(Follow {
+                        mob: m.id,
+                        locator: key(locator),
+                        offset,
+                    }),
+                    init: Init {
+                        script: pre,
+                        seed: Default::default(),
+                    },
+                });
+            }
+        }
     }
 
     /// The look of what `m` holds and wears that the pack dresses, one entry per slot.
@@ -2725,6 +2872,7 @@ impl BedrockMobs {
                     alpha,
                     dt,
                     from_camera,
+                    entry_speed: None,
                 },
                 slot,
                 owner,
@@ -2781,6 +2929,7 @@ impl BedrockMobs {
                         alpha,
                         dt: WARM_STEP,
                         from_camera,
+                        entry_speed: None,
                     },
                     slot,
                     owner,
@@ -2789,7 +2938,33 @@ impl BedrockMobs {
                     st.instance.update(def, &assets, &mut warming, WARM_STEP);
                 }
             }
-            let frame = st.instance.update(def, &assets, &mut host, dt);
+            let mut frame = st.instance.update(def, &assets, &mut host, dt);
+            // Where each effect starts: its locator in the attachable's model, carried to the
+            // holder's bone the item is bound to (Bedrock draws the attachable as part of the
+            // holder's skeleton; its y 24 sits on the bone); the bone itself without a locator.
+            let place = st.instance.place;
+            let emits: Vec<(Emit, [f64; 3])> = std::mem::take(&mut frame.emits)
+                .into_iter()
+                .map(|e| {
+                    let locator = match &e {
+                        Emit::Particle { locator, .. } | Emit::Hold { locator, .. } => locator.clone(),
+                        Emit::Sound(_) => None,
+                    };
+                    let local = locator
+                        .as_deref()
+                        .and_then(|l| {
+                            frame.layers.iter().find_map(|layer| {
+                                self.bundle.geometries.get(&layer.geometry)?.locator(l)
+                            })
+                        })
+                        .map_or([0.0, 24.0, 0.0], |(_, l)| l.offset);
+                    let p = [local[0], local[1] - 24.0, local[2]];
+                    let at = place.map_or([0.0, 18.0, 0.0], |t| {
+                        std::array::from_fn(|r| t[r][0] * p[0] + t[r][1] * p[1] + t[r][2] * p[2] + t[r][3])
+                    });
+                    (e, at.map(|v| f64::from(v) / 16.0))
+                })
+                .collect();
             let layers: Vec<DrawLayer> = frame
                 .layers
                 .into_iter()
@@ -2893,6 +3068,7 @@ impl BedrockMobs {
                 layers,
                 pose,
                 binds,
+                emits,
             });
         }
         out
@@ -2961,6 +3137,7 @@ impl BedrockMobs {
                     alpha,
                     dt,
                     from_camera,
+                    entry_speed: None,
                 },
                 slot,
                 owner: &owner,
@@ -3099,14 +3276,31 @@ impl BedrockMobs {
                 ),
                 4,
             );
+            // What the effect reads of its mob when it starts (a splash reads how fast it fell);
+            // a state that goes on only keeps it (held), it does not start it again.
+            if !held
+                && let Some(l) = &live
+            {
+                log_first(
+                    &format!(
+                        "particle {id} live: vertical_speed={:.1} delta_y={:.2}",
+                        l.vertical_speed, l.delta[1]
+                    ),
+                    3,
+                );
+            }
         }
         // One effect at a time per mob and locator: an animation that sets it off every loop
         // does not pile them up.
+        // The same effect on the same mob and locator, wherever the locator is now (a held
+        // item's moves with the hand every frame): that one follows it.
         if let Some(f) = &follow
             && let Some(a) = lock(&self.emitters).iter_mut().find(|a| {
                 !a.emitter.finished()
                     && (!held || a.emitter.emitting())
-                    && a.follow.as_ref() == Some(f)
+                    && a.follow
+                        .as_ref()
+                        .is_some_and(|g| g.mob == f.mob && g.locator == f.locator)
                     && a.script == init.script
                     && std::ptr::eq(a.emitter.effect(), &**fx)
             })
@@ -3114,6 +3308,7 @@ impl BedrockMobs {
             // Asked for again: the animation that sets it off is still running.
             a.requested = Instant::now();
             a.held |= held;
+            a.follow = Some(f.clone());
             return;
         }
         let mut e = Emitter::new(
@@ -3126,6 +3321,11 @@ impl BedrockMobs {
         }
         e.set_transform([at[0] as f32, at[1] as f32, at[2] as f32], yaw);
         e.set_init(init.script.as_deref(), init.seed);
+        // A manual effect set off once (an animation's event, the game's own particle) makes one
+        // particle; held by a state, it makes none, as in Bedrock.
+        if !held {
+            e.request_manual(1);
+        }
         let mut emitters = lock(&self.emitters);
         // A runaway pack cannot fill memory.
         if emitters.len() < 512 {
@@ -3148,7 +3348,16 @@ impl BedrockMobs {
 
     /// Advances the running effects to now, handing back the sprites to draw and the effects and
     /// sounds they set off in turn.
-    pub fn step_particles(&self) -> (Vec<(Arc<str>, Vec<Sprite>, bool)>, Vec<Emitted>) {
+    pub fn step_particles(&self) -> (Vec<Drawn>, Vec<Emitted>) {
+        self.step_particles_on(None)
+    }
+
+    /// [`Self::step_particles`] with the blocks around: particles collide with them and know
+    /// the block they are in (a rain drop's splash lands on the ground).
+    pub fn step_particles_on(
+        &self,
+        ground: Option<&dyn Ground>,
+    ) -> (Vec<Drawn>, Vec<Emitted>) {
         let now = Instant::now();
         let dt = {
             let mut clock = lock(&self.clock);
@@ -3164,7 +3373,7 @@ impl BedrockMobs {
         for a in emitters.iter_mut() {
             a.host.age += dt * 20.0;
             let mut out = Vec::new();
-            let carrier = Carrier(a.host.size);
+            let carrier = Carrier(a.host.size, ground);
             a.emitter.update(dt, &mut a.host, &carrier, &mut out);
             for s in out {
                 match s {
@@ -3194,7 +3403,12 @@ impl BedrockMobs {
             let sprites = a.emitter.sprites(&mut a.host);
             if !sprites.is_empty() {
                 let fx = a.emitter.effect();
-                drawn.push((Arc::<str>::from(atlas_name(&fx.texture)), sprites, fx.lit));
+                drawn.push(Drawn {
+                    texture: Arc::<str>::from(atlas_name(&fx.texture)),
+                    sprites,
+                    lit: fx.lit,
+                    additive: fx.material.to_ascii_lowercase().contains("particles_add"),
+                });
             }
         }
         if super::bedrock_debug::debug() {
@@ -3208,8 +3422,8 @@ impl BedrockMobs {
                     e.0 += 1;
                     e.1 += a.emitter.alive();
                 }
-                for (tex, sprites, _) in &drawn {
-                    per.entry(tex.to_string()).or_default().2 += sprites.len();
+                for d in &drawn {
+                    per.entry(d.texture.to_string()).or_default().2 += d.sprites.len();
                 }
                 let mut rows: Vec<_> = per.into_iter().collect();
                 rows.sort();
@@ -3268,6 +3482,46 @@ fn clip_span(a: f32, b: f32) -> Option<(f32, f32)> {
     (hi > lo).then_some((lo, hi))
 }
 
+/// The width and height directions of a sprite that does not face the camera squarely
+/// (`facing_camera_mode`), `center` being where it is from the camera. None for one that does.
+fn sprite_axes(s: &Sprite, center: glam::Vec3) -> Option<(glam::Vec3, glam::Vec3)> {
+    use horizon_bedrock::particle::Facing;
+    match s.facing {
+        // Height along the direction, width across it and across the line of sight.
+        Facing::LookAtDirection => {
+            let up = glam::Vec3::from(s.velocity).try_normalize()?;
+            let right = up.cross(-center).try_normalize()?;
+            Some((right, up))
+        }
+        // Upright, turned about the vertical to the camera.
+        Facing::LookAtY | Facing::RotateY => {
+            let up = glam::Vec3::Y;
+            let right = up.cross(-center).try_normalize()?;
+            Some((right, up))
+        }
+        // One axis of the quad along the direction, the quad turned as close to up as it can
+        // (`direction_x/y/z`), fixed in the world: `direction_x` lays its width along it and
+        // stands up, `direction_z` faces along it and stands up, `direction_y` lays its height
+        // along it and lies flat (a splash's ripple on the water).
+        Facing::DirectionX | Facing::DirectionY | Facing::DirectionZ => {
+            let d = glam::Vec3::from(s.velocity).try_normalize()?;
+            let up = (glam::Vec3::Y - d * d.dot(glam::Vec3::Y))
+                .try_normalize()
+                .unwrap_or(glam::Vec3::X);
+            Some(match s.facing {
+                Facing::DirectionX => (d, up),
+                Facing::DirectionY => (d.cross(up), d),
+                _ => (up.cross(d), up),
+            })
+        }
+        // Lying in a plane of the emitter (a rain drop's ring on the ground).
+        Facing::EmitterXz => Some((glam::Vec3::X, glam::Vec3::Z)),
+        Facing::EmitterXy => Some((glam::Vec3::X, glam::Vec3::Y)),
+        Facing::EmitterYz => Some((glam::Vec3::Z, glam::Vec3::Y)),
+        _ => None,
+    }
+}
+
 /// Camera-facing quads for sprites, into `out`: the same vertices the game's own particles make.
 #[allow(clippy::too_many_arguments)]
 pub fn sprite_quads(
@@ -3290,7 +3544,17 @@ pub fn sprite_quads(
             f64::from(s.pos[1]),
             f64::from(s.pos[2]),
         );
-        let center = (p - camera).as_vec3();
+        let mut center = (p - camera).as_vec3();
+        // A sprite lying on a surface (a ring on the ground, 0.01 above it) is drawn a hair
+        // toward the camera so the surface does not win their depth.
+        if matches!(
+            s.facing,
+            horizon_bedrock::particle::Facing::EmitterXz
+                | horizon_bedrock::particle::Facing::EmitterXy
+                | horizon_bedrock::particle::Facing::EmitterYz
+        ) {
+            center -= center.normalize_or_zero() * 0.02;
+        }
         let rotation = if s.rotation != 0.0 {
             base * glam::Quat::from_rotation_z(s.rotation.to_radians())
         } else {
@@ -3302,13 +3566,7 @@ pub fn sprite_quads(
         } else {
             super::render::FULL_BRIGHT
         };
-        let axes = (s.facing == horizon_bedrock::particle::Facing::LookAtDirection)
-            .then(|| {
-                let up = glam::Vec3::from(s.velocity).try_normalize()?;
-                let right = up.cross(-center).try_normalize()?;
-                Some((right, up))
-            })
-            .flatten();
+        let axes = sprite_axes(s, center);
         let c = |v: f32| (v.clamp(0.0, 1.0) * 255.0) as u32;
         let color = c(s.color[3]) << 24 | c(s.color[2]) << 16 | c(s.color[1]) << 8 | c(s.color[0]);
         // The part of the quad whose texture coordinates fall inside the sprite: past its edge
@@ -3338,7 +3596,6 @@ pub fn sprite_quads(
             ((x0, y0), [u0, v1]),
         ] {
             let v = match axes {
-                // Height along the direction, width across it and across the line of sight.
                 Some((right, up)) => center + right * (n.0 * s.size[0]) + up * (n.1 * s.size[1]),
                 None => center + rotation * glam::Vec3::new(n.0 * s.size[0], n.1 * s.size[1], 0.0),
             };
@@ -3357,6 +3614,38 @@ pub fn sprite_quads(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_mob_goes_into_water_as_fast_as_it_fell() {
+        let mut w = super::WaterEntry::default();
+        assert_eq!(w.look(1, false, -30.0), None);
+        // The fall ends on the bottom of a shallow pool before the game finds the water.
+        assert_eq!(w.look(2, false, -38.0), None);
+        assert_eq!(w.look(3, true, -3.4), Some(-38.0));
+        assert_eq!(w.look(3, true, -3.4), Some(-38.0), "every frame of that tick");
+        assert_eq!(w.look(4, true, -2.0), None);
+        // Slipping in slower than it moves on: the speed it has.
+        assert_eq!(w.look(5, false, 0.0), None);
+        assert_eq!(w.look(6, true, -4.0), Some(-4.0));
+    }
+
+    #[test]
+    fn a_locator_ahead_and_on_the_right_lands_ahead_and_on_the_right() {
+        // Facing south (+z, yaw 0): ahead is +z, the right side is west (-x).
+        let ahead = attach_point([0.0; 3], [0.0, 1.0, -1.0], 0.0);
+        assert!((ahead[2] - 1.0).abs() < 1e-9 && ahead[0].abs() < 1e-9 && ahead[1] == 1.0);
+        let right = attach_point([0.0; 3], [-1.0, 0.0, 0.0], 0.0);
+        assert!((right[0] + 1.0).abs() < 1e-9);
+        // Facing west (-x, yaw 90): ahead is -x, the right side is north (-z).
+        let ahead = attach_point([0.0; 3], [0.0, 0.0, -1.0], 90.0);
+        assert!((ahead[0] + 1.0).abs() < 1e-9 && ahead[2].abs() < 1e-9);
+        let right = attach_point([0.0; 3], [-1.0, 0.0, 0.0], 90.0);
+        assert!((right[2] + 1.0).abs() < 1e-9);
+        // The turn and mirror undo themselves.
+        let p = [0.3, 1.2, -0.7];
+        let back = model_to_world(model_to_world(p, 37.0), 37.0);
+        assert!(p.iter().zip(back).all(|(a, b)| (a - b).abs() < 1e-9));
+    }
+
     #[test]
     fn a_clock_shows_the_sun_at_noon_and_the_moon_at_midnight() {
         assert_eq!(clock_frame(6000), 0.0);
@@ -3435,14 +3724,15 @@ mod tests {
     #[test]
     fn an_attached_point_turns_with_the_mob() {
         let near = |a: [f64; 3], b: [f64; 3]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-9);
+        // Facing south: the model's back (+z) is north of the feet.
         assert!(near(
             attach_point([10.0, 64.0, -5.0], [1.0, 2.0, 3.0], 0.0),
-            [11.0, 66.0, -2.0]
+            [11.0, 66.0, -8.0]
         ));
-        // A quarter turn: model x and z swap into the world's z and x.
+        // A quarter turn (facing west): model x and z swap into the world's z and x.
         assert!(near(
             attach_point([0.0, 0.0, 0.0], [1.0, 0.0, 3.0], 90.0),
-            [3.0, 0.0, -1.0]
+            [3.0, 0.0, 1.0]
         ));
     }
 

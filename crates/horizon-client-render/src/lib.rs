@@ -101,6 +101,8 @@ pub mod pad_glyph;
 pub mod paged_maps;
 pub mod par;
 pub mod particles;
+/// Game particles a Bedrock pack draws itself (kept apart from `particles`).
+pub mod bedrock_particles;
 pub mod poi_sections;
 pub mod polytone_post;
 pub mod post_chain;

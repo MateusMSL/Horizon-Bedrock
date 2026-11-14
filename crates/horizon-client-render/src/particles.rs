@@ -1810,6 +1810,10 @@ impl ParticleEngine {
         }
         let minimal = self.calculate_particle_level(always_show) == 2;
         if override_limiter || options.ty.override_limiter() || (d2 <= 1024.0 && !minimal) {
+            // A Bedrock pack that draws this particle itself takes it (`bedrock_particles`).
+            if crate::bedrock_particles::redirect(options.ty, p, v) {
+                return;
+            }
             self.create(options, p, v);
         }
     }

@@ -519,6 +519,18 @@ fn parse_events(root: &Json) -> std::collections::HashMap<String, EventDef> {
 }
 
 impl Effect {
+    /// Whether the effect makes one particle (or a few) each time it is asked: a manual emitter,
+    /// which the game's own code feeds one particle per request, or a single small burst. Such
+    /// an effect can stand in for a game particle one for one; a steady stream cannot (the game
+    /// would start a stream for every particle it makes).
+    pub fn one_per_request(&self) -> bool {
+        match &self.rate {
+            Rate::Manual => true,
+            Rate::Instant { count } => matches!(count, Scalar::Const(n) if *n <= 4.0),
+            Rate::Steady { .. } => false,
+        }
+    }
+
     /// Reads a file with a `particle_effect` root.
     pub fn parse(root: &Json) -> Option<Effect> {
         let body = root.get("particle_effect")?;
@@ -868,6 +880,9 @@ struct Particle {
     random: [f32; 4],
     /// Relative position origin for parametric motion.
     origin: V3,
+    /// The way the emitter's shape sent it: a sprite facing its direction keeps it while the
+    /// particle stands still (a splash sheet with no speed).
+    dir: V3,
     timeline_at: usize,
     dead: bool,
     /// The variables this particle's own expressions set; the emitter's are not touched.
@@ -947,6 +962,9 @@ pub struct Emitter {
     /// emitter starts.
     init: Vec<Program>,
     seed: Vars,
+    /// Particles an `emitter_rate_manual` effect owes: the game's own requests (a rain drop's
+    /// splash, a `/particle`) each ask it for one.
+    manual: usize,
 }
 
 fn add(a: V3, b: V3) -> V3 {
@@ -987,7 +1005,14 @@ impl Emitter {
             expired: false,
             init: Vec::new(),
             seed: Vars::default(),
+            manual: 0,
         }
+    }
+
+    /// Has an `emitter_rate_manual` effect make `n` particles once it is active, then stop
+    /// emitting (one request of the game, a `/particle`). Other rates ignore it.
+    pub fn request_manual(&mut self, n: usize) {
+        self.manual = n;
     }
 
     /// Has the emitter run `script` (a `pre_effect_script`) and take `seed` as variables
@@ -1145,6 +1170,24 @@ impl Emitter {
 
     fn spawn(&mut self, host: &mut dyn Host, out: &mut Vec<Spawn>) {
         let e = Arc::clone(&self.effect);
+        // The particle's own variables first: its shape, direction and speed read them
+        // (`"direction": ["v.particle_random_1 - 0.5", ...]`, a splash's spray).
+        let mut p = Particle {
+            random: [
+                self.rng.unit(),
+                self.rng.unit(),
+                self.rng.unit(),
+                self.rng.unit(),
+            ],
+            ..Particle::default()
+        };
+        let emitter_vars = self.vars.clone();
+        self.vars.insert(names_table().age, Value::Num(0.0));
+        self.set_particle_vars(&p);
+        for x in &e.particle_creation {
+            self.run(host, x);
+        }
+        self.apply_curves(host);
         let offset: V3 = std::array::from_fn(|i| self.eval(host, &e.shape.offset[i]));
         let mut local = match &e.shape.kind {
             ShapeKind::Point => [0.0; 3],
@@ -1234,22 +1277,6 @@ impl Emitter {
             }
         };
         local = add(local, offset);
-        let mut p = Particle {
-            random: [
-                self.rng.unit(),
-                self.rng.unit(),
-                self.rng.unit(),
-                self.rng.unit(),
-            ],
-            ..Particle::default()
-        };
-        let emitter_vars = self.vars.clone();
-        self.vars.insert(names_table().age, Value::Num(0.0));
-        self.set_particle_vars(&p);
-        for x in &e.particle_creation {
-            self.run(host, x);
-        }
-        self.apply_curves(host);
         p.lifetime = self.eval(host, &e.lifetime).max(0.0);
         self.set_particle_vars(&p);
         let velocity = match &e.speed {
@@ -1276,6 +1303,7 @@ impl Emitter {
         p.pos = self.to_store(world_pos);
         p.origin = p.pos;
         p.vel = world_vel;
+        p.dir = dir;
         if let Some((rot, rate)) = &e.spin {
             p.rotation = self.eval(host, rot);
             p.spin = self.eval(host, rate);
@@ -1395,7 +1423,9 @@ impl Emitter {
             Life::Once { active } => {
                 let a = self.eval(host, active);
                 self.set_emitter_vars(a);
-                let on = self.age <= a;
+                // Active from the start of this frame: an emitter with `active_time` 0 (a burst
+                // set off by an event) still makes its burst on its first frame.
+                let on = self.age - dt <= a;
                 if !on {
                     self.finished_emitting = true;
                 }
@@ -1475,7 +1505,14 @@ impl Emitter {
                         }
                     }
                 }
-                Rate::Manual => {}
+                Rate::Manual => {
+                    if self.manual > 0 {
+                        for _ in 0..std::mem::take(&mut self.manual).min(4096) {
+                            self.spawn(host, out);
+                        }
+                        self.finished_emitting = true;
+                    }
+                }
             }
         }
         self.step(dt, host, world, out);
@@ -1676,15 +1713,21 @@ impl Emitter {
                 color,
                 facing: e.billboard.facing,
                 velocity: {
-                    let v = if e.local_rotation && e.local_position {
-                        rotate_yaw(p.vel, self.yaw)
-                    } else {
-                        p.vel
+                    let turn = |v: V3| {
+                        if e.local_rotation && e.local_position {
+                            rotate_yaw(v, self.yaw)
+                        } else {
+                            v
+                        }
                     };
+                    let v = turn(p.vel);
                     match &e.billboard.direction {
-                        Some(d) if !d.from_velocity || len(v) < d.min_speed => {
+                        Some(d) if !d.from_velocity => {
                             std::array::from_fn(|i| self.eval(host, &d.custom[i]))
                         }
+                        // Too slow to tell a direction: the one it was sent off in.
+                        Some(d) if len(v) < d.min_speed => turn(p.dir),
+                        None if len(v) < 0.01 => turn(p.dir),
                         _ => v,
                     }
                 },
@@ -1782,6 +1825,57 @@ mod tests {
         assert!(!e.finished());
         run(&mut e, 1.0, 0.1);
         assert!(e.finished());
+    }
+
+    #[test]
+    fn a_manual_emitter_makes_what_it_is_asked_for_and_ends() {
+        let fx = effect(
+            r#""minecraft:emitter_rate_manual":{"max_particles":300},"minecraft:emitter_lifetime_expression":{"activation_expression":1,"expiration_expression":0},
+               "minecraft:emitter_shape_point":{},"minecraft:particle_lifetime_expression":{"max_lifetime":0.2}"#,
+        );
+        let mut idle = Emitter::new(fx.clone(), 1);
+        run(&mut idle, 0.1, 0.05);
+        assert_eq!(idle.alive(), 0);
+        let mut e = Emitter::new(fx, 1);
+        e.request_manual(1);
+        run(&mut e, 0.05, 0.05);
+        assert_eq!(e.alive(), 1);
+        run(&mut e, 0.5, 0.05);
+        assert!(e.finished());
+    }
+
+    #[test]
+    fn only_a_manual_or_small_burst_effect_stands_in_for_a_game_particle() {
+        assert!(effect(r#""minecraft:emitter_rate_manual":{"max_particles":10}"#).one_per_request());
+        assert!(effect(r#""minecraft:emitter_rate_instant":{"num_particles":1}"#).one_per_request());
+        assert!(!effect(r#""minecraft:emitter_rate_instant":{"num_particles":30}"#).one_per_request());
+        assert!(!effect(r#""minecraft:emitter_rate_steady":{"spawn_rate":5,"max_particles":10}"#).one_per_request());
+    }
+
+    #[test]
+    fn a_burst_with_no_active_time_still_bursts() {
+        let fx = effect(
+            r#""minecraft:emitter_rate_instant":{"num_particles":3},"minecraft:emitter_lifetime_once":{"active_time":0},
+               "minecraft:emitter_shape_point":{},"minecraft:particle_lifetime_expression":{"max_lifetime":1}"#,
+        );
+        let mut e = Emitter::new(fx, 1);
+        run(&mut e, 0.05, 0.05);
+        assert_eq!(e.alive(), 3);
+    }
+
+    #[test]
+    fn a_particle_s_direction_reads_its_own_randoms() {
+        // A splash's spray: straight up with v.particle_random_2 = 1 would fly; with the
+        // randoms unset (0) it went sideways and fell into the water.
+        let fx = effect(
+            r#""minecraft:emitter_rate_instant":{"num_particles":20},"minecraft:emitter_lifetime_once":{"active_time":0},
+               "minecraft:emitter_shape_point":{"direction":[0,"v.particle_random_2",0]},
+               "minecraft:particle_initial_speed":"v.particle_random_2*6+4",
+               "minecraft:particle_lifetime_expression":{"max_lifetime":2}"#,
+        );
+        let mut e = Emitter::new(fx, 3);
+        run(&mut e, 0.05, 0.05);
+        assert!(e.particles.iter().any(|p| p.vel[1] > 4.0));
     }
 
     #[test]

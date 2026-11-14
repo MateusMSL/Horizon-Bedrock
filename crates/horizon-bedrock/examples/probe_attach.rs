@@ -24,7 +24,7 @@ impl Host for H {
     fn context(&mut self, name: &str) -> Value {
         match name {
             "item_slot" => Value::Str(self.slot.as_str().into()),
-            "is_first_person" => Value::Num(0.0),
+            "is_first_person" => Value::Num(std::env::var("FP").map_or(0.0, |_| 1.0)),
             "owning_entity" => Value::Entity(1),
             _ => Value::Null,
         }

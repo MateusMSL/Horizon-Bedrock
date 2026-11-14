@@ -143,6 +143,20 @@ fn main() {
     for e in ["fptest:splash", "fptest:land", "fptest:aura"] {
         c.check(&format!("particula {e}"), b.effects.contains_key(e), || "nao carregada".into());
     }
+    // The game's own particles the pack replaces: one particle per request.
+    for e in ["minecraft:rain_splash_particle", "minecraft:water_splash_particle_manual", "minecraft:basic_crit_particle"] {
+        c.check(
+            &format!("particula do jogo {e}: uma por pedido"),
+            b.effects.get(e).is_some_and(|fx| fx.one_per_request()),
+            || "ausente ou fluxo".into(),
+        );
+    }
+    let shard = b.attachables.get("minecraft:amethyst_shard");
+    c.check(
+        "amethyst_shard: particula aura no attachable",
+        shard.is_some_and(|a| a.particles.get("aura").map(String::as_str) == Some("fptest:aura")),
+        || "ausente".into(),
+    );
     c.check("som fptest.blip definido", b.sound_definitions.map.contains_key("fptest.blip"), || "ausente".into());
     c.check("arquivo do som convertido", out.join("assets/minecraft/sounds").exists() || out.join("assets").exists(), || {
         "sem pasta de sons".into()

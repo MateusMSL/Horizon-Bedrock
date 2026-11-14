@@ -28,6 +28,8 @@ não no Horizon, o defeito é do motor, não do A&S.
 | 3d | Duas mãos (como a tesoura do A&S) | **Tesoura**: `parent_setup` liga `v.fptest_two_hands` no jogador; em 1ª pessoa os dois braços aparecem, o esquerdo espelhado do direito. |
 | 3e | Variável do jogador lida pelo item (como a vara do A&S) | **Vara**: `parent_setup` liga `v.fptest_rod`; o item lê `c.owning_entity->v.fptest_rod` e escala a vara azul por ela (0 some com a vara, só o cubo ciano fica). |
 | 3f | Relógio do A&S, material por material | Caixa 10×3×10 (grava 0, topo aberto com borda amarela, fundo marrom fechado), janela 1 px abaixo do topo (grava 3, sem cor), ícones ciano 0,1 px acima da janela e mostrador magenta 1,4 px abaixo dela (só onde há 3). **Bússola**: janela de `entity` com texel transparente (igual ao A&S). **Bússola de recuperação**: janela de `entity` com texel opaco. **Fragmento de eco**: janela de `entity_alphatest` com texel transparente. Serve para descobrir por que, no Bedrock, o mostrador do A&S aparece mesmo atrás da janela. |
+| 3g | Partícula de item (attachable) | **Fragmento de ametista**: haste magenta; aura verde a cada 1 s saindo do locator `tip` (ponta de baixo). |
+| 3h | Partículas do jogo trocadas pelo pack | O pack traz `minecraft:rain_splash_particle` (magenta), `minecraft:water_splash_particle_manual` (amarelo) e `minecraft:basic_crit_particle` (vermelho): pingos de chuva no chão, respingos de água (nadar, barco, entrar na água) e golpe crítico saem nessas cores, uma partícula por pedido do jogo. |
 | 4 | Partícula + som de interação do jogador | Respingo azul ao entrar na água; anel laranja ao pousar depois de mais de 1 s no ar (voo); "blip" nos dois. |
 | 5 | Bloco customizado | **Esponja** com textura xadrez magenta/preto (`blocks.json` + `terrain_texture.json`). |
 | 6 | Entidade modificada | **Porco** de caixas, cabeça com eixos girando 90°/s. |
@@ -89,6 +91,7 @@ texturas aparecem como faltando e são esperadas: `steve` (no jogo vira a skin d
 | 1.0.7 | Relógio (stencil), tesoura (duas mãos), vara (variável do jogador): os três defeitos do A&S que sobraram (rosto do relógio some, braços gigantes na câmera, vara invisível). |
 | 1.0.8 | No Bedrock a 1.0.7 falhou nos três: relógio só moldura (janela grossa na frente do rosto tapava pela profundidade), tesoura sem braços e vara sem a haste (variáveis do jogador zeradas a cada quadro e não públicas). Agora como o A&S: rosto antes da janela, planos finos; variáveis zeradas só no `initialize` e declaradas `public`. |
 | 1.0.9 | Réplicas do relógio do A&S (bússola, bússola de recuperação, fragmento de eco) para isolar a regra da janela. |
+| 1.0.10 | Partícula de item (fragmento de ametista) e partículas do jogo trocadas pelo pack (chuva, respingo, crítico). |
 
 ## 6. Resultado no Bedrock (1.0.5)
 

@@ -47,7 +47,7 @@ física, inventário) continua sendo a do Java; o motor Bedrock só lê o estado
 | `src/animation.rs` | Animações e controladores de animação: keyframes (rotação/posição/escala, números ou Molang), loops, blend, estados e transições, sons/partículas/scripts com tempo. |
 | `src/molang/*.rs` | A linguagem Molang: `lexer` (texto ➜ tokens), `parser` (tokens ➜ programa), `ast` (forma do programa), `eval` (executa; variáveis `v.`, temporárias `t.`, `q.` respondidas pelo jogo), `math` (`math.*` em graus), `tests`. |
 | `src/material.rs` | `materials/*.material`: de qual material vanilla deriva e o que muda (alpha test, blend, emissivo, sem depth write, `color_mask`...). |
-| `src/particle.rs` | Partículas (`particles/*.json`): leitura dos componentes e a simulação na CPU (emissor, vida, movimento, cor, flipbook). |
+| `src/particle.rs` | Partículas (`particles/*.json`): leitura dos componentes e a simulação na CPU (emissor, vida, movimento, cor, flipbook). `request_manual`: um efeito `emitter_rate_manual` faz uma partícula por pedido; `one_per_request` diz se o efeito pode trocar uma partícula do jogo. |
 | `src/sounds.rs` | `sound_definitions.json` e `sounds.json`: sons nomeados, variações, e troca de sons de eventos de entidade. |
 | `src/lang.rs` | `texts/*.lang` (nomes e textos traduzidos). |
 | `src/world_data.rs` | Arquivos do mundo em volta: névoa (`fogs/`), biomas do cliente, `blocks.json`, culling de blocos. |
@@ -58,7 +58,7 @@ física, inventário) continua sendo a do Java; o motor Bedrock só lê o estado
 
 | Arquivo | Responsável por |
 |---|---|
-| `src/mobs/bedrock.rs` | O coração em tempo de execução. `BedrockMobs::load` carrega o `Bundle`; `frame()` roda, por mob e por quadro, o Molang, as animações e os controladores do pack e devolve um `MobFrame` (pose dos ossos, camadas a desenhar, itens presos — `Attached` —, sons e partículas emitidos). Responde as consultas `q.*` com o estado do mob Java (`MobHost`, `AttachHost`). Também: `ENGINE_BUILD` (versão do motor no log), `apply_pose` (pose Bedrock ➜ partes Java), superfícies em volta (`Surroundings`), partículas do pack. |
+| `src/mobs/bedrock.rs` | O coração em tempo de execução. `BedrockMobs::load` carrega o `Bundle`; `frame()` roda, por mob e por quadro, o Molang, as animações e os controladores do pack e devolve um `MobFrame` (pose dos ossos, camadas a desenhar, itens presos — `Attached` —, sons e partículas emitidos). Responde as consultas `q.*` com o estado do mob Java (`MobHost`, `AttachHost`). Também: `ENGINE_BUILD` (versão do motor no log), `apply_pose` (pose Bedrock ➜ partes Java), superfícies em volta (`Surroundings`), partículas do pack, velocidade de entrada na água (`WaterEntry`). |
 | `src/mobs/bedrock_debug.rs` | O `bedrock-debug.json` (pasta `%APPDATA%\horizon`): chaves de depuração recarregadas ao salvar, sem compilar (esconder ossos, mover/girar ossos, forçar materiais, dumps no log, `trace_fp`, `fp_offset`, `held_anchor`...). Cada campo está comentado no próprio arquivo. |
 | `src/mobs/render.rs` | Arquivo original do Horizon; inclui os 4 arquivos abaixo com `include!` e tem as funções de matriz usadas por eles (`held_anchor_at`, `rest_pivot`, `posed`). |
 | `src/mobs/bedrock_render/render_01.rs` | Agrupa os ossos de uma camada por material (uma passada de desenho por "look"), luz achatada (`filter_lighting`), UV animado (`uv_anim`). |
@@ -75,6 +75,7 @@ física, inventário) continua sendo a do Java; o motor Bedrock só lê o estado
 |---|---|
 | `src/packs/bedrock.rs` | Pasta `addons/`: descobre os packs Bedrock, converte (via `convert.rs`) e guarda a conversão em cache (`.horizon-cache`), refaz só quando o arquivo muda; subpack escolhido. |
 | `src/gfx/bedrock_stencil.rs` | **Stencil do Bedrock (lado da GPU).** Passe próprio com buffer de profundidade+stencil (`Depth32FloatStencil8`, ou `Depth24PlusStencil8`): copia a profundidade da cena, desenha as peças na ordem do modelo com o teste/gravação de stencil do material (`State`), com o shader de entidades (`fs_entity_uncut` sem corte de alfa para material sem `ALPHA_TEST`). Um passe depois do mundo (`draw_world`) e um depois da mão em 1ª pessoa (`draw_hand`). Pipelines criados sob demanda por estado. |
+| `src/bedrock_particles.rs` | **Partículas do jogo trocadas pelo pack.** Tabela partícula Java → identificador vanilla do Bedrock (`Rain` → `minecraft:rain_splash_particle`...); `install` liga as que o pack traz, `redirect` (chamado por `particles.rs::add_with`) desvia a partícula, `take` entrega ao `game/bedrock.rs`; `stash_additive`/`take_additive` levam as partículas `particles_add` do pack às aditivas do jogo (gancho de uma linha em `game.rs`). |
 | `src/pack_screen.rs` (gancho) | Tela de add-ons: lista, ordem, botão **Settings** (opções e subpacks do pack). |
 
 ## Documentos e ferramentas do repositório
@@ -86,7 +87,7 @@ física, inventário) continua sendo a do Java; o motor Bedrock só lê o estado
 | `docs/bedrock-roadmap.md` | Histórico de cada versão do motor (`ENGINE_BUILD`): o que mudou e por quê. |
 | `docs/bedrock-instalacao.md` | Compilar, importar no launcher, instalar add-ons (dev). |
 | `docs/bedrock.md`, `bedrock-status.md`, `bedrock-coverage.md` | Visão geral, estado e cobertura do formato Bedrock. |
-| `docs/bedrock-debug-notes.md`, `bedrock-first-person-tuning.md`, `bedrock-player-animations.md`, `bedrock-items-3d.md`, `bedrock-itens-checklist.md` (gerado por `tools/bedrock/items_checklist.py`), `bedrock-validation.md` | Notas de depuração de temas específicos. |
+| `docs/bedrock-debug-notes.md`, `bedrock-first-person-tuning.md`, `bedrock-player-animations.md`, `bedrock-items-3d.md`, `bedrock-pendencias.md` (lista única de pendências), `bedrock-itens-checklist.md` (gerado por `tools/bedrock/items_checklist.py`), `bedrock-validation.md` | Notas de depuração de temas específicos. |
 | `tools/check-hooks.ps1` + `tools/bedrock-hooks.txt` | Confere, depois de atualizar do upstream, se os ganchos continuam nos arquivos originais. |
 | `patches/bedrock-hooks.patch` | Reaplica ganchos perdidos (`git apply --3way`). |
 | `tools/fp-test/fp-axes-test.mcpack` | Pack de teste antigo (só os eixos no papel). |
@@ -126,6 +127,6 @@ física, inventário) continua sendo a do Java; o motor Bedrock só lê o estado
 | Item na mão (3ª pessoa) fora do lugar | `render_03.rs` (`base_of`, âncora `held_anchor`), `render_04.rs`. |
 | Item/mão em **1ª pessoa** | `render_03.rs` `first_person_item` e o bloco `fp_held_anchor`; `bedrock-debug.json` `trace_fp`, `fp_offset`; log `fp-view`. |
 | Stencil (relógio sem mostrador, brilho de armadura fora da faixa, contorno) | `material.rs` (`Stencil`), `mobs/bedrock_stencil.rs`, `gfx/bedrock_stencil.rs`. |
-| Partícula | `particle.rs`, `game/bedrock.rs`. |
+| Partícula | `particle.rs`, `game/bedrock.rs` (`Blocks`: blocos do mundo para colisão), `bedrock_particles.rs` (partículas do jogo), `examples/sim_particle.rs` (simula um efeito sobre chão plano), `mobs/bedrock.rs` (`send_emit`, partículas de itens); checklist em `bedrock-particulas.md` (`tools/bedrock/particles_checklist.py`). |
 | Som | `sounds.rs`, `game/bedrock.rs`. |
 | Entidade que o jogo desenha sozinho | `game/pack_proxy.rs` e o gancho do arquivo da entidade. |

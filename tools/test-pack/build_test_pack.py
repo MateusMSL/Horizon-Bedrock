@@ -462,6 +462,43 @@ def build():
         "minecraft:particle_initial_speed": 0.5,
         "minecraft:particle_motion_dynamic": {"linear_acceleration": [0, 1, 0]}}))
 
+    # Item particles: an amethyst shard that puffs green aura from its tip every second.
+    files["models/entity/fptest_shard.geo.json"] = geometry("geometry.fptest.shard", [{
+        "name": "item", "pivot": [0, 24, 0], "binding": BINDING,
+        "locators": {"tip": [0, 14, 0]},
+        "cubes": [cube([-1, 14, -1], [2, 10, 2], MAGENTA)]}])
+    files["attachables/fptest_amethyst_shard.json"] = {"format_version": "1.10.0", "minecraft:attachable": {"description": {
+        "identifier": "minecraft:amethyst_shard",
+        "materials": {"default": "entity_alphatest"},
+        "textures": {"default": "textures/fptest/palette"},
+        "geometry": {"default": "geometry.fptest.shard"},
+        "particle_effects": {"aura": "fptest:aura"},
+        "animations": {"puff": "animation.fptest.shard.puff"},
+        "scripts": {"animate": ["puff"]},
+        "render_controllers": ["controller.render.fptest.simple"]}}}
+    files["animations/fptest_shard.animation.json"] = {"format_version": "1.8.0", "animations": {
+        "animation.fptest.shard.puff": {"loop": True, "animation_length": 1,
+                                        "particle_effects": {"0.0": {"effect": "aura", "locator": "tip"}}}}}
+    # The game's own particles, replaced as Bedrock's vanilla ones (one particle per request):
+    # rain splashes magenta, water splashes yellow, critical hits red.
+    manual = {"minecraft:emitter_rate_manual": {"max_particles": 200},
+              "minecraft:emitter_lifetime_expression": {"activation_expression": 1, "expiration_expression": 0},
+              "minecraft:emitter_shape_point": {}}
+    files["particles/fptest_rain.json"] = effect("minecraft:rain_splash_particle", [1.0, 0.0, 1.0, 1.0], dict(manual, **{
+        "minecraft:particle_lifetime_expression": {"max_lifetime": 0.6},
+        "minecraft:particle_initial_speed": 2,
+        "minecraft:emitter_shape_point": {"direction": [0, 1, 0]},
+        "minecraft:particle_motion_dynamic": {"linear_acceleration": [0, -9.8, 0]}}))
+    files["particles/fptest_water_splash.json"] = effect("minecraft:water_splash_particle_manual", [1.0, 0.9, 0.0, 1.0], dict(manual, **{
+        "minecraft:particle_lifetime_expression": {"max_lifetime": 0.8},
+        "minecraft:particle_initial_speed": 3,
+        "minecraft:emitter_shape_point": {"direction": ["math.random(-0.5, 0.5)", 1, "math.random(-0.5, 0.5)"]},
+        "minecraft:particle_motion_dynamic": {"linear_acceleration": [0, -9.8, 0]}}))
+    files["particles/fptest_crit.json"] = effect("minecraft:basic_crit_particle", [1.0, 0.1, 0.1, 1.0], dict(once, **{
+        "minecraft:emitter_rate_instant": {"num_particles": 1},
+        "minecraft:emitter_shape_sphere": {"radius": 0.5, "direction": "outwards"},
+        "minecraft:particle_initial_speed": 1}))
+
     # Sound.
     files["sounds/sound_definitions.json"] = {"format_version": "1.14.0", "sound_definitions": {
         "fptest.blip": {"category": "neutral", "sounds": [{"name": "sounds/fptest/blip", "volume": 1.0}]}}}
@@ -475,11 +512,11 @@ def build():
     files["texts/en_US.lang"] = ("item.paper.name=Paper (test axes)\nitem.stick.name=Stick (test animation)\n"
                                  "entity.pig.name=Pig (test)\ntile.sponge.name=Sponge (test)\n"
                                  "item.brick.name=Brick (texture mesh)\nitem.flint.name=Flint (mesh as A&S)\n"
-                                 "item.clock.name=Clock (stencil window)\nitem.compass.name=A&S clock (entity window, clear)\nitem.recovery_compass.name=A&S clock (entity window, opaque)\nitem.echo_shard.name=A&S clock (alphatest window, clear)\nitem.shears.name=Shears (two hands)\nitem.fishing_rod.name=Fishing Rod (holder variable)\n")
+                                 "item.clock.name=Clock (stencil window)\nitem.compass.name=A&S clock (entity window, clear)\nitem.recovery_compass.name=A&S clock (entity window, opaque)\nitem.echo_shard.name=A&S clock (alphatest window, clear)\nitem.shears.name=Shears (two hands)\nitem.fishing_rod.name=Fishing Rod (holder variable)\nitem.amethyst_shard.name=Amethyst Shard (item particles)\n")
     files["texts/pt_BR.lang"] = ("item.paper.name=Papel (eixos de teste)\nitem.stick.name=Graveto (animação de teste)\n"
                                  "entity.pig.name=Porco (teste)\ntile.sponge.name=Esponja (teste)\n"
                                  "item.brick.name=Tijolo (malha de textura)\nitem.flint.name=Sílex (malha como o A&S)\n"
-                                 "item.clock.name=Relógio (janela de stencil)\nitem.compass.name=Relógio A&S (janela entity, transparente)\nitem.recovery_compass.name=Relógio A&S (janela entity, opaca)\nitem.echo_shard.name=Relógio A&S (janela alphatest, transparente)\nitem.shears.name=Tesoura (duas mãos)\nitem.fishing_rod.name=Vara (variável do jogador)\n")
+                                 "item.clock.name=Relógio (janela de stencil)\nitem.compass.name=Relógio A&S (janela entity, transparente)\nitem.recovery_compass.name=Relógio A&S (janela entity, opaca)\nitem.echo_shard.name=Relógio A&S (janela alphatest, transparente)\nitem.shears.name=Tesoura (duas mãos)\nitem.fishing_rod.name=Vara (variável do jogador)\nitem.amethyst_shard.name=Fragmento de Ametista (partículas do item)\n")
 
     # Images.
     files["textures/fptest/palette.png"] = palette(PALETTE[WHITE])
@@ -490,8 +527,8 @@ def build():
                                                          for x in range(16)] for y in range(16)])
     files["manifest.json"] = {"format_version": 2, "header": {
         "name": "Horizon Test Pack", "description": "Teste do motor Bedrock: 1a/3a pessoa, particulas, bloco, entidade, sons, etiquetas",
-        "uuid": PACK_UUID, "version": [1, 0, 9], "min_engine_version": [1, 20, 0]},
-        "modules": [{"type": "resources", "uuid": MODULE_UUID, "version": [1, 0, 9]}]}
+        "uuid": PACK_UUID, "version": [1, 0, 10], "min_engine_version": [1, 20, 0]},
+        "modules": [{"type": "resources", "uuid": MODULE_UUID, "version": [1, 0, 10]}]}
     return files
 
 

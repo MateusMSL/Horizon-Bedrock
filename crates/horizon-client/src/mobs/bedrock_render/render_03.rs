@@ -1659,6 +1659,10 @@ thread_local! {
     /// While the first-person view model draws: the eye height its feet stand below the camera.
     static FP_EYE: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
 }
+/// While the first-person view model draws: the eye height its feet stand below the camera.
+pub fn first_person_eye() -> Option<f32> {
+    FP_EYE.with(std::cell::Cell::get)
+}
 /// Whether the first-person view model is being drawn now.
 pub fn in_first_person_view() -> bool {
     FP_VIEW.with(|v| v.get().is_some())

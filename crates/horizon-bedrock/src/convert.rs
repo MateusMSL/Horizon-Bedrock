@@ -1604,6 +1604,7 @@ fn convert_world(pack: &Pack, out: &Path, report: &mut Report) -> Result<()> {
         )?;
         report.world_textures += 1;
     }
+    implicit_block_animations(out, report)?;
     // `splashes.json`: `{"splashes": ["..."]}`, Java's `texts/splashes.txt` one to a line.
     if let Ok(v) = pack.read_json("splashes.json")
         && let Some(list) = v.get("splashes").and_then(Value::as_array)
@@ -1623,6 +1624,52 @@ fn convert_world(pack: &Pack, out: &Path, report: &mut Report) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The block textures Bedrock's own code animates, with no `flipbook_textures.json` entry in any
+/// pack (the fire renderer steps through the strip, one frame a tick).
+const CODE_ANIMATED_BLOCKS: [&str; 4] = ["fire_0", "fire_1", "soul_fire_0", "soul_fire_1"];
+
+/// A pack's strip of square frames for a texture Bedrock animates in code (`fire_0`): Java needs
+/// the `.png.mcmeta` beside the file (it reads the metadata of the pack that ships the picture),
+/// else it squeezes the whole strip onto the block.
+fn implicit_block_animations(out: &Path, report: &mut Report) -> Result<()> {
+    let dir = out.join("assets/minecraft/textures/block");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("png") {
+            continue;
+        }
+        let stem = path.file_stem().and_then(|n| n.to_str()).unwrap_or_default();
+        let meta = path.with_extension("png.mcmeta");
+        if meta.exists() || !CODE_ANIMATED_BLOCKS.contains(&stem) {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        if let Some((w, h)) = png_size(&bytes)
+            && w > 0
+            && h > w
+            && h % w == 0
+        {
+            write(&meta, br#"{"animation":{}}"#)?;
+            report.world_textures += 1;
+        }
+    }
+    Ok(())
+}
+
+/// Width and height from a PNG's header.
+fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    if bytes.len() < 24 || &bytes[..8] != b"\x89PNG\r\n\x1a\n" || &bytes[12..16] != b"IHDR" {
+        return None;
+    }
+    let n = |i: usize| u32::from_be_bytes([bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]);
+    Some((n(16), n(20)))
 }
 
 /// `blocks.json` pointing a block at another `terrain_texture.json` name (`"sponge":
@@ -2051,7 +2098,7 @@ fn convert_settings(pack: &Pack, out: &Path) -> Result<()> {
 
 /// Bumped whenever the conversion's output changes, so packs converted by an older engine
 /// convert again instead of coming out of the cache.
-pub const CONVERTER_REVISION: u64 = 23;
+pub const CONVERTER_REVISION: u64 = 24;
 
 /// A folder name for a converted pack: stable for the same input, different for others.
 pub fn cache_name(source: &Path, modified_secs: u64, size: u64) -> PathBuf {
@@ -2519,6 +2566,34 @@ mod tests {
         put(dir, "models/entity/m.geo.json", b"{}");
         put(dir, "sounds.json", b"{}");
         put(dir, "texts/en_US.lang", b"a=b");
+    }
+
+    #[test]
+    fn a_block_strip_with_no_flipbook_animates_as_in_bedrock() {
+        let out = tmp("strip_out");
+        let dir = out.join("assets/minecraft/textures/block");
+        fs::create_dir_all(&dir).unwrap();
+        let png = |w: u32, h: u32| {
+            encode_png(&Image {
+                width: w,
+                height: h,
+                rgba: vec![255; (w * h * 4) as usize],
+            })
+            .unwrap()
+        };
+        fs::write(dir.join("fire_0.png"), png(16, 64)).unwrap();
+        fs::write(dir.join("stone.png"), png(16, 16)).unwrap();
+        // A strip Bedrock animates through the vanilla flipbook (prismarine), not in code: left
+        // as it is here.
+        fs::write(dir.join("prismarine.png"), png(16, 64)).unwrap();
+        fs::write(dir.join("campfire_fire.png"), png(16, 64)).unwrap();
+        fs::write(dir.join("campfire_fire.png.mcmeta"), b"{}").unwrap();
+        let mut report = Report::default();
+        implicit_block_animations(&out, &mut report).unwrap();
+        assert_eq!(fs::read(dir.join("fire_0.png.mcmeta")).unwrap(), br#"{"animation":{}}"#);
+        assert!(!dir.join("stone.png.mcmeta").exists());
+        assert!(!dir.join("prismarine.png.mcmeta").exists());
+        assert_eq!(fs::read(dir.join("campfire_fire.png.mcmeta")).unwrap(), b"{}");
     }
 
     #[test]
