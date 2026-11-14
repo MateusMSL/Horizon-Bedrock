@@ -1376,7 +1376,7 @@ impl Game<'_> {
                 } => "minecraft:spectral_arrow",
                 ProjectileKind::Arrow { .. } => "minecraft:arrow",
                 ProjectileKind::Snowball => "minecraft:snowball",
-                ProjectileKind::Egg => "minecraft:egg",
+                ProjectileKind::Egg(item) => item,
                 ProjectileKind::SmallFireball => "minecraft:small_fireball",
                 ProjectileKind::WindCharge => "minecraft:wind_charge",
                 _ => "minecraft:unknown_projectile",

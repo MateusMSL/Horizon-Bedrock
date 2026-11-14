@@ -936,9 +936,7 @@ impl Game<'_> {
                 horizon_client::projectiles::ProjectileKind::Snowball => {
                     Some("minecraft:snowball".to_owned())
                 }
-                horizon_client::projectiles::ProjectileKind::Egg => {
-                    Some("minecraft:egg".to_owned())
-                }
+                horizon_client::projectiles::ProjectileKind::Egg(item) => Some((*item).to_owned()),
                 horizon_client::projectiles::ProjectileKind::EnderPearl => {
                     Some("minecraft:ender_pearl".to_owned())
                 }

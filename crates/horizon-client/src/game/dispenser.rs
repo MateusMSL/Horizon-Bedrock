@@ -1235,7 +1235,7 @@ impl Game<'_> {
                         }
                     }
                     "minecraft:egg" | "minecraft:blue_egg" | "minecraft:brown_egg" => {
-                        ProjectileKind::Egg
+                        horizon_client::projectiles::egg(&item)
                     }
                     _ => ProjectileKind::Snowball,
                 };

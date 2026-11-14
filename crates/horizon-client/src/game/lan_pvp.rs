@@ -25,7 +25,7 @@ pub(super) fn meets_players(kind: &ProjectileKind) -> bool {
         kind,
         ProjectileKind::Arrow { .. }
             | ProjectileKind::Snowball
-            | ProjectileKind::Egg
+            | ProjectileKind::Egg(_)
             | ProjectileKind::Thrown(_)
     )
 }
@@ -305,7 +305,7 @@ impl Game<'_> {
             p.kind.id()
         };
         let hit = self.pvp_hit_of(&host, p.guest, victim, source);
-        let zero = matches!(p.kind, ProjectileKind::Snowball | ProjectileKind::Egg);
+        let zero = matches!(p.kind, ProjectileKind::Snowball | ProjectileKind::Egg(_));
         let result = match victim {
             Victim::Guest(conn) => self.guest_hit_by(&mut host, conn, |g| {
                 g.combat.refuse_player_hit = refused;

@@ -1157,7 +1157,7 @@ impl Game<'_> {
             let (size, eye) = match p.kind {
                 K::Arrow { .. } | K::Trident => (0.5, 0.13),
                 K::Snowball
-                | K::Egg
+                | K::Egg(_)
                 | K::EnderPearl
                 | K::LlamaSpit
                 | K::Potion { .. }

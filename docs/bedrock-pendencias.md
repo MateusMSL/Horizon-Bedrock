@@ -27,6 +27,12 @@ Junta as listas pedidas na conversa (lista de tarefas da sessão, notas "Anotado
 - [ ] Ataque em 3ª pessoa tocando duas animações por clique.
 - [ ] Tridente com pose invertida.
 - [?] Relógio: mostrador (v220), hora (v221). Bússola apontando (v216).
+- [ ] Itens mal posicionados na mão em 1ª pessoa (cristal do End grande e deslocado; captura de 2026-11-13).
+- [ ] Tesoura em 1ª pessoa: braços gigantes cobrindo a tela (já anotado como "mostrando os braços").
+- [ ] Balde d'água: fundo/paredes internas transparentes (vê-se a grama). Material `entity_alphatest_one_sided`; paredes internas são um cubo de altura negativa (`3m4c6l`, `[6,-6.5,6]`); falta renderizar o attachable e conferir a face/culling.
+- [ ] Trilho ativador, estande de armadura etc.: sem animação na primeira vez que são puxados (aquecimento de 6 s da v188 em attachable novo é suspeito; não alterado).
+- [?] Ovo arremessado com a textura do ovo comum: o projétil `Egg` não guardava qual ovo era. Agora guarda o item (`ProjectileKind::Egg(item)`), desenha `item/blue_egg`/`item/brown_egg` e o pintinho nasce da variante do ovo (código base do Horizon, não do motor Bedrock; o pack desenha o ovo 3D só se o projétil virar entidade do pack).
+- [ ] Armaduras do A&S (cobre) chapadas/rosadas conforme o ângulo da câmera, depois do stencil na GPU (v215). Contorno do pack: corpo escreve stencil 2 (`tasrgm`), casca inflada (`hyyvpv`/`zoytgm`) desenha onde `stencil & 18 == 0`. Onde a casca cobre a armadura o stencil 2 não foi escrito: suspeita do teste de profundidade da passada (cópia da profundidade da cena, `GreaterEqual`). Teste: `cpu_stencil: true` no `bedrock-debug.json`.
 - [ ] Checklist de todas as animações e controladores do pack, marcando implementada ou não.
 
 ## Jogador
