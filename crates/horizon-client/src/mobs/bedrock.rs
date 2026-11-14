@@ -786,7 +786,7 @@ fn common_query(name: &str, args: &[Value]) -> Value {
 
 /// The engine's build, logged once with `HORIZON_BEDROCK_DEBUG`: tells whether the game runs the
 /// files the last overlay carried.
-pub const ENGINE_BUILD: &str = "v233-start-log";
+pub const ENGINE_BUILD: &str = "v234-stencil-replay-bias";
 
 /// `HORIZON_BEDROCK_DUMP=skeleton,creeper`: the kinds (by part of the id) whose state is logged
 /// once a second while within twelve blocks of the camera.

@@ -70,6 +70,25 @@ pub fn thrown_by_item(item: &str) -> Option<&'static ThrownType> {
     thrown_types().iter().find(|t| t.item == item)
 }
 
+/// The egg `item` thrown: `minecraft:blue_egg` and `brown_egg` keep their kind, anything else
+/// is the plain egg.
+pub fn egg(item: &str) -> ProjectileKind {
+    ProjectileKind::Egg(match item {
+        "minecraft:blue_egg" => "minecraft:blue_egg",
+        "minecraft:brown_egg" => "minecraft:brown_egg",
+        _ => "minecraft:egg",
+    })
+}
+
+/// The chicken variant (`Mob.extra.variant`: 0 temperate, 1 warm, 2 cold) an egg item hatches.
+pub fn egg_variant(item: &str) -> u8 {
+    match item {
+        "minecraft:brown_egg" => 1,
+        "minecraft:blue_egg" => 2,
+        _ => 0,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProjectileKind {
     /// Arrow with its base damage, critical flag and tipped/stray/bogged effect.
@@ -83,7 +102,9 @@ pub enum ProjectileKind {
     /// `pickup_item`.
     Trident,
     Snowball,
-    Egg,
+    /// `ThrownEgg`: the egg item thrown (`minecraft:egg`, `blue_egg`, `brown_egg`), drawn as
+    /// itself and hatching a chick of its climate (`EggItem`'s `CHICKEN_VARIANT`).
+    Egg(&'static str),
     EnderPearl,
     SmallFireball,
     LargeFireball {
@@ -157,7 +178,7 @@ impl ProjectileKind {
         match self {
             Self::Arrow { .. } | Self::Trident => 0.5,
             Self::Snowball
-            | Self::Egg
+            | Self::Egg(_)
             | Self::EnderPearl
             | Self::LlamaSpit
             | Self::Potion(..)
@@ -177,7 +198,7 @@ impl ProjectileKind {
             Self::Arrow { .. } => "minecraft:arrow",
             Self::Trident => "minecraft:trident",
             Self::Snowball => "minecraft:snowball",
-            Self::Egg => "minecraft:egg",
+            Self::Egg(_) => "minecraft:egg",
             Self::EnderPearl => "minecraft:ender_pearl",
             Self::SmallFireball => "minecraft:small_fireball",
             Self::LargeFireball { .. } => "minecraft:fireball",
@@ -583,7 +604,7 @@ impl Projectile {
         matches!(
             self.kind,
             ProjectileKind::Snowball
-                | ProjectileKind::Egg
+                | ProjectileKind::Egg(_)
                 | ProjectileKind::EnderPearl
                 | ProjectileKind::LlamaSpit
                 | ProjectileKind::Potion(..)
@@ -752,7 +773,7 @@ impl Projectile {
         let throwable = matches!(
             self.kind,
             ProjectileKind::Snowball
-                | ProjectileKind::Egg
+                | ProjectileKind::Egg(_)
                 | ProjectileKind::EnderPearl
                 | ProjectileKind::Potion(..)
                 | ProjectileKind::ExperienceBottle
@@ -1598,7 +1619,11 @@ impl Projectile {
     pub fn item_sprite(&self) -> Option<&'static str> {
         Some(match &self.kind {
             ProjectileKind::Snowball => "item/snowball",
-            ProjectileKind::Egg => "item/egg",
+            ProjectileKind::Egg(item) => match *item {
+                "minecraft:blue_egg" => "item/blue_egg",
+                "minecraft:brown_egg" => "item/brown_egg",
+                _ => "item/egg",
+            },
             ProjectileKind::EnderPearl => "item/ender_pearl",
             ProjectileKind::SmallFireball | ProjectileKind::LargeFireball { .. } => {
                 "item/fire_charge"
@@ -1634,6 +1659,20 @@ impl Projectile {
 mod tests {
     use super::*;
     use horizon_core::random::LegacyRandom;
+
+    #[test]
+    fn a_thrown_egg_draws_and_hatches_as_the_egg_it_was() {
+        for (item, sprite, variant) in [
+            ("minecraft:egg", "item/egg", 0),
+            ("minecraft:brown_egg", "item/brown_egg", 1),
+            ("minecraft:blue_egg", "item/blue_egg", 2),
+        ] {
+            let p = Projectile::new(egg(item), Vec3::new(0.0, 64.0, 0.0), None);
+            assert_eq!(p.item_sprite(), Some(sprite));
+            assert_eq!(p.kind.id(), "minecraft:egg");
+            assert_eq!(egg_variant(item), variant);
+        }
+    }
 
     struct Empty(Vec<(Who, Aabb)>);
     impl ProjectileWorld for Empty {

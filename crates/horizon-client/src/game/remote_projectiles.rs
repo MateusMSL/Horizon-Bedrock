@@ -89,7 +89,7 @@ fn projectile_kind(kind: &str) -> Option<ProjectileKind> {
             effect: None,
         },
         "minecraft:snowball" => ProjectileKind::Snowball,
-        "minecraft:egg" => ProjectileKind::Egg,
+        "minecraft:egg" => ProjectileKind::Egg("minecraft:egg"),
         "minecraft:ender_pearl" => ProjectileKind::EnderPearl,
         "minecraft:small_fireball" => ProjectileKind::SmallFireball,
         "minecraft:fireball" => ProjectileKind::LargeFireball { power: 1 },
@@ -933,7 +933,7 @@ mod tests {
         // sends their position every 10 ticks, and the client ticks them
         // itself in between, as vanilla's no-op interpolation handler does.
         for kind in [
-            ProjectileKind::Egg,
+            ProjectileKind::Egg("minecraft:egg"),
             ProjectileKind::EnderPearl,
             ProjectileKind::WindCharge,
         ] {
@@ -952,7 +952,7 @@ mod tests {
         // ThrowableProjectile.tick: gravity 0.03, then the air drag 0.99F
         // (`getAirDrag`, a float widened to the double it scales by).
         let drag = f64::from(0.99_f32);
-        let mut p = thrown(ProjectileKind::Egg);
+        let mut p = thrown(ProjectileKind::Egg("minecraft:egg"));
         remote_projectile_tick(&mut p, &Empty);
         assert!((p.velocity.x - 1.5 * drag).abs() < 1e-9, "{p:?}");
         assert!((p.velocity.y - (-0.03 * drag)).abs() < 1e-9, "{p:?}");
@@ -989,7 +989,7 @@ mod tests {
                 },
                 3,
             ),
-            tracked(ProjectileKind::Egg, 4),
+            tracked(ProjectileKind::Egg("minecraft:egg"), 4),
             tracked(ProjectileKind::LargeFireball { power: 1 }, 12),
         ];
         remote_projectile_power(&mut list, 3, 0.5);

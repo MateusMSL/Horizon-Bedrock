@@ -4524,7 +4524,7 @@ impl Game<'_> {
                                 horizon_client::projectiles::ProjectileKind::Snowball => {
                                     "minecraft:snowball"
                                 }
-                                horizon_client::projectiles::ProjectileKind::Egg => "minecraft:egg",
+                                horizon_client::projectiles::ProjectileKind::Egg(item) => item,
                                 horizon_client::projectiles::ProjectileKind::Thrown(t) => t.item,
                                 _ => return None,
                             };

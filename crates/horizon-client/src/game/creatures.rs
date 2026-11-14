@@ -5034,7 +5034,7 @@ impl Game<'_> {
                 | ProjectileKind::Trident
                 | ProjectileKind::Snowball
                 | ProjectileKind::Thrown(_)
-                | ProjectileKind::Egg
+                | ProjectileKind::Egg(_)
                 | ProjectileKind::SmallFireball
                 | ProjectileKind::LargeFireball { .. }
                 | ProjectileKind::WitherSkull { .. }
@@ -5437,7 +5437,7 @@ impl Game<'_> {
             if !matches!(
                 p.kind,
                 ProjectileKind::EnderPearl
-                    | ProjectileKind::Egg
+                    | ProjectileKind::Egg(_)
                     | ProjectileKind::Snowball
                     | ProjectileKind::Thrown(_)
                     | ProjectileKind::LargeFireball { .. }
@@ -5807,7 +5807,7 @@ impl Game<'_> {
                 self.thrown_break_event(p.id, atp);
                 self.item_burst(atp, t.item);
             }
-            (ProjectileKind::Egg, hit) => {
+            (ProjectileKind::Egg(egg), hit) => {
                 if let Hit::Entity {
                     who: Who::Mob(id), ..
                 } = hit
@@ -5835,11 +5835,12 @@ impl Game<'_> {
                             && let Some(c) = self.mobs.iter_mut().find(|m| m.id == id)
                         {
                             c.extra.age = -24000;
+                            c.extra.variant = horizon_client::projectiles::egg_variant(egg);
                         }
                     }
                 }
                 self.thrown_break_event(p.id, atp);
-                self.item_burst(atp, "minecraft:egg");
+                self.item_burst(atp, egg);
             }
             (ProjectileKind::EnderPearl, hit) => {
                 if let Hit::Entity {
@@ -7365,7 +7366,9 @@ impl Game<'_> {
         let item = &*stack.item;
         let kind = match item {
             "minecraft:snowball" => ProjectileKind::Snowball,
-            "minecraft:egg" | "minecraft:blue_egg" | "minecraft:brown_egg" => ProjectileKind::Egg,
+            "minecraft:egg" | "minecraft:blue_egg" | "minecraft:brown_egg" => {
+                horizon_client::projectiles::egg(item)
+            }
             "minecraft:ender_pearl" => ProjectileKind::EnderPearl,
             "minecraft:wind_charge" => {
                 let thrown = self.throw_wind_charge()?;
@@ -7423,7 +7426,7 @@ impl Game<'_> {
             ProjectileKind::Snowball | ProjectileKind::Thrown(_) => {
                 "minecraft:entity.snowball.throw"
             }
-            ProjectileKind::Egg => "minecraft:entity.egg.throw",
+            ProjectileKind::Egg(_) => "minecraft:entity.egg.throw",
             _ => "minecraft:entity.ender_pearl.throw",
         };
         let pitch = 0.4 / (self.world.random.next_float() * 0.4 + 0.8);
@@ -7437,7 +7440,7 @@ impl Game<'_> {
                 *self.held_mut() = None;
             }
         }
-        if kind == ProjectileKind::Egg
+        if matches!(kind, ProjectileKind::Egg(_))
             && let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
         {
             self.native_player_egg_throw(player, &name);
@@ -7651,7 +7654,7 @@ fn thrown_item_quad(
 fn is_item_billboard(kind: &ProjectileKind) -> bool {
     matches!(
         kind,
-        ProjectileKind::Snowball | ProjectileKind::Egg | ProjectileKind::EnderPearl
+        ProjectileKind::Snowball | ProjectileKind::Egg(_) | ProjectileKind::EnderPearl
     )
 }
 /// `Bucketable.getBucketItemStack` and `getPickupSound` of a mob that a water
@@ -8126,7 +8129,7 @@ mod tests {
         // only lifted ones. A fireball hands `getItem` to the item renderer
         // instead, which carries the ground transform itself.
         assert!(is_item_billboard(&ProjectileKind::Snowball));
-        assert!(is_item_billboard(&ProjectileKind::Egg));
+        assert!(is_item_billboard(&ProjectileKind::Egg("minecraft:egg")));
         assert!(is_item_billboard(&ProjectileKind::EnderPearl));
         assert!(!is_item_billboard(&ProjectileKind::SmallFireball));
         let large = ProjectileKind::LargeFireball { power: 1 };
@@ -8148,7 +8151,7 @@ mod tests {
         assert_eq!((lo.y, hi.y), (99.75, 100.25));
         // The rise follows the billboard's own up axis, not world up.
         let (right, up) = (glam::Vec3::Z, glam::Vec3::X);
-        let lifted = is_item_billboard(&ProjectileKind::Egg);
+        let lifted = is_item_billboard(&ProjectileKind::Egg("minecraft:egg"));
         let (lo, hi) = bounds(&thrown_item_quad(at, right, up, 1.0, lifted));
         assert_eq!((lo.x, hi.x), (-0.125, 0.375));
         assert_eq!((lo.y, hi.y), (100.0, 100.0));

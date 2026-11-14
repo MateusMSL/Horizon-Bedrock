@@ -167,7 +167,7 @@ fn mob_thorns_melee_projectiles_and_non_attacks() {
             (ProjectileKind::WindCharge, true),
             (ProjectileKind::BreezeWindCharge, true),
             (ProjectileKind::Snowball, false),
-            (ProjectileKind::Egg, false),
+            (ProjectileKind::Egg("minecraft:egg"), false),
         ] {
             pair(g, f::CHEST);
             let mut p = Projectile::new(kind, g.mobs[1].position, Some(Who::Mob(41)));

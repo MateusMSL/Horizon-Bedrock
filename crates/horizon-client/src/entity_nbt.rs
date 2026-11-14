@@ -3327,7 +3327,7 @@ pub fn throwable_kind(id: &str) -> Option<ProjectileKind> {
     }
     match id {
         "minecraft:snowball" => Some(ProjectileKind::Snowball),
-        "minecraft:egg" => Some(ProjectileKind::Egg),
+        "minecraft:egg" => Some(ProjectileKind::Egg("minecraft:egg")),
         "minecraft:ender_pearl" => Some(ProjectileKind::EnderPearl),
         // The entity type is the id; the `Item` read later may be another potion.
         "minecraft:experience_bottle" => Some(ProjectileKind::ExperienceBottle),
@@ -3352,7 +3352,7 @@ pub fn saved_with_chunk(p: &Projectile) -> bool {
         | ProjectileKind::BreezeWindCharge
         | ProjectileKind::WitherSkull { .. }
         | ProjectileKind::Snowball
-        | ProjectileKind::Egg
+        | ProjectileKind::Egg(_)
         | ProjectileKind::EnderPearl
         | ProjectileKind::Potion(..)
         | ProjectileKind::ExperienceBottle
@@ -8146,7 +8146,7 @@ mod fireball_nbt_tests {
         let player = Some([5, 6, 7, 8]);
         for (kind, id) in [
             (ProjectileKind::Snowball, "minecraft:snowball"),
-            (ProjectileKind::Egg, "minecraft:egg"),
+            (ProjectileKind::Egg("minecraft:egg"), "minecraft:egg"),
             (ProjectileKind::EnderPearl, "minecraft:ender_pearl"),
         ] {
             let mut p =

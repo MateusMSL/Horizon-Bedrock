@@ -670,7 +670,7 @@ impl Stencil {
                         0
                     },
                 },
-                bias: self.bias,
+                bias: replay_bias(self.bias, state),
             }),
             multisample: Default::default(),
             fragment: Some(wgpu::FragmentState {
@@ -697,8 +697,50 @@ impl Stencil {
     }
 }
 
+/// The depth bias of a piece drawn with `state`. A piece the scene already drew, drawn again
+/// here only for the stencil it writes (no colour), meets its own depth in the scene's copy: the
+/// two depths are the same surface computed twice, and where they come out a few ulps apart the
+/// write fails, leaving the piece unmarked at some angles of the camera (an armour then covered
+/// by the outline that should show only past its edge). Pulled a little nearer, with the slope,
+/// it always reaches its own surface.
+fn replay_bias(bias: wgpu::DepthBiasState, state: State) -> wgpu::DepthBiasState {
+    if state.color || !state.replace || !state.depth_test {
+        return bias;
+    }
+    wgpu::DepthBiasState {
+        constant: bias.constant.saturating_mul(4).max(512),
+        slope_scale: bias.slope_scale.max(1.0),
+        clamp: bias.clamp,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_stencil_only_replay_is_pulled_nearer_than_its_own_surface() {
+        let base = wgpu::DepthBiasState { constant: 128, slope_scale: 0.0, clamp: 0.0 };
+        let mut state = State {
+            color: false,
+            additive: false,
+            depth_write: true,
+            depth_test: true,
+            cutout: true,
+            compare: Compare::Always,
+            replace: true,
+            reference: 2,
+            read_mask: 255,
+            write_mask: 255,
+        };
+        let b = replay_bias(base, state);
+        assert!(b.constant > base.constant && b.slope_scale > 0.0);
+        // What draws colour, or only tests, keeps the scene's bias.
+        state.color = true;
+        assert_eq!(replay_bias(base, state), base);
+        state.color = false;
+        state.replace = false;
+        assert_eq!(replay_bias(base, state), base);
+    }
     use super::*;
 
     fn quad(layer: u32) -> [Vertex; 4] {
