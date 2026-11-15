@@ -67,6 +67,8 @@ Junta as listas pedidas na conversa (lista de tarefas da sessão, notas "Anotado
 ## Motor
 
 - [ ] Otimizar o motor: FPS bem abaixo do Horizon base (anotado em 2026-11-14). Medir com e sem pack (`--benchmark`, `HORIZON_SPIKES`) e achar onde o motor Bedrock gasta: Molang/controladores por mob e por quadro, attachables, partículas, stencil.
+- [ ] Medidores de desempenho do motor Bedrock (anotado em 2026-11-15): tempo por quadro de Molang/controladores, animações, attachables, partículas, stencil e desenho, por mob e no total; contagem de mobs e vértices do pack. Visível no F3 ou num relatório (`--benchmark`), para comparar Horizon base × com add-on e medir cada otimização.
+- [ ] Otimizações a partir dos medidores: o Horizon base roda bem, com o A&S cai bastante (motor novo ainda sem otimização).
 - [?] Desempenho com o stencil na GPU (v215; comparar com `cpu_stencil`).
 - [ ] `texture_meshes`: tamanho real e extrusão.
 - [ ] `uv_anim` por material/osso.

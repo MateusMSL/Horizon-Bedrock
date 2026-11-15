@@ -44,3 +44,21 @@ A tarefa (`xtask/src/launcher_build.rs`) compila `launcher/` com o perfil `relea
 - `HORIZON_LAUNCHER_NO_SELF_UPDATE` (sempre): o launcher do fork não se troca pelo release do upstream (`self_update_allowed` em `launcher/src/backend.rs` lê também em tempo de compilação).
 - `HORIZON_MSA_CLIENT_ID`: client ID do app Azure **do fork** (docs/forking.md proíbe o do Horizon). Sem ele: "sign-in não configurado". Na configuração do IntelliJ, preencher a variável; também vale em tempo de execução.
 - `HORIZON_CURSEFORGE_API_KEY`, `HORIZON_LAUNCHER_VERSION`, `HORIZON_LAUNCHER_TAG`: repassados quando definidos (opcionais).
+
+# Pacote de teste completo (`bedrock-dist`)
+
+```
+cargo run -p xtask -- bedrock-dist
+```
+
+No IntelliJ: **Horizon - Bedrock dist**. Não publica nada: release é um passo separado.
+
+Gera em `release/`:
+
+| Arquivo | Para quê |
+|---|---|
+| `horizon-bedrock/horizon-client.exe` | O jogo. Importar no launcher oficial (**Versões > Importar uma compilação do jogo…**): abre com a conta logada nele. |
+| `horizon-bedrock.zip` | O mesmo programa + `GUIDE.md`, para importar ou distribuir. |
+| `horizon-launcher/horizon-launcher.exe` | O launcher do fork. Não se atualiza para o do upstream. |
+
+Conta: o caminho de teste é o jogo importado no launcher oficial, que confere a conta e entrega a sessão. O `horizon-launcher.exe` do fork só faz login com o client ID do app Azure do próprio fork (`HORIZON_MSA_CLIENT_ID` na configuração); sem ele avisa que o login não está configurado. Usar a sessão do launcher oficial ou o client ID do Horizon é proibido (docs/forking.md).
