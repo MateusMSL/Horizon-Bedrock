@@ -1593,7 +1593,6 @@ dependencies = [
  "half",
  "horizon-assets",
  "horizon-bedrock",
- "horizon-bench",
  "horizon-client-core",
  "horizon-client-input",
  "horizon-command",

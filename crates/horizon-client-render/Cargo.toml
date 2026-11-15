@@ -15,7 +15,6 @@ lz4_flex = { version = "0.14", default-features = false, features = ["std", "saf
 horizon-assets = { path = "../horizon-assets" }
 # Bedrock resource packs in `resourcepacks/`, converted to Java packs when discovered.
 horizon-bedrock = { path = "../horizon-bedrock" }
-horizon-bench = { path = "../horizon-bench" }
 horizon-client-core = { path = "../horizon-client-core" }
 horizon-client-input = { path = "../horizon-client-input" }
 horizon-command = { path = "../horizon-command" }
