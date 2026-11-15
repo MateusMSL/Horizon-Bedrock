@@ -178,7 +178,7 @@ Detalhe por item em `docs/bedrock-items-3d.md`.
 
 ## 2. Nametags
 
-Status: PULADO por enquanto (2.1 a 2.6).
+Status: PULADO por enquanto (2.1 a 2.6); avaliar cada nametag individualmente.
 
 ### 2.1 General
 - [ ] Qualquer mob (menos Ender Dragon): `Baby` mantém filhote
@@ -241,7 +241,8 @@ Pack setting "Seasonal Mob Variants" faz spawn natural o ano todo; ou nametag `H
 - [ ] Shulker: `Pumpkin` (projéteis viram abóboras brilhantes com o setting)
 - [ ] Traça: `Centipede` (onda de perninhas)
 - [ ] Esqueleto e Bogged: `Scarecrow`
-- [ ] Slime: `Skull`
+- [~] Slime: `Skull`
+  - Obs.: nametag `Halloween` não deixa o slime como a variante de caveira.
 - [ ] Aranha e aranha da caverna: `Skull`
 - [ ] Stray: `Grim Reaper`, `Reaper` (lanterna brilhante balançando)
 - [ ] Strider: `Demon` / `Demon Stridling`
@@ -539,7 +540,8 @@ Skins com expressões (skin pack ou template próprio).
 
 ## 9. Texture Styles (subpacks)
 - [ ] Full Experience (tudo)
-- [ ] Vanilla Experience (animações e 3D com texturas vanilla)
+- [~] Vanilla Experience (animações e 3D com texturas vanilla)
+  - Obs.: com outro resource pack por cima, itens bugam. Revisar.
 - [ ] Custom Experience (animações e 3D, compatível com outros texture packs acima)
 
 ---

@@ -122,3 +122,6 @@ Junta as listas pedidas na conversa (lista de tarefas da sessão, notas "Anotado
 - [ ] Morphs: ferramentas e armaduras não encaixam no corpo do Morph (testado em raposa, olho do fim e golem de redstone).
 - [ ] Costumes: trim aparece na armadura de couro, mas nenhuma fantasia (opção ligada).
 - [ ] Abóboras e Snow Golem sempre com o mesmo rosto (sem variações).
+- [ ] Glows com shader pack ligado: olhos brilhantes, tochas, allays e outros brilhos ficam bugados. Revisar a passagem emissiva com shaders.
+- [ ] Texture Style Vanilla Experience com outro resource pack por cima: itens bugam.
+- [ ] Nametags: avaliar uma a uma; `Halloween` no slime não aplica a variante de caveira.

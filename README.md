@@ -98,6 +98,9 @@ Things that don't work yet and will be fixed in future updates:
 - **Morphs:** with an empty hand, first person shows your normal skin's hand, and tools and armour don't fit the morph's body
 - **Pumpkins** and snow golems always have the same face
 - **Wolves** howl on any night, not only at full moon
+- **Glows with shaders on:** glowing eyes, torches, allays and other glows look wrong when a shader pack is active
+- **Vanilla Experience** with another resource pack on top breaks some items
+- **Name tag variants** are still being checked one by one (for example, *Halloween* doesn't turn a slime into its skull variant)
 
 Everything still open: [pending list](docs/bedrock-pendencias.md) (in Portuguese).
 
