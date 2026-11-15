@@ -1846,10 +1846,19 @@ mod tests {
 
     #[test]
     fn only_a_manual_or_small_burst_effect_stands_in_for_a_game_particle() {
-        assert!(effect(r#""minecraft:emitter_rate_manual":{"max_particles":10}"#).one_per_request());
-        assert!(effect(r#""minecraft:emitter_rate_instant":{"num_particles":1}"#).one_per_request());
-        assert!(!effect(r#""minecraft:emitter_rate_instant":{"num_particles":30}"#).one_per_request());
-        assert!(!effect(r#""minecraft:emitter_rate_steady":{"spawn_rate":5,"max_particles":10}"#).one_per_request());
+        assert!(
+            effect(r#""minecraft:emitter_rate_manual":{"max_particles":10}"#).one_per_request()
+        );
+        assert!(
+            effect(r#""minecraft:emitter_rate_instant":{"num_particles":1}"#).one_per_request()
+        );
+        assert!(
+            !effect(r#""minecraft:emitter_rate_instant":{"num_particles":30}"#).one_per_request()
+        );
+        assert!(
+            !effect(r#""minecraft:emitter_rate_steady":{"spawn_rate":5,"max_particles":10}"#)
+                .one_per_request()
+        );
     }
 
     #[test]

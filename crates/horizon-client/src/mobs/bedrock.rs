@@ -171,7 +171,8 @@ fn first_person_offset(m: &Mob, offset: [f64; 3]) -> [f64; 3] {
     let [x, y, z] = offset;
     let q = attach_point([0.0, -eye, 0.0], [-x, y, -z], yaw);
     let level = glam::DQuat::from_rotation_y(std::f64::consts::PI - f64::from(yaw).to_radians());
-    let tilt = level * glam::DQuat::from_rotation_x(-f64::from(pitch).to_radians()) * level.inverse();
+    let tilt =
+        level * glam::DQuat::from_rotation_x(-f64::from(pitch).to_radians()) * level.inverse();
     let world = tilt * glam::DVec3::from_array(q) + glam::DVec3::new(0.0, eye, 0.0);
     // Back into the body's axes (the turn and mirror undo themselves).
     model_to_world(world.to_array(), yaw)
@@ -423,7 +424,8 @@ pub fn sample_surroundings(m: &Mob, w: &super::MobWorld) -> Surroundings {
     };
     let mut palette: Vec<Box<str>> = Vec::new();
     let mut known: HashMap<&str, u16> = HashMap::new();
-    let mut cells = Vec::with_capacity(((2 * side + 1) * (2 * side + 1) * (below + above + 1)) as usize);
+    let mut cells =
+        Vec::with_capacity(((2 * side + 1) * (2 * side + 1) * (below + above + 1)) as usize);
     for dy in -below..=above {
         for dz in -side..=side {
             for dx in -side..=side {
@@ -520,16 +522,28 @@ fn block_has_tag(name: &str, tag: &str) -> bool {
         return false;
     };
     let java = |t: &str| {
-        let full = if t.contains(':') { t.to_owned() } else { format!("minecraft:{t}") };
-        tags.get(full.as_str()).is_some_and(|set| set.contains(name))
+        let full = if t.contains(':') {
+            t.to_owned()
+        } else {
+            format!("minecraft:{t}")
+        };
+        tags.get(full.as_str())
+            .is_some_and(|set| set.contains(name))
     };
-    let air = matches!(name, "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air");
+    let air = matches!(
+        name,
+        "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"
+    );
     let tag = tag.to_ascii_lowercase();
     match tag.trim_start_matches("minecraft:") {
         "water" => matches!(
             name,
-            "minecraft:water" | "minecraft:bubble_column" | "minecraft:kelp"
-                | "minecraft:kelp_plant" | "minecraft:seagrass" | "minecraft:tall_seagrass"
+            "minecraft:water"
+                | "minecraft:bubble_column"
+                | "minecraft:kelp"
+                | "minecraft:kelp_plant"
+                | "minecraft:seagrass"
+                | "minecraft:tall_seagrass"
         ),
         "lava" => name == "minecraft:lava",
         "is_pickaxe_item_destructible" | "iron_tier_destructible" | "stone_tier_destructible" => {
@@ -547,7 +561,10 @@ fn block_has_tag(name: &str, tag: &str) -> bool {
             !air && !java("replaceable") && !matches!(name, "minecraft:water" | "minecraft:lava")
         }
         "wood" => java("logs") || java("planks"),
-        "snow" => matches!(name, "minecraft:snow" | "minecraft:snow_block" | "minecraft:powder_snow"),
+        "snow" => matches!(
+            name,
+            "minecraft:snow" | "minecraft:snow_block" | "minecraft:powder_snow"
+        ),
         "rail" => java("rails"),
         "trapdoors" => java("trapdoors"),
         "dirt" => java("dirt"),
@@ -605,8 +622,12 @@ fn world_query(m: &Mob, name: &str, args: &[Value]) -> Option<Value> {
 fn players_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| {
-        !std::env::var("HORIZON_BEDROCK_PLAYERS")
-            .is_ok_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "off" | "false"))
+        !std::env::var("HORIZON_BEDROCK_PLAYERS").is_ok_and(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "0" | "off" | "false"
+            )
+        })
     })
 }
 
@@ -620,7 +641,9 @@ static COMPASS_TARGET: std::sync::Mutex<Option<[f64; 2]>> = std::sync::Mutex::ne
 /// Where a spawn compass points (x and z of the world spawn), or None where it spins (another
 /// dimension): for `query.get_animation_frame` of a held compass.
 pub fn set_compass_target(target: Option<[f64; 2]>) {
-    *COMPASS_TARGET.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = target;
+    *COMPASS_TARGET
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = target;
 }
 
 /// `CompassAngleState`: the needle's turn, 0..1 (0 points ahead of the holder), toward
@@ -662,7 +685,9 @@ fn item_frame(m: &Mob, item: &str) -> f32 {
     match item.trim_start_matches("minecraft:") {
         "clock" => clock_frame(day),
         "compass" => {
-            let target = *COMPASS_TARGET.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let target = *COMPASS_TARGET
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             compass_frame(compass_turn(pos, m.yaw, target))
         }
         "recovery_compass" => compass_frame(compass_turn(pos, m.yaw, None)),
@@ -827,7 +852,11 @@ fn trace_pose(m: &Mob, alpha: f32, time: f32, dt: f32, frame: &horizon_bedrock::
     let wanted: Vec<String> = if settings.dump_bones.is_empty() {
         ["root", "waist", "body", "head"].map(String::from).to_vec()
     } else {
-        settings.dump_bones.iter().map(|n| n.to_ascii_lowercase()).collect()
+        settings
+            .dump_bones
+            .iter()
+            .map(|n| n.to_ascii_lowercase())
+            .collect()
     };
     let mut bones: Vec<_> = frame
         .pose
@@ -854,7 +883,12 @@ fn trace_pose(m: &Mob, alpha: f32, time: f32, dt: f32, frame: &horizon_bedrock::
     ));
 }
 
-fn dump_line(m: &Mob, host: &mut MobHost, frame: &horizon_bedrock::entity::Frame, running: &str) -> String {
+fn dump_line(
+    m: &Mob,
+    host: &mut MobHost,
+    frame: &horizon_bedrock::entity::Frame,
+    running: &str,
+) -> String {
     use std::fmt::Write;
     let mut q = String::new();
     for name in [
@@ -900,11 +934,7 @@ fn dump_line(m: &Mob, host: &mut MobHost, frame: &horizon_bedrock::entity::Frame
     let _ = write!(
         q,
         " main_hand={:?} body={:?} using_item={} hurt={} death={}",
-        m.extra.main_hand,
-        m.extra.body,
-        m.extra.using_item,
-        m.hurt_time,
-        m.death_time
+        m.extra.main_hand, m.extra.body, m.extra.using_item, m.hurt_time, m.death_time
     );
     // Where the mob is: the position the packs differentiate for their own speed.
     let _ = write!(
@@ -1044,7 +1074,11 @@ impl WaterEntry {
     fn look(&mut self, age: u32, in_water: bool, speed: f32) -> Option<f32> {
         if age != self.tick {
             if in_water && !self.in_water {
-                let hit = if self.speed.abs() > speed.abs() { self.speed } else { speed };
+                let hit = if self.speed.abs() > speed.abs() {
+                    self.speed
+                } else {
+                    speed
+                };
                 self.entered = Some((age, hit));
             }
             self.tick = age;
@@ -1059,7 +1093,10 @@ impl WaterEntry {
 fn log_first(what: &str, times: u32) {
     static SEEN: std::sync::Mutex<Option<HashMap<String, u32>>> = std::sync::Mutex::new(None);
     let mut seen = lock(&SEEN);
-    let n = seen.get_or_insert_with(HashMap::new).entry(what.to_owned()).or_insert(0);
+    let n = seen
+        .get_or_insert_with(HashMap::new)
+        .entry(what.to_owned())
+        .or_insert(0);
     if *n < times {
         *n += 1;
         log::info!("bedrock-debug: {what}");
@@ -1076,7 +1113,10 @@ pub fn set_camera_rotation(yaw: f32, pitch: f32) {
 
 fn camera_rotation() -> (f32, f32) {
     let bits = CAMERA_ROTATION.load(std::sync::atomic::Ordering::Relaxed);
-    (f32::from_bits((bits >> 32) as u32), f32::from_bits(bits as u32))
+    (
+        f32::from_bits((bits >> 32) as u32),
+        f32::from_bits(bits as u32),
+    )
 }
 
 /// `query.rotation_to_camera`: the (pitch, yaw) in degrees that would face the camera from a
@@ -1193,7 +1233,10 @@ impl Host for MobHost<'_> {
             // The hand raised (1) or lowered while the item is swapped (`swap_item`: the arm
             // drops 10 px at 0). Undefined, it read 0 and the vanilla view model held every
             // item 10 px too low.
-            ("player_arm_height", Value::Num(super::render::first_person_arm_heights()[0])),
+            (
+                "player_arm_height",
+                Value::Num(super::render::first_person_arm_heights()[0]),
+            ),
             // Using what the main hand holds: the spyglass up to the eye, the brush, the horn.
             ("is_holding_spyglass", Value::bool(using("spyglass"))),
             ("is_using_brush", Value::bool(using("brush"))),
@@ -1204,16 +1247,24 @@ impl Host for MobHost<'_> {
             // v.gliding_speed_value`) is divided by: 1 on foot, more while gliding fast
             // (HumanoidModel.setupAnim: `(speed² / 0.2)³`, never below 1). The speed itself
             // made the swing huge standing still (0 or nearly).
-            ("gliding_speed_value", Value::Num(if m.extra.fall_flying {
-                ((m.velocity.length_squared() as f32 / 0.2).powi(3)).max(1.0)
-            } else {
-                1.0
-            })),
+            (
+                "gliding_speed_value",
+                Value::Num(if m.extra.fall_flying {
+                    ((m.velocity.length_squared() as f32 / 0.2).powi(3)).max(1.0)
+                } else {
+                    1.0
+                }),
+            ),
             // Arms out in front: a zombie, a skeleton or a husk with something to attack.
-            ("raise_arms", Value::bool(m.ai.target.is_some() || {
-                let id: &str = &m.kind.id;
-                id.contains("zombie") || id.contains("husk") || id.contains("drowned")
-            })),
+            (
+                "raise_arms",
+                Value::bool(
+                    m.ai.target.is_some() || {
+                        let id: &str = &m.kind.id;
+                        id.contains("zombie") || id.contains("husk") || id.contains("drowned")
+                    },
+                ),
+            ),
             // What vanilla's resources keep and the game has no word for: at rest.
             ("is_patterned", Value::Num(0.0)),
             ("ischarging", Value::bool(m.extra.charged)),
@@ -1300,8 +1351,10 @@ impl Host for MobHost<'_> {
             // and the body turned head down.
             // Gliding the same: the wings' size follows it, and a climb on a firework reads
             // as no speed at all when only the flat part counts.
-            "ground_speed" if m.kind.id == "minecraft:player"
-                && (m.extra.avatar_pose == crate::pose::Pose::Swimming || m.extra.fall_flying) =>
+            "ground_speed"
+                if m.kind.id == "minecraft:player"
+                    && (m.extra.avatar_pose == crate::pose::Pose::Swimming
+                        || m.extra.fall_flying) =>
             {
                 let (dx, dy, dz) = (
                     m.position.x - m.previous.x,
@@ -1310,9 +1363,10 @@ impl Host for MobHost<'_> {
                 );
                 Value::Num((dx * dx + dy * dy + dz * dz).sqrt() as f32 * 20.0)
             }
-            "vertical_speed" if m.kind.id == "minecraft:player"
-                && m.extra.avatar_pose == crate::pose::Pose::Swimming
-                && !m.extra.fall_flying =>
+            "vertical_speed"
+                if m.kind.id == "minecraft:player"
+                    && m.extra.avatar_pose == crate::pose::Pose::Swimming
+                    && !m.extra.fall_flying =>
             {
                 Value::Num((m.position.y - m.previous.y) as f32 * 20.0)
             }
@@ -1355,7 +1409,9 @@ impl Host for MobHost<'_> {
             "ride_head_x_rotation" if m.extra.passenger => {
                 Value::Num(lerp(m.previous_head_pitch, m.head_pitch))
             }
-            "ride_body_x_rotation" | "ride_body_y_rotation" | "ride_head_x_rotation"
+            "ride_body_x_rotation"
+            | "ride_body_y_rotation"
+            | "ride_head_x_rotation"
             | "ride_head_y_rotation" => Value::Num(0.0),
             "position" => {
                 // Per frame, like Bedrock: the packs' speed from successive reads is smooth
@@ -1371,11 +1427,19 @@ impl Host for MobHost<'_> {
             }
             "rotation_to_camera" => {
                 let (pitch, yaw) = rotation_to_camera(self.from_camera);
-                Value::Num(if args.first().map_or(0.0, Value::num) as i32 == 0 { pitch } else { yaw })
+                Value::Num(if args.first().map_or(0.0, Value::num) as i32 == 0 {
+                    pitch
+                } else {
+                    yaw
+                })
             }
             "camera_rotation" => {
                 let (yaw, pitch) = camera_rotation();
-                Value::Num(if args.first().map_or(0.0, Value::num) as i32 == 0 { pitch } else { yaw })
+                Value::Num(if args.first().map_or(0.0, Value::num) as i32 == 0 {
+                    pitch
+                } else {
+                    yaw
+                })
             }
             "swell_amount" => Value::Num(if m.max_swell > 0 {
                 (lerp(m.previous_swell as f32, m.swell as f32) / m.max_swell as f32).clamp(0.0, 1.0)
@@ -1452,7 +1516,8 @@ impl Host for MobHost<'_> {
             }),
             // A camel sits by its own pose state (`Camel.isCamelSitting`), not a pet's `sitting`.
             "is_sitting" => Value::bool(
-                m.extra.sitting || (super::camel::is_camel(m.species()) && super::camel::sitting(m)),
+                m.extra.sitting
+                    || (super::camel::is_camel(m.species()) && super::camel::sitting(m)),
             ),
             "sit_amount" => Value::Num(
                 if m.extra.sitting
@@ -1577,7 +1642,9 @@ impl Host for MobHost<'_> {
             }
             // A shulker's variant is its shell colour: 0 to 15 the dyes, 16 the purple one it
             // has by default.
-            "variant" if m.species() == super::Species::Shulker => Value::Num(f32::from(m.extra.color)),
+            "variant" if m.species() == super::Species::Shulker => {
+                Value::Num(f32::from(m.extra.color))
+            }
             "variant" => Value::Num(f32::from(m.extra.variant)),
             "swelling_dir" => Value::Num(match m.swell.cmp(&m.previous_swell) {
                 std::cmp::Ordering::Greater => 1.0,
@@ -1611,7 +1678,10 @@ impl Host for MobHost<'_> {
                 Value::bool(m.species() == super::Species::Ravager && m.extra.counter > 0)
             }
             "hurt_direction" if m.extra.stand_pose.is_some() => Value::Num(
-                m.extra.stand_pose.as_deref().map_or(0.0, |s| s.hurt_direction),
+                m.extra
+                    .stand_pose
+                    .as_deref()
+                    .map_or(0.0, |s| s.hurt_direction),
             ),
             "hurt_direction" | "head_roll_angle" | "sleep_rotation" | "roll_counter"
             | "sneeze_counter" | "unhappy_counter" | "shake_angle" | "shake_time" => {
@@ -1665,15 +1735,15 @@ impl Host for MobHost<'_> {
                             .any(|a| matches!(a, Value::Str(s) if s.eq_ignore_ascii_case(&k)))
                     }),
             ),
-            "is_sleeping" | "is_avoiding_mobs" | "is_shaking" => {
-                Value::Num(0.0)
-            }
+            "is_sleeping" | "is_avoiding_mobs" | "is_shaking" => Value::Num(0.0),
             "time_stamp" => Value::Num(m.age as f32),
-            "facing_target_to_range_attack" => Value::bool(if m.species() == super::Species::Blaze {
-                super::nether::blaze_attacking(m)
-            } else {
-                m.extra.using_item > 0
-            }),
+            "facing_target_to_range_attack" => {
+                Value::bool(if m.species() == super::Species::Blaze {
+                    super::nether::blaze_attacking(m)
+                } else {
+                    m.extra.using_item > 0
+                })
+            }
             "item_is_charged" => Value::bool(m.extra.flag2),
             "blocking" => Value::bool(m.extra.using_item > 0 && m.extra.off_hand.is_some()),
             // The properties vanilla's own entities carry, from the Java mob's state.
@@ -1732,7 +1802,11 @@ impl Host for MobHost<'_> {
                     args.first().map_or(0.0, Value::num),
                     args.get(1).map_or(1.0, Value::num),
                 );
-                Value::Num(if hi > lo { ((d - lo) / (hi - lo)).clamp(0.0, 1.0) } else { 0.0 })
+                Value::Num(if hi > lo {
+                    ((d - lo) / (hi - lo)).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                })
             }
             "get_level_seed_based_fraction" => {
                 Value::Num(((m.id.wrapping_mul(2654435761)) >> 8 & 0xFFFF) as f32 / 65536.0)
@@ -1741,10 +1815,9 @@ impl Host for MobHost<'_> {
             | "maximum_frame_time" => Value::Num(self.dt),
             "client_max_render_distance" => Value::Num(128.0),
             "client_memory_tier" | "server_memory_tier" => Value::Num(3.0),
-            "last_input_mode_is_any" => Value::bool(
-                args.iter()
-                    .any(|a| matches!(a, Value::Str(s) if s.eq_ignore_ascii_case("keyboard_and_mouse"))),
-            ),
+            "last_input_mode_is_any" => Value::bool(args.iter().any(
+                |a| matches!(a, Value::Str(s) if s.eq_ignore_ascii_case("keyboard_and_mouse")),
+            )),
             "day" => Value::Num(
                 m.extra
                     .surroundings
@@ -2065,7 +2138,10 @@ fn head_drawn_apart(id: &str) -> bool {
 }
 
 /// `head_drawn_apart`: the head's scale divided by its ancestors' animated scales.
-fn head_apart(pose: &mut horizon_bedrock::animation::Pose, g: &horizon_bedrock::geometry::Geometry) {
+fn head_apart(
+    pose: &mut horizon_bedrock::animation::Pose,
+    g: &horizon_bedrock::geometry::Geometry,
+) {
     let parent_of = |n: &str| {
         g.bones
             .iter()
@@ -2130,9 +2206,16 @@ pub(super) fn pose_stand(pose: &mut horizon_bedrock::animation::Pose, stand: &su
 /// Items worn on the body that no hand holds as a model: armour, elytra, heads.
 fn is_wearable(item: &str) -> bool {
     let name = item.trim_start_matches("minecraft:");
-    ["_helmet", "_chestplate", "_leggings", "_boots", "_head", "_skull"]
-        .iter()
-        .any(|s| name.ends_with(s))
+    [
+        "_helmet",
+        "_chestplate",
+        "_leggings",
+        "_boots",
+        "_head",
+        "_skull",
+    ]
+    .iter()
+    .any(|s| name.ends_with(s))
         || matches!(name, "elytra" | "carved_pumpkin" | "turtle_helmet")
 }
 
@@ -2248,7 +2331,11 @@ fn holder_is_any(m: &Mob, args: &[Value]) -> bool {
     args.iter().any(|a| {
         let Value::Str(s) = a else { return false };
         let want = s.trim().to_ascii_lowercase();
-        let want = if want.contains(':') { want } else { format!("minecraft:{want}") };
+        let want = if want.contains(':') {
+            want
+        } else {
+            format!("minecraft:{want}")
+        };
         want == bedrock
             || want == java
             || (mannequin && matches!(want.as_str(), "minecraft:player" | "minecraft:armor_stand"))
@@ -2293,7 +2380,11 @@ fn read_glint_colour(path: &Path) -> Option<u32> {
     let mut sum = [0.0f64; 3];
     let mut weight = 0.0f64;
     for px in buf[..info.buffer_size()].chunks_exact(channels) {
-        let a = if channels == 4 { f64::from(px[3]) / 255.0 } else { 1.0 };
+        let a = if channels == 4 {
+            f64::from(px[3]) / 255.0
+        } else {
+            1.0
+        };
         // The `GLINT` shader multiplies its texture by the glint colour: Actions & Stuff's
         // glint textures are stored divided by it (its magenta one reads olive green, its
         // white one green until multiplied).
@@ -2373,9 +2464,9 @@ fn inset_uv(vertices: &mut [[f32; 5]; 4], texture: [f32; 2]) {
     for axis in 0..2 {
         let size = texture[axis].max(1.0);
         let i = 3 + axis;
-        let (lo, hi) = vertices
-            .iter()
-            .fold((f32::MAX, f32::MIN), |(lo, hi), v| (lo.min(v[i]), hi.max(v[i])));
+        let (lo, hi) = vertices.iter().fold((f32::MAX, f32::MIN), |(lo, hi), v| {
+            (lo.min(v[i]), hi.max(v[i]))
+        });
         let span = (hi - lo) * size;
         let step = INSET.min(span * 0.25) / size;
         let mid = (lo + hi) / 2.0;
@@ -2518,7 +2609,10 @@ impl BedrockMobs {
         );
         let key = std::ptr::from_ref(self) as usize;
         if let Some(ids) = horizon_client_render::bedrock_particles::install_for(key, |id| {
-            self.bundle.effects.get(id).is_some_and(|fx| fx.one_per_request())
+            self.bundle
+                .effects
+                .get(id)
+                .is_some_and(|fx| fx.one_per_request())
         }) {
             log::info!(
                 "bedrock: {} game particles drawn by the pack: {}",
@@ -2663,7 +2757,11 @@ impl BedrockMobs {
             render_controllers: &self.bundle.render_controllers,
             geometries: Some(&self.bundle.geometries),
         };
-        let entry_speed = if gui { None } else { st.water.look(m.age, m.fluids.in_water, vertical_speed(m)) };
+        let entry_speed = if gui {
+            None
+        } else {
+            st.water.look(m.age, m.fluids.in_water, vertical_speed(m))
+        };
         let mut host = MobHost {
             m,
             alpha,
@@ -2700,9 +2798,10 @@ impl BedrockMobs {
             // The same for a glide: a pack that follows the look with `root` itself (the
             // gliding animation turns it by `-target_x_rotation`) turns the body a second time
             // over the game's pitch, and a climb straight up lies it back down.
-            let turned = frame.pose.get("root").is_some_and(|b| {
-                (b.rotation[0] + b.rotation_entity[0]).abs() >= 5.0
-            });
+            let turned = frame
+                .pose
+                .get("root")
+                .is_some_and(|b| (b.rotation[0] + b.rotation_entity[0]).abs() >= 5.0);
             if turned {
                 set_pack_glides(m.id);
             }
@@ -2713,9 +2812,10 @@ impl BedrockMobs {
             // animations blend by the way the body goes (a diagonal swim weighs the forward
             // one at 0.7, a root 55 degrees over), so the first time any of the turn shows
             // while swimming settles it for the pack.
-            let turned = frame.pose.get("root").is_some_and(|b| {
-                (b.rotation[0] + b.rotation_entity[0]).abs() >= 15.0
-            });
+            let turned = frame
+                .pose
+                .get("root")
+                .is_some_and(|b| (b.rotation[0] + b.rotation_entity[0]).abs() >= 15.0);
             if turned {
                 set_pack_lies_down(m.id, true);
             }
@@ -2725,7 +2825,9 @@ impl BedrockMobs {
             super::camel::set_model_drop(m.id, (moved("root") + moved("body")) / 16.0);
         }
         if !gui
-            && (m.extra.passenger || m.rider.is_some() || super::bedrock_debug::is_traced_mount(m.id))
+            && (m.extra.passenger
+                || m.rider.is_some()
+                || super::bedrock_debug::is_traced_mount(m.id))
         {
             trace_pose(m, alpha, time, dt, &frame);
         }
@@ -2757,7 +2859,12 @@ impl BedrockMobs {
                 })
                 .collect();
             if !vars.is_empty() {
-                log::info!("bedrock-dump-vars {}#{} {}", m.kind.id, m.id, vars.join(" "));
+                log::info!(
+                    "bedrock-dump-vars {}#{} {}",
+                    m.kind.id,
+                    m.id,
+                    vars.join(" ")
+                );
             }
         }
         let layers: Vec<DrawLayer> = frame
@@ -2774,8 +2881,8 @@ impl BedrockMobs {
                 let skinned = avatar && layer.texture == "textures/entity/steve";
                 // A pack's model samples the skin as it was drawn (its unused base-layer
                 // texels transparent): the game's own opaque-base copy is the fallback.
-                let skin = skinned
-                    .then(|| m.skin.clone().unwrap_or_else(|| m.kind.texture.to_string()));
+                let skin =
+                    skinned.then(|| m.skin.clone().unwrap_or_else(|| m.kind.texture.to_string()));
                 Some(DrawLayer {
                     built,
                     texture: match &skin {
@@ -2799,7 +2906,11 @@ impl BedrockMobs {
             position: [
                 lerp(m.previous.x, m.position.x),
                 lerp(m.previous.y, m.position.y)
-                    + if m.kind.id == "minecraft:player" { 1.62 } else { 0.0 },
+                    + if m.kind.id == "minecraft:player" {
+                        1.62
+                    } else {
+                        0.0
+                    },
                 lerp(m.previous.z, m.position.z),
             ],
             delta: [
@@ -2807,7 +2918,9 @@ impl BedrockMobs {
                 m.position.y - m.previous.y,
                 m.position.z - m.previous.z,
             ],
-            body_yaw: wrap_degrees(m.previous_body_yaw + (m.body_yaw - m.previous_body_yaw) * alpha),
+            body_yaw: wrap_degrees(
+                m.previous_body_yaw + (m.body_yaw - m.previous_body_yaw) * alpha,
+            ),
             target: [
                 wrap_degrees(
                     m.previous_head_yaw + (m.head_yaw - m.previous_head_yaw) * alpha
@@ -2828,9 +2941,9 @@ impl BedrockMobs {
                 Emit::Particle { locator, .. } | Emit::Hold { locator, .. } => locator
                     .as_deref()
                     .and_then(|l| {
-                        layers.iter().find_map(|d| {
-                            self.bundle.geometries.get(&d.layer.geometry)?.locator(l)
-                        })
+                        layers
+                            .iter()
+                            .find_map(|d| self.bundle.geometries.get(&d.layer.geometry)?.locator(l))
                     })
                     .map_or([0.0; 3], |l| l.1.offset.map(|v| f64::from(v) / 16.0)),
                 Emit::Sound(_) => [0.0; 3],
@@ -2846,14 +2959,24 @@ impl BedrockMobs {
             off_replaced: false,
         };
         self.parent_setups(m, alpha, dt, from_camera, &mut st.instance.vars);
-        let mut attached =
-            self.attachments(m, alpha, dt, from_camera, &st.instance.vars, (&layers, &frame.pose));
+        let mut attached = self.attachments(
+            m,
+            alpha,
+            dt,
+            from_camera,
+            &st.instance.vars,
+            (&layers, &frame.pose),
+        );
         for a in &mut attached {
             for (e, offset) in std::mem::take(&mut a.emits) {
                 self.send_emit(&mut queue, m, &live, e, offset, Some(a.slot));
             }
         }
-        let dressed = |slot: &str| attached.iter().any(|a| a.slot == slot && !a.layers.is_empty());
+        let dressed = |slot: &str| {
+            attached
+                .iter()
+                .any(|a| a.slot == slot && !a.layers.is_empty())
+        };
         held.main_replaced = dressed("main_hand");
         held.off_replaced = dressed("off_hand");
         if held.hidden {
@@ -2870,8 +2993,13 @@ impl BedrockMobs {
             .unwrap_or(false);
         for a in attached.iter().filter(|_| drives) {
             for (bone, drive) in &a.pose.bones {
-                let own = a.layers.iter().any(|d| d.built.names.iter().any(|n| n == bone));
-                let holder_has = layers.iter().any(|d| d.built.names.iter().any(|n| n == bone));
+                let own = a
+                    .layers
+                    .iter()
+                    .any(|d| d.built.names.iter().any(|n| n == bone));
+                let holder_has = layers
+                    .iter()
+                    .any(|d| d.built.names.iter().any(|n| n == bone));
                 if own || !holder_has {
                     continue;
                 }
@@ -3023,7 +3151,10 @@ impl BedrockMobs {
                     m.id,
                     held,
                     held.iter()
-                        .map(|(_, i)| attachables_for(&self.item_index, &i.to_ascii_lowercase()).cloned())
+                        .map(
+                            |(_, i)| attachables_for(&self.item_index, &i.to_ascii_lowercase())
+                                .cloned()
+                        )
                         .collect::<Vec<_>>()
                 )
             });
@@ -3089,7 +3220,10 @@ impl BedrockMobs {
             // Where its bones are on the holder, for a pack that asks (a glow turned to the
             // camera from the bone it shines from: a torch's flame, a harness's lamps).
             {
-                let target = st.bound_to.clone().unwrap_or_else(|| slot_bone(slot).to_owned());
+                let target = st
+                    .bound_to
+                    .clone()
+                    .unwrap_or_else(|| slot_bone(slot).to_owned());
                 st.instance.place = holder.0.iter().find_map(|d| {
                     let g = self.bundle.geometries.get(&d.layer.geometry)?;
                     horizon_bedrock::entity::bone_place(g, holder.1, &target)
@@ -3130,7 +3264,9 @@ impl BedrockMobs {
                 .into_iter()
                 .map(|e| {
                     let locator = match &e {
-                        Emit::Particle { locator, .. } | Emit::Hold { locator, .. } => locator.clone(),
+                        Emit::Particle { locator, .. } | Emit::Hold { locator, .. } => {
+                            locator.clone()
+                        }
                         Emit::Sound(_) => None,
                     };
                     let local = locator
@@ -3143,7 +3279,9 @@ impl BedrockMobs {
                         .map_or([0.0, 24.0, 0.0], |(_, l)| l.offset);
                     let p = [local[0], local[1] - 24.0, local[2]];
                     let at = place.map_or([0.0, 18.0, 0.0], |t| {
-                        std::array::from_fn(|r| t[r][0] * p[0] + t[r][1] * p[1] + t[r][2] * p[2] + t[r][3])
+                        std::array::from_fn(|r| {
+                            t[r][0] * p[0] + t[r][1] * p[1] + t[r][2] * p[2] + t[r][3]
+                        })
                     });
                     (e, at.map(|v| f64::from(v) / 16.0))
                 })
@@ -3218,16 +3356,23 @@ impl BedrockMobs {
                 let secs = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map_or(0, |d| d.as_secs());
-                super::render::log_bedrock_once(format!("attached/{}/{slot}/{secs}", m.kind.id), || {
-                    format!(
-                        "bedrock-attached {}#{} {slot}: attachable {id}, {} layers {:?}, binds {:?}",
-                        m.kind.id,
-                        m.id,
-                        layers.len(),
-                        layers.iter().enumerate().map(|(i, d)| (i, d.layer.geometry.as_str(), d.texture.as_str())).collect::<Vec<_>>(),
-                        binds
-                    )
-                });
+                super::render::log_bedrock_once(
+                    format!("attached/{}/{slot}/{secs}", m.kind.id),
+                    || {
+                        format!(
+                            "bedrock-attached {}#{} {slot}: attachable {id}, {} layers {:?}, binds {:?}",
+                            m.kind.id,
+                            m.id,
+                            layers.len(),
+                            layers
+                                .iter()
+                                .enumerate()
+                                .map(|(i, d)| (i, d.layer.geometry.as_str(), d.texture.as_str()))
+                                .collect::<Vec<_>>(),
+                            binds
+                        )
+                    },
+                );
             }
             out.push(Attached {
                 slot,
@@ -3445,9 +3590,7 @@ impl BedrockMobs {
             );
             // What the effect reads of its mob when it starts (a splash reads how fast it fell);
             // a state that goes on only keeps it (held), it does not start it again.
-            if !held
-                && let Some(l) = &live
-            {
+            if !held && let Some(l) = &live {
                 log_first(
                     &format!(
                         "particle {id} live: vertical_speed={:.1} delta_y={:.2}",
@@ -3521,10 +3664,7 @@ impl BedrockMobs {
 
     /// [`Self::step_particles`] with the blocks around: particles collide with them and know
     /// the block they are in (a rain drop's splash lands on the ground).
-    pub fn step_particles_on(
-        &self,
-        ground: Option<&dyn Ground>,
-    ) -> (Vec<Drawn>, Vec<Emitted>) {
+    pub fn step_particles_on(&self, ground: Option<&dyn Ground>) -> (Vec<Drawn>, Vec<Emitted>) {
         let now = Instant::now();
         let dt = {
             let mut clock = lock(&self.clock);
@@ -3598,7 +3738,11 @@ impl BedrockMobs {
                     .iter()
                     .map(|(t, (e, a, s))| format!("{t}: emitters {e} alive {a} sprites {s}"))
                     .collect();
-                log::info!("bedrock-debug: particles {} | {}", emitters.len(), text.join(" | "));
+                log::info!(
+                    "bedrock-debug: particles {} | {}",
+                    emitters.len(),
+                    text.join(" | ")
+                );
             }
         }
         emitters.retain(|a| !a.emitter.finished());
@@ -3790,7 +3934,11 @@ mod tests {
         // The fall ends on the bottom of a shallow pool before the game finds the water.
         assert_eq!(w.look(2, false, -38.0), None);
         assert_eq!(w.look(3, true, -3.4), Some(-38.0));
-        assert_eq!(w.look(3, true, -3.4), Some(-38.0), "every frame of that tick");
+        assert_eq!(
+            w.look(3, true, -3.4),
+            Some(-38.0),
+            "every frame of that tick"
+        );
         assert_eq!(w.look(4, true, -2.0), None);
         // Slipping in slower than it moves on: the speed it has.
         assert_eq!(w.look(5, false, 0.0), None);
@@ -3837,11 +3985,17 @@ mod tests {
     #[test]
     fn java_items_take_their_bedrock_names() {
         assert_eq!(super::bedrock_item_name("minecraft:magma_block"), "magma");
-        assert_eq!(super::bedrock_item_name("minecraft:jack_o_lantern"), "lit_pumpkin");
+        assert_eq!(
+            super::bedrock_item_name("minecraft:jack_o_lantern"),
+            "lit_pumpkin"
+        );
         assert_eq!(super::bedrock_item_name("minecraft:snow_block"), "snow");
         assert_eq!(super::bedrock_item_name("minecraft:snow"), "snow_layer");
         assert_eq!(super::bedrock_item_name("minecraft:dirt"), "dirt");
-        let index = HashMap::from([("minecraft:magma".to_owned(), vec!["minecraft:magma".to_owned()])]);
+        let index = HashMap::from([(
+            "minecraft:magma".to_owned(),
+            vec!["minecraft:magma".to_owned()],
+        )]);
         assert!(super::attachables_for(&index, "minecraft:magma_block").is_some());
     }
 
@@ -4012,10 +4166,17 @@ mod tests {
         let mut matrices = HashMap::new();
         bone_matrices(&b.part, &poses, &mut matrices);
         let (now, _) = matrices["hand"];
-        let item = b.part.children.iter().find(|c| c.name == "item").unwrap().pose;
+        let item = b
+            .part
+            .children
+            .iter()
+            .find(|c| c.name == "item")
+            .unwrap()
+            .pose;
         // The item's origin, drawn the way `draw_attached` does: the holder's anchor, then the
         // item's own pose (in sixteenths, as every pose is).
-        let at = (held_anchor(now, 1.0) * posed(glam::Mat4::IDENTITY, item)).transform_point3(glam::Vec3::ZERO);
+        let at = (held_anchor(now, 1.0) * posed(glam::Mat4::IDENTITY, item))
+            .transform_point3(glam::Vec3::ZERO);
         let hand = now.transform_point3(glam::Vec3::ZERO);
         assert!((at - hand).length() < 1e-4, "{at:?} vs {hand:?}");
         // And that is where the hand is: 15 sixteenths up, 6 to the side, not blocks away.
@@ -4027,7 +4188,9 @@ mod tests {
     #[ignore = "needs a pack"]
     fn sword_probe() {
         use super::super::render::{bone_matrices, held_anchor, posed};
-        let Ok(dir) = std::env::var("HORIZON_TEST_PACK") else { return };
+        let Ok(dir) = std::env::var("HORIZON_TEST_PACK") else {
+            return;
+        };
         let pack = horizon_bedrock::pack::Pack::open(std::path::Path::new(&dir)).unwrap();
         let mut geos = HashMap::new();
         let mut builtin = horizon_bedrock::bundle::Bundle::default();
@@ -4035,7 +4198,11 @@ mod tests {
         geos.extend(builtin.geometries);
         for p in pack.paths().map(str::to_owned).collect::<Vec<_>>() {
             if p.starts_with("models/") && p.ends_with(".json") {
-                if let Ok(list) = pack.read_json(&p).map_err(|_| ()).and_then(|v| geometry::parse_file(&v).map_err(|_| ())) {
+                if let Ok(list) = pack
+                    .read_json(&p)
+                    .map_err(|_| ())
+                    .and_then(|v| geometry::parse_file(&v).map_err(|_| ()))
+                {
                     for g in list {
                         geos.insert(g.id.to_ascii_lowercase(), g);
                     }
@@ -4052,7 +4219,19 @@ mod tests {
         let item_poses = super::super::anim::Poses::new(&sword.part);
         let anchor = held_anchor(now, 1.0);
         let _ = posed;
-        super::super::render::draw_attached(&sword.part, glam::Mat4::IDENTITY, glam::Mat4::IDENTITY, true, &|b| (b == "sword").then_some(anchor), &item_poses, [0.0, 0.0, 1.0, 1.0], 0, 0, 0, &mut out);
+        super::super::render::draw_attached(
+            &sword.part,
+            glam::Mat4::IDENTITY,
+            glam::Mat4::IDENTITY,
+            true,
+            &|b| (b == "sword").then_some(anchor),
+            &item_poses,
+            [0.0, 0.0, 1.0, 1.0],
+            0,
+            0,
+            0,
+            &mut out,
+        );
         let (mut lo, mut hi) = (glam::Vec3::splat(f32::MAX), glam::Vec3::splat(f32::MIN));
         for v in &out {
             let p = glam::Vec3::from_array(v.pos);
@@ -4060,7 +4239,15 @@ mod tests {
             hi = hi.max(p);
         }
         // The game's frame: y down from the 24 line; above the feet is 1.5 - y.
-        eprintln!("sword x {:.2}..{:.2} height above feet {:.2}..{:.2} z {:.2}..{:.2}", lo.x, hi.x, 1.5 - hi.y, 1.5 - lo.y, lo.z, hi.z);
+        eprintln!(
+            "sword x {:.2}..{:.2} height above feet {:.2}..{:.2} z {:.2}..{:.2}",
+            lo.x,
+            hi.x,
+            1.5 - hi.y,
+            1.5 - lo.y,
+            lo.z,
+            hi.z
+        );
     }
 
     #[test]

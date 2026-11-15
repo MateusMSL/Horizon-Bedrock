@@ -189,13 +189,25 @@ impl Geometry {
                     // higher, centred on the hand as in the game.
                     let (sx, sy, sz) = (k * m.scale[0], m.scale[1], k * m.scale[2]);
                     let lp = [m.local_pivot[0] * k, m.local_pivot[1], m.local_pivot[2] * k];
-                    let origin = [m.position[0], 2.0 * b.pivot[1] - m.position[1], m.position[2]];
+                    let origin = [
+                        m.position[0],
+                        2.0 * b.pivot[1] - m.position[1],
+                        m.position[2],
+                    ];
                     let at = |x: f32, y: f32, z: f32| -> [f32; 3] {
-                        [origin[0] + x - lp[0], origin[1] + y + lp[1], origin[2] + z - lp[2]]
+                        [
+                            origin[0] + x - lp[0],
+                            origin[1] + y + lp[1],
+                            origin[2] + z - lp[2],
+                        ]
                     };
                     let pivot = Some(origin);
                     let solid = sprite.filter(|_| m.pixel_depth);
-                    let depth = if solid.is_some() { sy.max(0.01) } else { SPRITE_DEPTH };
+                    let depth = if solid.is_some() {
+                        sy.max(0.01)
+                    } else {
+                        SPRITE_DEPTH
+                    };
                     let mut push =
                         |origin: [f32; 3], extent: [f32; 3], faces: [Option<FaceUv>; 6]| {
                             cubes.push(Cube {
@@ -941,7 +953,11 @@ mod tests {
     #[test]
     fn uv_rotation_turns_the_face_texture_by_quarter_turns() {
         let face = |turns: u8| -> Vec<(f32, f32)> {
-            let up = FaceUv { uv: [0.0, 0.0], size: [4.0, 4.0], turns };
+            let up = FaceUv {
+                uv: [0.0, 0.0],
+                size: [4.0, 4.0],
+                turns,
+            };
             let mut faces: [Option<FaceUv>; 6] = [None; 6];
             faces[4] = Some(up);
             let cube = Cube {

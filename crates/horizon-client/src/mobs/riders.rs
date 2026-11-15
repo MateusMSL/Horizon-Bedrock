@@ -54,7 +54,6 @@ pub fn mount_kind(rider: u32) -> Option<String> {
         .map(|(_, k)| k.clone())
 }
 
-
 /// `LivingEntity.getScale`: the `minecraft:scale` the server sent on any
 /// living entity, 1 when unset (`Mob::model_scale`).
 pub(super) fn scale(m: &Mob) -> f64 {

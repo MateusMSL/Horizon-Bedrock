@@ -180,9 +180,18 @@ fn the_pack_loads_each_kind_of_resource() {
     let (_dirs, b) = load();
     assert!(b.entities.contains_key("synth:beast"), "client entity");
     assert!(b.attachables.contains_key("synth:staff"), "attachable");
-    assert!(b.geometries.contains_key("geometry.synth.beast"), "geometry");
-    assert!(b.render_controllers.contains_key("controller.render.synth"), "render controller");
-    assert!(b.library.animations.get("animation.synth.idle").is_some(), "animation");
+    assert!(
+        b.geometries.contains_key("geometry.synth.beast"),
+        "geometry"
+    );
+    assert!(
+        b.render_controllers.contains_key("controller.render.synth"),
+        "render controller"
+    );
+    assert!(
+        b.library.animations.get("animation.synth.idle").is_some(),
+        "animation"
+    );
 }
 
 #[test]
@@ -195,7 +204,10 @@ fn an_entity_draws_its_geometry_texture_and_visible_bones() {
     let l = &f.layers[0];
     assert_eq!(l.geometry, "geometry.synth.beast");
     assert_eq!(l.texture, "textures/entity/beast");
-    assert!(l.bone_visible("head") && !l.bone_visible("saddle"), "saddle hidden unsaddled");
+    assert!(
+        l.bone_visible("head") && !l.bone_visible("saddle"),
+        "saddle hidden unsaddled"
+    );
 }
 
 #[test]
@@ -203,12 +215,26 @@ fn queries_pick_geometry_texture_scale_and_parts() {
     let (_dirs, b) = load();
     let def = &b.entities["synth:beast"];
     let mut inst = Instance::new(1);
-    let mut w = World { saddled: true, sheared: true, baby: true, ..World::default() };
+    let mut w = World {
+        saddled: true,
+        sheared: true,
+        baby: true,
+        ..World::default()
+    };
     let f = inst.update(def, &assets(&b), &mut w, 0.05);
-    assert_eq!(f.layers[0].geometry, "geometry.synth.beast_baby", "baby model");
-    assert_eq!(f.layers[0].texture, "textures/entity/beast_sheared", "sheared texture");
+    assert_eq!(
+        f.layers[0].geometry, "geometry.synth.beast_baby",
+        "baby model"
+    );
+    assert_eq!(
+        f.layers[0].texture, "textures/entity/beast_sheared",
+        "sheared texture"
+    );
     assert_eq!(f.scale, 2.0, "scale from a variable set in pre_animation");
-    assert!(f.layers[0].bone_visible("saddle"), "saddle shown when saddled");
+    assert!(
+        f.layers[0].bone_visible("saddle"),
+        "saddle shown when saddled"
+    );
 }
 
 #[test]
@@ -218,12 +244,23 @@ fn animations_and_controllers_pose_bones() {
     let mut inst = Instance::new(1);
     let mut w = World::default();
     let f = inst.update(def, &assets(&b), &mut w, 0.05);
-    assert_eq!(f.pose.get("head").unwrap().rotation, [10.0, 0.0, 0.0], "looping animation");
-    assert!(f.pose.get("body").is_none_or(|p| p.rotation == [0.0; 3]), "controller idle");
+    assert_eq!(
+        f.pose.get("head").unwrap().rotation,
+        [10.0, 0.0, 0.0],
+        "looping animation"
+    );
+    assert!(
+        f.pose.get("body").is_none_or(|p| p.rotation == [0.0; 3]),
+        "controller idle"
+    );
     w.fire = true;
     inst.update(def, &assets(&b), &mut w, 0.05);
     let f = inst.update(def, &assets(&b), &mut w, 0.05);
-    assert_eq!(f.pose.get("body").unwrap().rotation[2], 45.0, "controller state on a query");
+    assert_eq!(
+        f.pose.get("body").unwrap().rotation[2],
+        45.0,
+        "controller state on a query"
+    );
 }
 
 struct Held;
@@ -257,7 +294,10 @@ fn an_attachable_names_the_holders_bone_it_binds() {
         .iter()
         .map(|g| (g.name.as_str(), g.binding.as_deref()))
         .collect();
-    assert!(bones["item"].is_some_and(|x| x.contains("item_slot_to_bone_name")), "binding kept");
+    assert!(
+        bones["item"].is_some_and(|x| x.contains("item_slot_to_bone_name")),
+        "binding kept"
+    );
     assert!(bones["root"].is_none());
 }
 
@@ -279,9 +319,18 @@ fn block_and_item_textures_follow_the_texture_lists_and_flipbooks_animate() {
         std::fs::read(tex.join(java)).ok() == std::fs::read(src.join(bedrock)).ok()
             && tex.join(java).exists()
     };
-    assert!(same("block/stone.png", "blocks/custom_rock.png"), "terrain_texture.json renames a block texture");
-    assert!(same("block/grass_block_top.png", "blocks/lawn.png"), "a list of the same file is one file");
-    assert!(same("item/apple.png", "items/fruit.png"), "item_texture.json renames an item texture");
+    assert!(
+        same("block/stone.png", "blocks/custom_rock.png"),
+        "terrain_texture.json renames a block texture"
+    );
+    assert!(
+        same("block/grass_block_top.png", "blocks/lawn.png"),
+        "a list of the same file is one file"
+    );
+    assert!(
+        same("item/apple.png", "items/fruit.png"),
+        "item_texture.json renames an item texture"
+    );
     let meta = std::fs::read_to_string(tex.join("block/water_still.png.mcmeta")).unwrap();
     let meta: serde_json::Value = serde_json::from_str(&meta).unwrap();
     assert_eq!(meta["animation"]["frametime"], 4);

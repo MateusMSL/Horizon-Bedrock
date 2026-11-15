@@ -37,17 +37,35 @@ impl Host for Hop {
             "delta_time" => Value::Num(0.05),
             "frame_alpha" => Value::Num(0.0),
             "is_on_ground" => Value::bool(p < 12),
-            "vertical_speed" => Value::Num(if p < 12 { 0.0 } else if p < 18 { 6.0 } else { -6.0 }),
+            "vertical_speed" => Value::Num(if p < 12 {
+                0.0
+            } else if p < 18 {
+                6.0
+            } else {
+                -6.0
+            }),
             "variant" => Value::Num(self.variant),
             "distance_from_camera" => Value::Num(5.0),
             "model_scale" => Value::Num(1.0),
             "health" => Value::Num(20.0),
             "max_health" => Value::Num(20.0),
             "time_stamp" => Value::Num(self.tick as f32),
-            "rotation_to_camera" | "camera_rotation" | "body_y_rotation" | "target_y_rotation"
-            | "target_x_rotation" | "ground_speed" | "modified_move_speed" | "is_local_player"
-            | "is_name_any" | "is_baby" | "is_in_ui" | "is_attached" | "is_on_fire"
-            | "is_in_water" | "is_in_lava" | "head_is_in_water" => {
+            "rotation_to_camera"
+            | "camera_rotation"
+            | "body_y_rotation"
+            | "target_y_rotation"
+            | "target_x_rotation"
+            | "ground_speed"
+            | "modified_move_speed"
+            | "is_local_player"
+            | "is_name_any"
+            | "is_baby"
+            | "is_in_ui"
+            | "is_attached"
+            | "is_on_fire"
+            | "is_in_water"
+            | "is_in_lava"
+            | "head_is_in_water" => {
                 let _ = args;
                 Value::Num(0.0)
             }
@@ -98,20 +116,39 @@ fn main() {
     let mut inst = Instance::new(1);
     let variant: f32 = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(4.0);
     let mut host = Hop { tick: 0, variant };
-    for t in 0..std::env::var("TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(48u32) {
+    for t in 0..std::env::var("TICKS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(48u32)
+    {
         host.tick = t;
         let f = inst.update(def, &assets, &mut host, 0.05);
-        if t % std::env::var("EVERY").ok().and_then(|v| v.parse().ok()).unwrap_or(8u32) == 0 {
-            println!("t={t:2} {}", inst.describe(def, &assets).chars().take(200).collect::<String>());
+        if t % std::env::var("EVERY")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(8u32)
+            == 0
+        {
+            println!(
+                "t={t:2} {}",
+                inst.describe(def, &assets)
+                    .chars()
+                    .take(200)
+                    .collect::<String>()
+            );
             let want = std::env::var("BONES").unwrap_or_default();
             for (n, b) in &f.pose.bones {
                 if want.split(',').any(|w| !w.is_empty() && n.contains(w)) {
-                    println!("   {n}: pos {:?} rot {:?} scale {:?}", b.position, b.rotation, b.scale);
+                    println!(
+                        "   {n}: pos {:?} rot {:?} scale {:?}",
+                        b.position, b.rotation, b.scale
+                    );
                 }
             }
         }
     }
-    let names = std::env::var("VARS").unwrap_or_else(|_| "dxvpbr,habcyx,acloko,fuppgm,rdmkec,jgzabo,qugnsz".into());
+    let names = std::env::var("VARS")
+        .unwrap_or_else(|_| "dxvpbr,habcyx,acloko,fuppgm,rdmkec,jgzabo,qugnsz".into());
     for n in names.split(',').filter(|n| !n.is_empty()) {
         println!("  v.{n} = {:?}", inst.vars.get(&molang::intern(n)));
     }

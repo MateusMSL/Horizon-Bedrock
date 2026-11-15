@@ -27,7 +27,11 @@ pub fn color(v: &Value) -> Option<Rgb> {
             if c.len() != 3 {
                 return None;
             }
-            let scale = if c.iter().all(|x| *x <= 1.0) { 255.0 } else { 1.0 };
+            let scale = if c.iter().all(|x| *x <= 1.0) {
+                255.0
+            } else {
+                1.0
+            };
             let byte = |x: f64| (x * scale).round().clamp(0.0, 255.0) as u32;
             Some(byte(c[0]) << 16 | byte(c[1]) << 8 | byte(c[2]))
         }
@@ -67,8 +71,14 @@ pub struct Fog {
 impl Fog {
     pub fn parse(v: &Value) -> Option<Fog> {
         let root = v.get("minecraft:fog_settings")?;
-        let id = root.pointer("/description/identifier")?.as_str()?.to_owned();
-        let mut fog = Fog { id, ..Fog::default() };
+        let id = root
+            .pointer("/description/identifier")?
+            .as_str()?
+            .to_owned();
+        let mut fog = Fog {
+            id,
+            ..Fog::default()
+        };
         if let Some(distance) = root.get("distance").and_then(Value::as_object) {
             for (medium, d) in distance {
                 let number = |key: &str| d.get(key).and_then(Value::as_f64).map(|n| n as f32);
@@ -89,7 +99,10 @@ impl Fog {
                 );
             }
         }
-        if let Some(density) = root.pointer("/volumetric/density").and_then(Value::as_object) {
+        if let Some(density) = root
+            .pointer("/volumetric/density")
+            .and_then(Value::as_object)
+        {
             for (medium, d) in density {
                 let number = |key: &str| d.get(key).and_then(Value::as_f64).unwrap_or(0.0) as f32;
                 fog.density.insert(
@@ -130,10 +143,16 @@ impl ClientBiome {
     /// A `biomes/<name>.client_biome.json` file.
     pub fn parse(v: &Value) -> Option<ClientBiome> {
         let root = v.get("minecraft:client_biome")?;
-        let id = root.pointer("/description/identifier")?.as_str()?.to_owned();
+        let id = root
+            .pointer("/description/identifier")?
+            .as_str()?
+            .to_owned();
         let components = root.get("components")?;
         let get = |path: &str| components.pointer(path);
-        let mut b = ClientBiome { id, ..ClientBiome::default() };
+        let mut b = ClientBiome {
+            id,
+            ..ClientBiome::default()
+        };
         b.water_color = get("/minecraft:water_appearance/surface_color").and_then(color);
         b.water_transparency = get("/minecraft:water_appearance/surface_transparency")
             .and_then(Value::as_f64)
@@ -148,12 +167,17 @@ impl ClientBiome {
             .and_then(Value::as_str)
             .map(str::to_owned);
         if let Some(music) = get("/minecraft:music/music").and_then(Value::as_str) {
-            let volume = get("/minecraft:music/volume").and_then(Value::as_f64).unwrap_or(1.0);
+            let volume = get("/minecraft:music/volume")
+                .and_then(Value::as_f64)
+                .unwrap_or(1.0);
             b.music = Some((music.to_owned(), volume as f32));
         }
         for (component, key) in [
             ("minecraft:atmosphere_identifier", "atmosphere_identifier"),
-            ("minecraft:color_grading_identifier", "color_grading_identifier"),
+            (
+                "minecraft:color_grading_identifier",
+                "color_grading_identifier",
+            ),
             ("minecraft:lighting_identifier", "lighting_identifier"),
             ("minecraft:water_identifier", "water_identifier"),
         ] {
@@ -173,7 +197,10 @@ impl ClientBiome {
             .iter()
             .filter_map(|(name, b)| {
                 let b = b.as_object()?;
-                let mut out = ClientBiome { id: name.clone(), ..ClientBiome::default() };
+                let mut out = ClientBiome {
+                    id: name.clone(),
+                    ..ClientBiome::default()
+                };
                 out.water_color = b.get("water_surface_color").and_then(color);
                 out.water_transparency = b
                     .get("water_surface_transparency")
@@ -244,7 +271,10 @@ impl BlockDef {
                 Some(Value::Object(faces)) => faces.values().any(|f| f.as_bool() == Some(true)),
                 _ => false,
             };
-            b.brightness_gamma = def.get("brightness_gamma").and_then(Value::as_f64).map(|n| n as f32);
+            b.brightness_gamma = def
+                .get("brightness_gamma")
+                .and_then(Value::as_f64)
+                .map(|n| n as f32);
             b.ambient_occlusion_exponent = def
                 .get("ambient_occlusion_exponent")
                 .and_then(Value::as_f64)
@@ -275,7 +305,10 @@ pub struct CullRules {
 impl CullRules {
     pub fn parse(v: &Value) -> Option<CullRules> {
         let root = v.get("minecraft:block_culling_rules")?;
-        let id = root.pointer("/description/identifier")?.as_str()?.to_owned();
+        let id = root
+            .pointer("/description/identifier")?
+            .as_str()?
+            .to_owned();
         let rules = root
             .get("rules")?
             .as_array()?
@@ -355,7 +388,10 @@ mod tests {
         assert_eq!(b.water_transparency, Some(0.8));
         assert_eq!(b.fog.as_deref(), Some("minecraft:fog_ice_plains"));
         assert_eq!(b.music, Some(("music.game.creative".into(), 0.5)));
-        assert_eq!(b.deferred["lighting_identifier"], "minecraft:default_lighting");
+        assert_eq!(
+            b.deferred["lighting_identifier"],
+            "minecraft:default_lighting"
+        );
         let legacy = ClientBiome::parse_legacy(&json!({
             "biomes": {"swamp": {"water_surface_color": "#617B64", "water_surface_transparency": 0.65}}
         }));

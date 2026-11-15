@@ -160,24 +160,26 @@ impl Game<'_> {
                 super::packs::packs_dir()
             })
             .into_iter()
-                .flatten()
-                .flatten()
-                .map(|e| {
-                    let meta = e.metadata().ok();
-                    (
-                        e.file_name().to_string_lossy().into_owned(),
-                        meta.as_ref().map_or(0, |m| m.len()),
-                        meta.and_then(|m| m.modified().ok()),
-                    )
-                })
-                .collect();
+            .flatten()
+            .flatten()
+            .map(|e| {
+                let meta = e.metadata().ok();
+                (
+                    e.file_name().to_string_lossy().into_owned(),
+                    meta.as_ref().map_or(0, |m| m.len()),
+                    meta.and_then(|m| m.modified().ok()),
+                )
+            })
+            .collect();
         let changed = self
             .pack_folder
             .as_ref()
             .is_some_and(|(_, seen)| *seen != signature);
         self.pack_folder = Some((now, signature));
         if changed && addons {
-            self.ui.options.update_addon_infos(super::packs::addon_infos());
+            self.ui
+                .options
+                .update_addon_infos(super::packs::addon_infos());
         } else if changed {
             let infos = super::packs::pack_infos(&self.vanilla_root(), &self.server_packs.active);
             self.ui.options.update_pack_infos(infos);

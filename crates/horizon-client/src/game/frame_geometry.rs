@@ -451,9 +451,21 @@ impl Game<'_> {
             // (`bedrock.rs`), in place of the game's own model. The game's own use poses turn
             // its models, so the pack gets the hand where it rests.
             let rest = to_world
-                * horizon_client::first_person::item_pose(left, inverse_height, 0.0, ItemPose::Using);
+                * horizon_client::first_person::item_pose(
+                    left,
+                    inverse_height,
+                    0.0,
+                    ItemPose::Using,
+                );
             let mut dressed = Vec::new();
-            if self.first_person_pack_item(&stack.item, hand == Hand::Off, a, rest, packed, &mut dressed) {
+            if self.first_person_pack_item(
+                &stack.item,
+                hand == Hand::Off,
+                a,
+                rest,
+                packed,
+                &mut dressed,
+            ) {
                 runs.push((out.len() as u32, item_id));
                 out.append(&mut dressed);
                 continue;

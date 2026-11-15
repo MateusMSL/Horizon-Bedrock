@@ -1834,7 +1834,9 @@ impl Game<'_> {
 /// each hit (`last_hit` moving) turning it over.
 fn stand_hurt_direction(a: &ArmorStand) -> f32 {
     static HITS: std::sync::Mutex<Option<HashMap<u32, (i64, u32)>>> = std::sync::Mutex::new(None);
-    let mut hits = HITS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut hits = HITS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let map = hits.get_or_insert_with(HashMap::new);
     if map.len() > 4096 {
         map.clear();

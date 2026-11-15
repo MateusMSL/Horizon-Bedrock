@@ -36,7 +36,12 @@ pub fn set_model_drop(id: u32, drop: f32) {
     }
 }
 fn model_drop(id: u32) -> Option<f32> {
-    MODEL_DROP.lock().ok()?.iter().find(|(i, _)| *i == id).map(|e| e.1)
+    MODEL_DROP
+        .lock()
+        .ok()?
+        .iter()
+        .find(|(i, _)| *i == id)
+        .map(|e| e.1)
 }
 pub fn register(m: &mut Mob) {
     m.extra.tame = true;

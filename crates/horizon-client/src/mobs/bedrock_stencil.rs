@@ -95,7 +95,12 @@ fn state(f: &MaterialFlags, color: bool) -> pass::State {
 pub fn hand_over(f: &MaterialFlags, out: &mut Vec<Vertex>, start: usize) {
     let route = route(f);
     if f.stencil.matters() && super::bedrock_debug::settings().dump_draw {
-        let id = format!("{:?}/{:?}/{}", route, f.stencil, super::render::in_first_person_view());
+        let id = format!(
+            "{:?}/{:?}/{}",
+            route,
+            f.stencil,
+            super::render::in_first_person_view()
+        );
         super::render::log_bedrock_once(format!("stencil-route/{id}"), || {
             format!(
                 "bedrock-stencil: piece with {:?} goes {:?} (pass on {}, first person {}, {} vertices)",

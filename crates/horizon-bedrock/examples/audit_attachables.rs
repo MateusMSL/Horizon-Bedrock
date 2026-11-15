@@ -15,8 +15,12 @@ struct H {
 impl Host for H {
     fn query(&mut self, name: &str, _args: &[Value]) -> Value {
         match name {
-            "is_attached" | "is_alive" | "is_on_ground" | "graphics_mode_is_any"
-            | "is_pack_setting_enabled" | "is_owner_identifier_any" => Value::Num(1.0),
+            "is_attached"
+            | "is_alive"
+            | "is_on_ground"
+            | "graphics_mode_is_any"
+            | "is_pack_setting_enabled"
+            | "is_owner_identifier_any" => Value::Num(1.0),
             "delta_time" => Value::Num(0.05),
             "item_slot_to_bone_name" => Value::Str("rightitem".into()),
             "is_name_any" | "is_in_ui" => Value::Num(0.0),
@@ -98,7 +102,10 @@ fn main() {
         }
         let mut drawable = false;
         for l in &f.layers {
-            match geos.get(&l.geometry.to_ascii_lowercase()).or_else(|| geos.get(&l.geometry)) {
+            match geos
+                .get(&l.geometry.to_ascii_lowercase())
+                .or_else(|| geos.get(&l.geometry))
+            {
                 None => problems.push(format!("geometria ausente {}", l.geometry)),
                 Some(g) => {
                     if g.bones.iter().any(|b| {

@@ -338,8 +338,7 @@ mod tests {
         pack(&root.join("addons/Demo"));
         pack(&root.join("resourcepacks/Demo"));
         // Only `addons/` takes Bedrock's packs.
-        let none =
-            super::super::folder(&root.join("resourcepacks"), super::super::RESOURCE_FORMAT);
+        let none = super::super::folder(&root.join("resourcepacks"), super::super::RESOURCE_FORMAT);
         assert!(none.is_empty(), "{none:?}");
         let packs = super::super::addons(&root.join("addons"));
         assert_eq!(packs.len(), 1, "{packs:?}");

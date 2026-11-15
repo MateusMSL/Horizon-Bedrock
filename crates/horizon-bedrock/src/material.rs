@@ -297,10 +297,15 @@ impl Materials {
                 read_mask = d.stencil_read_mask.or(read_mask);
             }
             f.stencil_mask = read_mask.unwrap_or(0);
-            let write_mask = chain.iter().rev().fold(None, |m, d| d.stencil_write_mask.or(m));
+            let write_mask = chain
+                .iter()
+                .rev()
+                .fold(None, |m, d| d.stencil_write_mask.or(m));
             f.stencil = Stencil {
                 enabled: true,
-                func: func.and_then(StencilFunc::parse).unwrap_or(StencilFunc::Always),
+                func: func
+                    .and_then(StencilFunc::parse)
+                    .unwrap_or(StencilFunc::Always),
                 replace: states.contains("StencilWrite") && pass == Some("Replace"),
                 reference: reference.unwrap_or(0),
                 read_mask: read_mask.unwrap_or(u8::MAX),

@@ -1216,7 +1216,10 @@ impl Downloader {
         let decode = |bytes: &[u8]| -> Option<(Vec<u8>, Option<Vec<u8>>)> {
             let (w, h, rgba) = crate::hud::decode_bytes(bytes).ok()?;
             match kind {
-                Kind::Skin => Some((process_legacy_skin(w, h, &rgba)?, process_skin_raw(w, h, &rgba))),
+                Kind::Skin => Some((
+                    process_legacy_skin(w, h, &rgba)?,
+                    process_skin_raw(w, h, &rgba),
+                )),
                 Kind::Cape => Some((process_cape(w, h, &rgba)?, None)),
                 Kind::Elytra => Some((rgba, None)),
             }

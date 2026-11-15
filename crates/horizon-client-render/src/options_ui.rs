@@ -4497,8 +4497,12 @@ impl OptionsUi {
                     self.data_pack_dir.is_some()
                         || crate::packs::is_addon_id(id) == self.addons_page
                 };
-                let selection: Vec<String> =
-                    self.pack_selection.iter().filter(|id| own(id)).cloned().collect();
+                let selection: Vec<String> = self
+                    .pack_selection
+                    .iter()
+                    .filter(|id| own(id))
+                    .cloned()
+                    .collect();
                 let mut screen = crate::pack_screen::PackScreen::new(
                     &m,
                     crate::text::Text::translate(title, &[]),

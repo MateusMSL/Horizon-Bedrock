@@ -69,6 +69,8 @@ pub mod keypad;
 pub mod terrain_model;
 pub use horizon_polytone::creative_tabs as polytone_creative_tabs;
 pub use horizon_world::json_folder;
+/// Game particles a Bedrock pack draws itself (kept apart from `particles`).
+pub mod bedrock_particles;
 pub mod level_loading;
 pub mod light;
 pub mod lod;
@@ -101,8 +103,6 @@ pub mod pad_glyph;
 pub mod paged_maps;
 pub mod par;
 pub mod particles;
-/// Game particles a Bedrock pack draws itself (kept apart from `particles`).
-pub mod bedrock_particles;
 pub mod poi_sections;
 pub mod polytone_post;
 pub mod post_chain;

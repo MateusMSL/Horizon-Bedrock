@@ -231,7 +231,9 @@ fn builtin_query(name: &str, args: &[Value]) -> Option<Value> {
     let (first, rest) = args.split_first()?;
     match name {
         "any" => Some(Value::bool(rest.iter().any(|v| first.equals(v)))),
-        "all" => Some(Value::bool(!rest.is_empty() && rest.iter().all(|v| first.equals(v)))),
+        "all" => Some(Value::bool(
+            !rest.is_empty() && rest.iter().all(|v| first.equals(v)),
+        )),
         "approx_eq" => Some(Value::bool(
             rest.iter().all(|v| (first.num() - v.num()).abs() < 1e-6),
         )),

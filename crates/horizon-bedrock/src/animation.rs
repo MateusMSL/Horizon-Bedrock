@@ -722,9 +722,8 @@ impl Animation {
                 }
                 if let Some(c) = &b.position {
                     let rest = pose.rest.get(&b.bone.to_ascii_lowercase());
-                    let here = std::array::from_fn(|a| {
-                        entry.position[a] + rest.map_or(0.0, |r| r[a])
-                    });
+                    let here =
+                        std::array::from_fn(|a| entry.position[a] + rest.map_or(0.0, |r| r[a]));
                     let v = c.sample(st.time, env, scope, here);
                     for a in 0..3 {
                         entry.position[a] += v[a] * weight;
@@ -1124,7 +1123,12 @@ impl Run<'_, '_> {
         }
         let state = &ctrl.states[st.state];
         for e in &state.events {
-            if let Event::Particle { effect, locator, pre } = e {
+            if let Event::Particle {
+                effect,
+                locator,
+                pre,
+            } = e
+            {
                 self.events.push(Event::Hold {
                     effect: effect.clone(),
                     locator: locator.clone(),
@@ -1606,14 +1610,12 @@ mod tests {
 
     #[test]
     fn a_controller_the_parent_stops_playing_starts_over_and_clears_its_flags() {
-        let l = lib(
-            r#"{"format_version":"1.10.0","animation_controllers":{
+        let l = lib(r#"{"format_version":"1.10.0","animation_controllers":{
               "controller.animation.t.parent":{"initial_state":"default","states":{
                 "default":{"animations":[{"child":"!q.stop"}]}}},
               "controller.animation.t.child":{"initial_state":"a","states":{
                 "a":{"on_entry":["v.busy=0;"],"transitions":[{"b":"q.go"}]},
-                "b":{"on_entry":["v.busy=1;"]}}}}}"#,
-        );
+                "b":{"on_entry":["v.busy=1;"]}}}}}"#);
         let n = names(&[
             ("parent", "controller.animation.t.parent"),
             ("child", "controller.animation.t.child"),
@@ -1675,9 +1677,13 @@ mod tests {
             rng: &mut rng,
         };
         let r = one.sample(0.0, &mut env, Scope::default(), [0.0; 3]);
-        assert!((r[0] - 90.0).abs() < 1e-3 && r[1].abs() < 1e-3 && r[2].abs() < 1e-3, "{r:?}");
+        assert!(
+            (r[0] - 90.0).abs() < 1e-3 && r[1].abs() < 1e-3 && r[2].abs() < 1e-3,
+            "{r:?}"
+        );
         // Turns about one axis add up.
-        let two = Channel::parse(&crate::jsonc::parse(r#"[{"z": 30}, {"z": 15}]"#).unwrap()).unwrap();
+        let two =
+            Channel::parse(&crate::jsonc::parse(r#"[{"z": 30}, {"z": 15}]"#).unwrap()).unwrap();
         let r = two.sample(0.0, &mut env, Scope::default(), [0.0; 3]);
         assert!((r[2] - 45.0).abs() < 1e-3, "{r:?}");
     }

@@ -56,7 +56,6 @@ mod agent;
 mod agent_settings;
 mod allays;
 mod armor_stands;
-mod pack_proxy;
 mod atlas_slots;
 mod attachment_sync;
 mod autosave;
@@ -164,6 +163,7 @@ mod frames;
 #[cfg(feature = "friends")]
 mod friends;
 mod held_items;
+mod pack_proxy;
 #[cfg(test)]
 mod setblock_order_tests;
 // Without Play with Friends: nothing shared, no Friends button (game/friends_off.rs).

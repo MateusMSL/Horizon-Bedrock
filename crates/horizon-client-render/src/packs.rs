@@ -678,7 +678,11 @@ pub fn discover_all(resources: &Path, packs_dir: &Path, addons_dir: &Path) -> Ve
 
 /// A `resourcePacks` list after one of the two screens committed `chosen`: the screen's own
 /// kind is replaced and the other kind stays; addons go above the resource packs.
-pub fn merge_selection(current: &[String], chosen: Vec<String>, addons_screen: bool) -> Vec<String> {
+pub fn merge_selection(
+    current: &[String],
+    chosen: Vec<String>,
+    addons_screen: bool,
+) -> Vec<String> {
     let kept = current
         .iter()
         .filter(|id| is_addon_id(id) != addons_screen)
@@ -1540,8 +1544,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("horizon-addons-{}", std::process::id()));
         let pack = dir.join("Look");
         fs::create_dir_all(&pack).unwrap();
-        fs::write(pack.join("pack.mcmeta"), br#"{"pack":{"pack_format":1,"description":"x"}}"#)
-            .unwrap();
+        fs::write(
+            pack.join("pack.mcmeta"),
+            br#"{"pack":{"pack_format":1,"description":"x"}}"#,
+        )
+        .unwrap();
         let found = super::addons(&dir);
         let _ = fs::remove_dir_all(&dir);
         assert_eq!(found.len(), 1);
@@ -1550,14 +1557,27 @@ mod tests {
     }
     #[test]
     fn converted_bedrock_packs_are_listed_lowest_first() {
-        let out = std::env::temp_dir().join(format!("horizon-bedrock-order-{}", std::process::id()));
+        let out =
+            std::env::temp_dir().join(format!("horizon-bedrock-order-{}", std::process::id()));
         let _ = fs::remove_dir_all(&out);
         let provided: Provided = (None, String::new());
         let mut files = BTreeMap::new();
-        files.insert("assets/horizon_bedrock/top/materials/entity.material".to_owned(), (2, provided.clone()));
-        files.insert("assets/horizon_bedrock/low/materials/entity.material".to_owned(), (0, provided.clone()));
-        files.insert("assets/horizon_bedrock/low/entity/a.json".to_owned(), (0, provided.clone()));
-        files.insert("assets/horizon_bedrock/entity/legacy.json".to_owned(), (1, provided));
+        files.insert(
+            "assets/horizon_bedrock/top/materials/entity.material".to_owned(),
+            (2, provided.clone()),
+        );
+        files.insert(
+            "assets/horizon_bedrock/low/materials/entity.material".to_owned(),
+            (0, provided.clone()),
+        );
+        files.insert(
+            "assets/horizon_bedrock/low/entity/a.json".to_owned(),
+            (0, provided.clone()),
+        );
+        files.insert(
+            "assets/horizon_bedrock/entity/legacy.json".to_owned(),
+            (1, provided),
+        );
         write_bedrock_order(&files, &out).unwrap();
         let text = fs::read_to_string(out.join("assets/horizon_bedrock/order.txt")).unwrap();
         assert_eq!(text, "low\ntop\n");

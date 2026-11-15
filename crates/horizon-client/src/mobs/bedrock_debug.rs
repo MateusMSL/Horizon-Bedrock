@@ -134,7 +134,11 @@ impl Worn {
     fn matrix(&self) -> glam::Mat4 {
         let at = |v: &[f32], i: usize| v.get(i).copied().unwrap_or(0.0);
         glam::Mat4::from_translation(
-            glam::Vec3::new(at(&self.offset, 0), at(&self.offset, 1), at(&self.offset, 2)) / 16.0,
+            glam::Vec3::new(
+                at(&self.offset, 0),
+                at(&self.offset, 1),
+                at(&self.offset, 2),
+            ) / 16.0,
         ) * glam::Mat4::from_euler(
             glam::EulerRot::ZYX,
             at(&self.rotate, 2).to_radians(),
@@ -322,8 +326,11 @@ impl Settings {
     fn with_env(mut self) -> Self {
         self.debug |= std::env::var_os("HORIZON_BEDROCK_DEBUG").is_some();
         self.hide.extend(list("HORIZON_BEDROCK_HIDE"));
-        self.dump
-            .extend(list("HORIZON_BEDROCK_DUMP").into_iter().map(|k| k.to_ascii_lowercase()));
+        self.dump.extend(
+            list("HORIZON_BEDROCK_DUMP")
+                .into_iter()
+                .map(|k| k.to_ascii_lowercase()),
+        );
         self.dump_vars.extend(list("HORIZON_BEDROCK_DUMP_VARS"));
         self.dump_bones.extend(list("HORIZON_BEDROCK_DUMP_BONES"));
         for k in &mut self.dump {
@@ -338,7 +345,12 @@ impl Settings {
     /// as a pack's bell, lantern or sword is, the hand at 0), or the bone's pivot (`Pivot`).
     /// `has_parent`: the bone sits under another bone of its model; `pivot_height`: its pivot,
     /// pixels up from the model's floor; `floor`: its lowest cube at rest, the same way.
-    pub fn held_anchor_of(&self, has_parent: bool, pivot_height: f32, floor: Option<f32>) -> HeldAnchor {
+    pub fn held_anchor_of(
+        &self,
+        has_parent: bool,
+        pivot_height: f32,
+        floor: Option<f32>,
+    ) -> HeldAnchor {
         match self.held_anchor.to_ascii_lowercase().as_str() {
             "frame" => HeldAnchor::Frame,
             "pivot" => HeldAnchor::Pivot,
@@ -349,7 +361,11 @@ impl Settings {
                 // blocks off the hand in Bedrock, first and third person).
                 let _ = pivot_height;
                 let in_frame = floor.is_some_and(|y| y >= 12.0) || !has_parent;
-                if in_frame { HeldAnchor::Frame } else { HeldAnchor::Origin }
+                if in_frame {
+                    HeldAnchor::Frame
+                } else {
+                    HeldAnchor::Origin
+                }
             }
         }
     }
@@ -383,7 +399,8 @@ impl Settings {
 
     /// Whether the pack model's layer number `i` does not draw (`hide_layers`, `solo_layers`).
     pub fn hides_layer(&self, i: usize) -> bool {
-        self.hide_layers.contains(&i) || (!self.solo_layers.is_empty() && !self.solo_layers.contains(&i))
+        self.hide_layers.contains(&i)
+            || (!self.solo_layers.is_empty() && !self.solo_layers.contains(&i))
     }
 
     /// The alpha factor of the pack model's layer number `i`.
@@ -392,7 +409,10 @@ impl Settings {
     }
 
     fn attached_key(slot: &str, i: usize) -> (String, String) {
-        (slot.to_ascii_lowercase(), format!("{}:{i}", slot.to_ascii_lowercase()))
+        (
+            slot.to_ascii_lowercase(),
+            format!("{}:{i}", slot.to_ascii_lowercase()),
+        )
     }
 
     /// Whether layer `i` of the attachable in `slot` does not draw.
@@ -489,7 +509,9 @@ impl Settings {
         let mut out = [1.0; 3];
         for (k, v) in &self.scale_bones {
             let (mob, name) = k.split_once(':').unwrap_or(("", k.as_str()));
-            if name.eq_ignore_ascii_case(bone) && id.to_ascii_lowercase().contains(&mob.to_ascii_lowercase()) {
+            if name.eq_ignore_ascii_case(bone)
+                && id.to_ascii_lowercase().contains(&mob.to_ascii_lowercase())
+            {
                 for i in 0..3 {
                     out[i] *= v[i];
                 }
@@ -693,7 +715,10 @@ pub fn settings() -> Arc<Settings> {
         stamp: None,
         cur: Arc::new(Settings::default().with_env()),
     });
-    if st.checked.is_some_and(|t| t.elapsed() < Duration::from_secs(1)) {
+    if st
+        .checked
+        .is_some_and(|t| t.elapsed() < Duration::from_secs(1))
+    {
         return st.cur.clone();
     }
     st.checked = Some(Instant::now());
@@ -712,7 +737,10 @@ pub fn settings() -> Arc<Settings> {
     match now {
         None => {
             if had_file {
-                log::info!("bedrock-debug: {} gone, back to the environment", st.path.display());
+                log::info!(
+                    "bedrock-debug: {} gone, back to the environment",
+                    st.path.display()
+                );
                 st.cur = Arc::new(Settings::default().with_env());
             }
         }
@@ -753,8 +781,12 @@ pub fn trace(line: &str) {
     let mut guard = FILE.lock().unwrap_or_else(PoisonError::into_inner);
     if guard.is_none() {
         let logs = horizon_client_render::logging::game_home().join("logs");
-        let path = if logs.is_dir() { logs } else { horizon_client_render::logging::game_home() }
-            .join("rider-trace.log");
+        let path = if logs.is_dir() {
+            logs
+        } else {
+            horizon_client_render::logging::game_home()
+        }
+        .join("rider-trace.log");
         match std::fs::File::create(&path) {
             Ok(f) => {
                 log::info!("bedrock-debug: trace_rider writes {}", path.display());
@@ -862,7 +894,10 @@ mod tests {
         assert!(f.blend && !f.double_sided);
         assert!(!s.bone_flags(MaterialFlags::default(), "body").blend);
         assert!(!s.solo_hides("armor") && !s.solo_hides("2dh923") && s.solo_hides("body"));
-        assert_eq!(s.tint_for("textures/oreville/ans/cmj"), Some([1.0, 1.0, 1.0, 0.5]));
+        assert_eq!(
+            s.tint_for("textures/oreville/ans/cmj"),
+            Some([1.0, 1.0, 1.0, 0.5])
+        );
         assert_eq!(s.tint_for("textures/oreville/ans/cmk"), None);
         assert_eq!(s.bone_tint_for("2dh923#cube0"), [1.0, 0.5, 1.0, 0.5]);
         assert_eq!(s.bone_tint_for("body"), [1.0; 4]);
@@ -892,7 +927,11 @@ mod tests {
         )
         .unwrap();
         assert!(s.hides_layer(1) && !s.hides_layer(0));
-        assert!(Settings::parse(r#"{"solo_layers":[3]}"#).unwrap().hides_layer(0));
+        assert!(
+            Settings::parse(r#"{"solo_layers":[3]}"#)
+                .unwrap()
+                .hides_layer(0)
+        );
         assert_eq!(s.layer_alpha_for(2), 0.25);
         assert_eq!(s.layer_alpha_for(0), 1.0);
         assert!(s.hides_attached("main_hand", 1) && !s.hides_attached("main_hand", 0));
@@ -920,9 +959,13 @@ mod tests {
 
     #[test]
     fn bones_and_models_hide_by_part_of_the_name() {
-        let s = Settings::parse(r#"{"hide_bones":["Hat","sleeve"],"hide_geometry":["zwjvro"]}"#).unwrap();
+        let s = Settings::parse(r#"{"hide_bones":["Hat","sleeve"],"hide_geometry":["zwjvro"]}"#)
+            .unwrap();
         assert!(s.hides_bone("rightSleeve") && s.hides_bone("hat") && !s.hides_bone("head"));
-        assert!(s.hides_geometry("geometry.oreville_ans.zwjvro") && !s.hides_geometry("geometry.humanoid.custom"));
+        assert!(
+            s.hides_geometry("geometry.oreville_ans.zwjvro")
+                && !s.hides_geometry("geometry.humanoid.custom")
+        );
         assert!(!Settings::default().hides_bone("hat"));
         let s = Settings::parse(r#"{"push_bones":{"Eye":1.5,"eye_l":0.5}}"#).unwrap();
         assert_eq!(s.push_for("eye_l"), 2.0);

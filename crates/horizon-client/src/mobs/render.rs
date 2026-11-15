@@ -1515,14 +1515,24 @@ pub fn holder_matrices(
         // Turned as the bones above turn, where the true chain puts it.
         let mut upright = posed(upright_parent, unit);
         upright.w_axis = now.w_axis;
-        let shown = if own_flat || !flat(&now) { now } else { upright };
+        let shown = if own_flat || !flat(&now) {
+            now
+        } else {
+            upright
+        };
         out.insert(part.name.clone(), (shown, rest));
         let carried = if flat(&now) { upright } else { now };
         for c in &part.children {
             walk(c, (now, carried), rest, poses, out);
         }
     }
-    walk(part, (glam::Mat4::IDENTITY, glam::Mat4::IDENTITY), glam::Mat4::IDENTITY, poses, out);
+    walk(
+        part,
+        (glam::Mat4::IDENTITY, glam::Mat4::IDENTITY),
+        glam::Mat4::IDENTITY,
+        poses,
+        out,
+    );
 }
 /// Where what is held is modelled from: the holder's bone (`rightitem`, with its whole pose) at
 /// the item's own origin. A model baked to the game's frame puts a bone modelled at the origin

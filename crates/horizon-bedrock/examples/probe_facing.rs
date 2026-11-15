@@ -50,9 +50,19 @@ impl Host for World {
             "target_y_rotation" => Value::Num(self.yaw),
             "target_x_rotation" => Value::Num(self.pitch),
             "has_target" => Value::Num(1.0),
-            "camera_rotation" | "body_y_rotation" | "ground_speed" | "modified_move_speed"
-            | "vertical_speed" | "is_local_player" | "is_name_any" | "is_in_ui" | "is_attached"
-            | "is_on_fire" | "is_in_water" | "is_in_lava" | "head_is_in_water" => Value::Num(0.0),
+            "camera_rotation"
+            | "body_y_rotation"
+            | "ground_speed"
+            | "modified_move_speed"
+            | "vertical_speed"
+            | "is_local_player"
+            | "is_name_any"
+            | "is_in_ui"
+            | "is_attached"
+            | "is_on_fire"
+            | "is_in_water"
+            | "is_in_lava"
+            | "head_is_in_water" => Value::Num(0.0),
             _ => Value::Null,
         }
     }
@@ -175,7 +185,9 @@ fn wrap(a: f32) -> f32 {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let [pack_path, id, geo, bill, head, ..] = args.as_slice() else {
-        eprintln!("usage: probe_facing <pack dir> <entity id> <geometry substring> <billboard bone> <head bone>");
+        eprintln!(
+            "usage: probe_facing <pack dir> <entity id> <geometry substring> <billboard bone> <head bone>"
+        );
         return;
     };
     let pack = Pack::open(Path::new(pack_path)).expect("pack");
@@ -219,7 +231,11 @@ fn main() {
     let ticks: u32 = env("TICKS").and_then(|v| v.parse().ok()).unwrap_or(60);
     let yaws: Vec<f32> = env("YAWS")
         .map(|v| v.split(',').filter_map(|s| s.trim().parse().ok()).collect())
-        .unwrap_or_else(|| vec![-135.0, -90.0, -45.0, -20.0, 0.0, 20.0, 45.0, 90.0, 135.0, 180.0]);
+        .unwrap_or_else(|| {
+            vec![
+                -135.0, -90.0, -45.0, -20.0, 0.0, 20.0, 45.0, 90.0, 135.0, 180.0,
+            ]
+        });
     println!("bearing | head front | billboard front | difference   (hcmvys, rdmkec)");
     for yaw in yaws {
         let mut host = World {
@@ -251,9 +267,17 @@ fn main() {
         }
         // The front of a cube is its north face: the model's -z, as the game's cubes carry it.
         let front = [0.0, 0.0, -1.0];
-        let of = |name: &str| mats.iter().find(|(n, _)| n == name).map(|(_, m)| heading(m, front));
+        let of = |name: &str| {
+            mats.iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, m)| heading(m, front))
+        };
         let var = |n: &str| inst.vars.get(&molang::intern(n)).map(|v| v.num());
-        let up = |name: &str| mats.iter().find(|(n, _)| n == name).map(|(_, m)| elevation(m, front));
+        let up = |name: &str| {
+            mats.iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, m)| elevation(m, front))
+        };
         match (of(head), of(bill)) {
             (Some(h), Some(b)) => println!(
                 "{yaw:7.1} | {h:10.1} | {b:15.1} | {:10.1}   (hcmvys {:?}, rdmkec {:?}) up: head {:.1} billboard {:.1}",

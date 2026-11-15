@@ -2926,7 +2926,16 @@ impl Game<'_> {
             });
             if !pack {
                 let poses = Poses::new(model);
-                horizon_client::mobs::render::draw(model, m, &poses, uv, 0xFFFF_FFFF, packed, 0, out);
+                horizon_client::mobs::render::draw(
+                    model,
+                    m,
+                    &poses,
+                    uv,
+                    0xFFFF_FFFF,
+                    packed,
+                    0,
+                    out,
+                );
             }
             self.finish_entity_occlusion(culling, c, out, entity_start);
         }

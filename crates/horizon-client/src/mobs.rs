@@ -4227,9 +4227,8 @@ impl Mob {
         // LivingEntity.tick: CombatTracker.recheckStatus.
         let alive = self.alive();
         self.combat.recheck(alive, self.age);
-        let keep = neutral_anger::around_tick(self, w.game_time, |m| {
-            ai::tick(m, w, level_random, events)
-        });
+        let keep =
+            neutral_anger::around_tick(self, w.game_time, |m| ai::tick(m, w, level_random, events));
         if bedrock::wants_surroundings() && self.age.wrapping_add(self.id).is_multiple_of(4) {
             self.extra.surroundings = Some(Arc::new(bedrock::sample_surroundings(self, w)));
         }

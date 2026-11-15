@@ -37,7 +37,10 @@ impl Host for World {
         vec![
             ("is_first_person", Value::bool(fp)),
             ("is_paperdoll", Value::Num(0.0)),
-            ("is_holding_right", Value::bool(std::env::var_os("HOLD").is_some())),
+            (
+                "is_holding_right",
+                Value::bool(std::env::var_os("HOLD").is_some()),
+            ),
             ("attack_time", Value::Num(0.0)),
         ]
     }
@@ -365,7 +368,9 @@ fn collect_held(
             if !h.in_hand {
                 return mul(now, &mul(&scale(h.scale, h.scale, h.scale), &inverse(rest)));
             }
-            let has_parent = !roots.iter().any(|r| r.name.eq_ignore_ascii_case(&part.name));
+            let has_parent = !roots
+                .iter()
+                .any(|r| r.name.eq_ignore_ascii_case(&part.name));
             let pv = if h.frame_mode.unwrap_or(!has_parent) {
                 [0.0; 3]
             } else {
@@ -373,7 +378,10 @@ fn collect_held(
             };
             mul(
                 now,
-                &mul(&scale(h.scale, h.scale, h.scale), &translate(-pv[0], -pv[1], -pv[2])),
+                &mul(
+                    &scale(h.scale, h.scale, h.scale),
+                    &translate(-pv[0], -pv[1], -pv[2]),
+                ),
             )
         });
     let under = bound.or(inherited);
@@ -720,7 +728,10 @@ fn main() {
                 continue;
             }
             if std::env::var("LAYERS").is_ok() {
-                println!("layer {} texture {} material {}", layer.geometry, layer.texture, layer.material);
+                println!(
+                    "layer {} texture {} material {}",
+                    layer.geometry, layer.texture, layer.material
+                );
             }
             let Some(g) = geos.get(&layer.geometry.to_ascii_lowercase()) else {
                 continue;
@@ -732,7 +743,13 @@ fn main() {
             let mut tris = Vec::new();
             for root in &roots {
                 match held {
-                    None => collect(root, &ident(), &frame.pose, &|n| layer.bone_visible(n), &mut tris),
+                    None => collect(
+                        root,
+                        &ident(),
+                        &frame.pose,
+                        &|n| layer.bone_visible(n),
+                        &mut tris,
+                    ),
                     Some((mats, hand_scale, frame_mode, slot)) => {
                         let mut binds: HashMap<String, String> = g
                             .bones
@@ -746,13 +763,20 @@ fn main() {
                             .collect();
                         if binds.is_empty() && matches!(slot, "main_hand" | "off_hand") {
                             for b in g.bones.iter().filter(|b| b.parent.is_none()) {
-                                binds.insert(b.name.to_ascii_lowercase(), slot_bone(slot).to_owned());
+                                binds.insert(
+                                    b.name.to_ascii_lowercase(),
+                                    slot_bone(slot).to_owned(),
+                                );
                             }
                         }
                         let h = Held {
                             binds,
                             mats: mats.clone(),
-                            scale: if matches!(slot, "main_hand" | "off_hand") { hand_scale } else { 1.0 },
+                            scale: if matches!(slot, "main_hand" | "off_hand") {
+                                hand_scale
+                            } else {
+                                1.0
+                            },
                             frame_mode,
                             in_hand: matches!(slot, "main_hand" | "off_hand"),
                         };
@@ -771,12 +795,32 @@ fn main() {
             }
             if env("PROBE").is_some() && layer.geometry.contains("rduxhj") {
                 for (bone, t) in &tris {
-                    if matches!(bone.as_str(), "hmhadk" | "6q6k" | "6q6da5k_lgh" | "6q6da5k_3gllge" | "head") {
-                        let lo: Vec<f32> = (0..3).map(|a| t.p.iter().map(|p| p[a]).fold(f32::MAX, f32::min)).collect();
-                        let hi: Vec<f32> = (0..3).map(|a| t.p.iter().map(|p| p[a]).fold(f32::MIN, f32::max)).collect();
-                        let flat = (0..3).min_by(|a, b| (hi[*a] - lo[*a]).partial_cmp(&(hi[*b] - lo[*b])).unwrap());
+                    if matches!(
+                        bone.as_str(),
+                        "hmhadk" | "6q6k" | "6q6da5k_lgh" | "6q6da5k_3gllge" | "head"
+                    ) {
+                        let lo: Vec<f32> = (0..3)
+                            .map(|a| t.p.iter().map(|p| p[a]).fold(f32::MAX, f32::min))
+                            .collect();
+                        let hi: Vec<f32> = (0..3)
+                            .map(|a| t.p.iter().map(|p| p[a]).fold(f32::MIN, f32::max))
+                            .collect();
+                        let flat = (0..3).min_by(|a, b| {
+                            (hi[*a] - lo[*a]).partial_cmp(&(hi[*b] - lo[*b])).unwrap()
+                        });
                         if let Some(a) = flat {
-                            println!("{bone:16} flat axis {a} at {:.5}  x {:.3}..{:.3} y {:.3}..{:.3} z {:.3}..{:.3} (px: y {:.2}..{:.2})", lo[a], lo[0], hi[0], lo[1], hi[1], lo[2], hi[2], (1.5-hi[1])*16.0, (1.5-lo[1])*16.0);
+                            println!(
+                                "{bone:16} flat axis {a} at {:.5}  x {:.3}..{:.3} y {:.3}..{:.3} z {:.3}..{:.3} (px: y {:.2}..{:.2})",
+                                lo[a],
+                                lo[0],
+                                hi[0],
+                                lo[1],
+                                hi[1],
+                                lo[2],
+                                hi[2],
+                                (1.5 - hi[1]) * 16.0,
+                                (1.5 - lo[1]) * 16.0
+                            );
                         }
                     }
                 }
@@ -808,7 +852,11 @@ fn main() {
         let adef = att_defs
             .iter()
             .find(|d| d.id == att_id)
-            .or_else(|| att_defs.iter().find(|d| d.items.iter().any(|(k, _)| *k == att_id)))
+            .or_else(|| {
+                att_defs
+                    .iter()
+                    .find(|d| d.items.iter().any(|(k, _)| *k == att_id))
+            })
             .expect("attachable");
         let mut mats = HashMap::new();
         for layer in &frame.layers {
@@ -842,7 +890,9 @@ fn main() {
                     &mut items,
                 );
                 if items[holder_items..].iter().all(|i| i.tris.is_empty()) {
-                    println!("{att_id}: its layers draw no quads (every bone hidden or scaled to zero)");
+                    println!(
+                        "{att_id}: its layers draw no quads (every bone hidden or scaled to zero)"
+                    );
                 }
                 let hand = apply(now, [0.0; 3]);
                 // The eye: 1.62 above the feet, the frame's origin 1.5 above them, y down.
@@ -912,7 +962,11 @@ fn main() {
         .max(hi[1] - lo[1])
         .max(hi[2] - lo[2])
         .max(0.05);
-    let (centre, extent) = match env("CROP").map(|c| c.split(',').filter_map(|n| n.parse::<f32>().ok()).collect::<Vec<_>>()) {
+    let (centre, extent) = match env("CROP").map(|c| {
+        c.split(',')
+            .filter_map(|n| n.parse::<f32>().ok())
+            .collect::<Vec<_>>()
+    }) {
         Some(c) if c.len() == 4 => ([c[0], c[1], c[2]], c[3]),
         _ => (centre, extent),
     };
@@ -938,7 +992,9 @@ fn main() {
                 .or_insert_with(|| load_tex(&pack, &it.texture))
                 .as_ref();
             for (tri, mode) in &it.tris {
-                raster(&mut color, &mut depth, size, tri, &view, tex, it.color, *mode, zoom);
+                raster(
+                    &mut color, &mut depth, size, tri, &view, tex, it.color, *mode, zoom,
+                );
             }
         }
         for y in 0..size {

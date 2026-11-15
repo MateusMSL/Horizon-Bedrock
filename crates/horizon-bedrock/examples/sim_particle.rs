@@ -66,7 +66,10 @@ fn main() {
             let sp = e.sprites(&mut Q);
             let n = sp.len();
             if let (Some(s), true) = (sp.first(), std::env::var("SIZES").is_ok()) {
-                println!("  first sprite pos {:?} size {:?} uv {:?}", s.pos, s.size, s.uv);
+                println!(
+                    "  first sprite pos {:?} size {:?} uv {:?}",
+                    s.pos, s.size, s.uv
+                );
             }
             if n > 0 || e.alive() > 0 || step < 3 {
                 println!(

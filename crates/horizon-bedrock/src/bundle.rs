@@ -168,16 +168,21 @@ impl Bundle {
         let base = root.join(DATA_DIR);
         let mut all: Vec<(PathBuf, PathBuf)> = Vec::new();
         for ns in namespaces(&base) {
-            let dir = if ns.is_empty() { base.clone() } else { base.join(&ns) };
+            let dir = if ns.is_empty() {
+                base.clone()
+            } else {
+                base.join(&ns)
+            };
             let mut found = Vec::new();
             files(&dir, &mut found);
             for path in found {
-                let Ok(rel) = path.strip_prefix(&dir) else { continue };
+                let Ok(rel) = path.strip_prefix(&dir) else {
+                    continue;
+                };
                 if ns.is_empty()
-                    && rel
-                        .components()
-                        .next()
-                        .is_some_and(|c| base.join(c.as_os_str()).is_dir() && !is_data_folder(c.as_os_str()))
+                    && rel.components().next().is_some_and(|c| {
+                        base.join(c.as_os_str()).is_dir() && !is_data_folder(c.as_os_str())
+                    })
                 {
                     continue;
                 }
@@ -212,7 +217,10 @@ impl Bundle {
                         let key = d.id.to_ascii_lowercase();
                         // One file per version of an entity: the highest `min_engine_version`
                         // stays, and of equal ones the later file.
-                        if b.entities.get(&key).is_none_or(|old| old.min_engine <= d.min_engine) {
+                        if b.entities
+                            .get(&key)
+                            .is_none_or(|old| old.min_engine <= d.min_engine)
+                        {
                             b.entities.insert(key, d);
                         }
                     }
@@ -220,7 +228,10 @@ impl Bundle {
                 "attachables" => {
                     if let Some(d) = ClientEntity::parse(&v) {
                         let key = d.id.to_ascii_lowercase();
-                        if b.attachables.get(&key).is_none_or(|old| old.min_engine <= d.min_engine) {
+                        if b.attachables
+                            .get(&key)
+                            .is_none_or(|old| old.min_engine <= d.min_engine)
+                        {
                             b.attachables.insert(key, d);
                         }
                     }
@@ -261,7 +272,9 @@ impl Bundle {
                         b.client_biomes.insert(biome.id.clone(), biome);
                     }
                 }
-                "blocks.json" => b.block_defs.extend(crate::world_data::BlockDef::parse_file(&v)),
+                "blocks.json" => b
+                    .block_defs
+                    .extend(crate::world_data::BlockDef::parse_file(&v)),
                 "block_culling" => {
                     if let Some(rules) = crate::world_data::CullRules::parse(&v) {
                         b.culling_rules.insert(rules.id.clone(), rules);
@@ -435,12 +448,19 @@ mod tests {
         let cube = &sprite.bone("body").unwrap().cubes[0];
         assert_eq!(cube.size, [8.0, 8.0, 0.0]);
         // The bow is a texture mesh on the hand bone, the pack's own texture on it.
-        assert!(!b.geometries["geometry.bow_standby"].bone("rightitem").unwrap().texture_meshes.is_empty());
+        assert!(
+            !b.geometries["geometry.bow_standby"]
+                .bone("rightitem")
+                .unwrap()
+                .texture_meshes
+                .is_empty()
+        );
     }
 
     #[test]
     fn every_stacked_packs_data_is_kept_and_the_top_one_wins() {
-        let src = std::env::temp_dir().join(format!("horizon-bedrock-stack-{}", std::process::id()));
+        let src =
+            std::env::temp_dir().join(format!("horizon-bedrock-stack-{}", std::process::id()));
         let _ = fs::remove_dir_all(&src);
         let base = src.join(DATA_DIR);
         let put = |ns: &str, rel: &str, text: &str| {
@@ -461,8 +481,16 @@ mod tests {
         // define `minecraft:cow`, under different file names.
         put("a", "pack_settings.json", &toggle("ns:a"));
         put("b", "pack_settings.json", &toggle("ns:b"));
-        put("a", "entity/cow_a.json", &entity("minecraft:cow", "geometry.low"));
-        put("b", "entity/cow_b.json", &entity("minecraft:cow", "geometry.high"));
+        put(
+            "a",
+            "entity/cow_a.json",
+            &entity("minecraft:cow", "geometry.low"),
+        );
+        put(
+            "b",
+            "entity/cow_b.json",
+            &entity("minecraft:cow", "geometry.high"),
+        );
         // `b` is listed first, so `a` is the pack on top.
         fs::write(base.join("order.txt"), "b\na\n").unwrap();
         let loaded = Bundle::load(&src);
@@ -470,12 +498,18 @@ mod tests {
         names.sort();
         assert_eq!(names, ["ns:a", "ns:b"], "{names:?}");
         let cow = &loaded.entities["minecraft:cow"];
-        assert_eq!(cow.geometry.get("default").map(String::as_str), Some("geometry.low"));
+        assert_eq!(
+            cow.geometry.get("default").map(String::as_str),
+            Some("geometry.low")
+        );
         // And the other way round.
         fs::write(base.join("order.txt"), "a\nb\n").unwrap();
         let loaded = Bundle::load(&src);
         let cow = &loaded.entities["minecraft:cow"];
-        assert_eq!(cow.geometry.get("default").map(String::as_str), Some("geometry.high"));
+        assert_eq!(
+            cow.geometry.get("default").map(String::as_str),
+            Some("geometry.high")
+        );
         let _ = fs::remove_dir_all(&src);
     }
 }

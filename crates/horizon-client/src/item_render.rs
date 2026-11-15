@@ -877,7 +877,9 @@ impl ItemRenderer {
             level: None,
             seed: 0,
         };
-        let resolved = self.models.resolve(&stack, &ctx, &horizon_assets::item_model::NoEnv);
+        let resolved = self
+            .models
+            .resolve(&stack, &ctx, &horizon_assets::item_model::NoEnv);
         for layer in resolved.layers {
             let model = match layer.content {
                 LayerContent::Model { model } => model,
@@ -896,9 +898,7 @@ impl ItemRenderer {
             out.push(format!(
                 "  model {model}: {} quads; file {}",
                 baked.quads.len(),
-                head(root.join(format!(
-                    "assets/{model_namespace}/models/{model_path}.json"
-                )))
+                head(root.join(format!("assets/{model_namespace}/models/{model_path}.json")))
             ));
             let sprites: std::collections::BTreeSet<&str> = baked
                 .quads
@@ -933,7 +933,9 @@ impl ItemRenderer {
     pub fn report_debug_items(&self) {
         static LAST: Mutex<Vec<String>> = Mutex::new(Vec::new());
         let wanted = crate::mobs::bedrock_debug::settings().items.clone();
-        let mut last = LAST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut last = LAST
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if *last == wanted {
             return;
         }

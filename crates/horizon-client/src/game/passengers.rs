@@ -68,7 +68,12 @@ impl Game<'_> {
     /// The entity type of the vehicle `id`: a boat, a cart or a mob.
     pub(super) fn vehicle_kind(&self, id: u32) -> String {
         if let Some(b) = self.boats.iter().find(|b| b.id == id) {
-            return if b.chest { "minecraft:chest_boat" } else { "minecraft:boat" }.to_owned();
+            return if b.chest {
+                "minecraft:chest_boat"
+            } else {
+                "minecraft:boat"
+            }
+            .to_owned();
         }
         if let Some(c) = self.carts.iter().find(|c| c.id == id) {
             return match c.kind {

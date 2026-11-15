@@ -223,7 +223,9 @@ fn java_block(name: &str) -> String {
         return named(&format!("{}_planks", wood(w)));
     }
     if let Some(rest) = name.strip_prefix("log_") {
-        let (w, top) = rest.strip_suffix("_top").map_or((rest, false), |w| (w, true));
+        let (w, top) = rest
+            .strip_suffix("_top")
+            .map_or((rest, false), |w| (w, true));
         if !w.chars().last().is_some_and(|c| c.is_ascii_digit()) && w != "top_normal_weak" {
             return named(&format!("{}_log{}", wood(w), if top { "_top" } else { "" }));
         }
@@ -244,19 +246,25 @@ fn java_block(name: &str) -> String {
         }
     }
     if let Some(rest) = name.strip_prefix("coral_fan_") {
-        let (color, dead) = rest.strip_suffix("_dead").map_or((rest, ""), |c| (c, "dead_"));
+        let (color, dead) = rest
+            .strip_suffix("_dead")
+            .map_or((rest, ""), |c| (c, "dead_"));
         if let Some(kind) = coral(color) {
             return named(&format!("{dead}{kind}_coral_fan"));
         }
     }
     if let Some(rest) = name.strip_prefix("coral_plant_") {
-        let (color, dead) = rest.strip_suffix("_dead").map_or((rest, ""), |c| (c, "dead_"));
+        let (color, dead) = rest
+            .strip_suffix("_dead")
+            .map_or((rest, ""), |c| (c, "dead_"));
         if let Some(kind) = coral(color) {
             return named(&format!("{dead}{kind}_coral"));
         }
     }
     if let Some(rest) = name.strip_prefix("coral_") {
-        let (color, dead) = rest.strip_suffix("_dead").map_or((rest, ""), |c| (c, "dead_"));
+        let (color, dead) = rest
+            .strip_suffix("_dead")
+            .map_or((rest, ""), |c| (c, "dead_"));
         if let Some(kind) = coral(color) {
             return named(&format!("{dead}{kind}_coral_block"));
         }
@@ -286,7 +294,10 @@ fn java_block(name: &str) -> String {
     if let Some(n) = name.strip_suffix("_nylium_top") {
         return named(&format!("{n}_nylium"));
     }
-    for (suffix, java) in [("_door_lower", "_door_bottom"), ("_door_upper", "_door_top")] {
+    for (suffix, java) in [
+        ("_door_lower", "_door_bottom"),
+        ("_door_upper", "_door_top"),
+    ] {
         if let Some(w) = name.strip_suffix(suffix) {
             return named(&format!("{w}{java}"));
         }
@@ -324,7 +335,14 @@ fn java_block(name: &str) -> String {
     if let Some(n) = name.strip_prefix("stonecutter2_") {
         return named(&format!("stonecutter_{n}"));
     }
-    for crop in ["wheat", "carrots", "potatoes", "beetroots", "nether_wart", "cocoa"] {
+    for crop in [
+        "wheat",
+        "carrots",
+        "potatoes",
+        "beetroots",
+        "nether_wart",
+        "cocoa",
+    ] {
         if let Some(n) = name
             .strip_prefix(crop)
             .and_then(|r| r.strip_prefix("_stage_"))
@@ -541,10 +559,7 @@ fn java_item(name: &str) -> String {
         };
     }
     for kind in ["boat", "door", "sign"] {
-        if let Some(wood_name) = name
-            .strip_prefix(kind)
-            .and_then(|r| r.strip_prefix('_'))
-        {
+        if let Some(wood_name) = name.strip_prefix(kind).and_then(|r| r.strip_prefix('_')) {
             return format!("{}_{kind}", wood(wood_name));
         }
     }
@@ -697,7 +712,11 @@ const ENTITY_MAX_HEIGHT: u32 = 1024;
 /// The side factor (a power of two) that brings a `width` x `height` texture within the atlas
 /// (`tall`: an entity's texture, which the atlas takes up to `ENTITY_MAX_HEIGHT`).
 fn atlas_shrink(width: u32, height: u32, tall: bool) -> u32 {
-    let max_height = if tall { ENTITY_MAX_HEIGHT } else { ATLAS_MAX_HEIGHT };
+    let max_height = if tall {
+        ENTITY_MAX_HEIGHT
+    } else {
+        ATLAS_MAX_HEIGHT
+    };
     let mut factor = 1;
     while width.div_ceil(factor) > ATLAS_MAX_WIDTH || height.div_ceil(factor) > max_height {
         factor *= 2;
@@ -724,13 +743,24 @@ fn fit_to_atlas(png_bytes: &[u8], tall: bool) -> Option<Vec<u8>> {
     let src = &buf[..info.buffer_size()];
     let rgba = |i: usize| -> [u32; 4] {
         match info.color_type {
-            png::ColorType::Rgba => {
-                [src[i * 4].into(), src[i * 4 + 1].into(), src[i * 4 + 2].into(), src[i * 4 + 3].into()]
-            }
-            png::ColorType::Rgb => [src[i * 3].into(), src[i * 3 + 1].into(), src[i * 3 + 2].into(), 255],
-            png::ColorType::GrayscaleAlpha => {
-                [src[i * 2].into(), src[i * 2].into(), src[i * 2].into(), src[i * 2 + 1].into()]
-            }
+            png::ColorType::Rgba => [
+                src[i * 4].into(),
+                src[i * 4 + 1].into(),
+                src[i * 4 + 2].into(),
+                src[i * 4 + 3].into(),
+            ],
+            png::ColorType::Rgb => [
+                src[i * 3].into(),
+                src[i * 3 + 1].into(),
+                src[i * 3 + 2].into(),
+                255,
+            ],
+            png::ColorType::GrayscaleAlpha => [
+                src[i * 2].into(),
+                src[i * 2].into(),
+                src[i * 2].into(),
+                src[i * 2 + 1].into(),
+            ],
             _ => [src[i].into(), src[i].into(), src[i].into(), 255],
         }
     };
@@ -1162,7 +1192,8 @@ pub fn to_java(pack: &Pack, out: &Path, format: (i64, i64)) -> Result<Report> {
                 }
                 // The same texture with those texels opaque: what an emissive material shows
                 // under the glow.
-                if let Some(solid) = texture_png(pack, &t, false, true).and_then(|b| solid_png(&b)) {
+                if let Some(solid) = texture_png(pack, &t, false, true).and_then(|b| solid_png(&b))
+                {
                     write(
                         &out.join(format!("assets/minecraft/textures/{name}_solid.png")),
                         &solid,
@@ -1182,27 +1213,66 @@ pub fn to_java(pack: &Pack, out: &Path, format: (i64, i64)) -> Result<Report> {
 
 /// The sixteen dye colours, Java's names.
 const DYES: [&str; 16] = [
-    "white", "orange", "magenta", "light_blue", "yellow", "lime", "pink", "gray", "light_gray",
-    "cyan", "purple", "blue", "brown", "green", "red", "black",
+    "white",
+    "orange",
+    "magenta",
+    "light_blue",
+    "yellow",
+    "lime",
+    "pink",
+    "gray",
+    "light_gray",
+    "cyan",
+    "purple",
+    "blue",
+    "brown",
+    "green",
+    "red",
+    "black",
 ];
 
 /// A Bedrock effect's potion icons and the potions of the game they stand for.
 const POTION_ICONS: [(&str, &[&str]); 20] = [
-    ("movespeed", &["swiftness", "long_swiftness", "strong_swiftness"]),
-    ("moveslowdown", &["slowness", "long_slowness", "strong_slowness"]),
-    ("damageboost", &["strength", "long_strength", "strong_strength"]),
+    (
+        "movespeed",
+        &["swiftness", "long_swiftness", "strong_swiftness"],
+    ),
+    (
+        "moveslowdown",
+        &["slowness", "long_slowness", "strong_slowness"],
+    ),
+    (
+        "damageboost",
+        &["strength", "long_strength", "strong_strength"],
+    ),
     ("jump", &["leaping", "long_leaping", "strong_leaping"]),
     ("heal", &["healing", "strong_healing"]),
     ("harm", &["harming", "strong_harming"]),
     ("poison", &["poison", "long_poison", "strong_poison"]),
-    ("regeneration", &["regeneration", "long_regeneration", "strong_regeneration"]),
-    ("fireresistance", &["fire_resistance", "long_fire_resistance"]),
+    (
+        "regeneration",
+        &["regeneration", "long_regeneration", "strong_regeneration"],
+    ),
+    (
+        "fireresistance",
+        &["fire_resistance", "long_fire_resistance"],
+    ),
     ("nightvision", &["night_vision", "long_night_vision"]),
     ("invisibility", &["invisibility", "long_invisibility"]),
-    ("waterbreathing", &["water_breathing", "long_water_breathing"]),
+    (
+        "waterbreathing",
+        &["water_breathing", "long_water_breathing"],
+    ),
     ("weakness", &["weakness", "long_weakness"]),
     ("slowfall", &["slow_falling", "long_slow_falling"]),
-    ("turtlemaster", &["turtle_master", "long_turtle_master", "strong_turtle_master"]),
+    (
+        "turtlemaster",
+        &[
+            "turtle_master",
+            "long_turtle_master",
+            "strong_turtle_master",
+        ],
+    ),
     ("luck", &["luck"]),
     ("infested", &["infested"]),
     ("oozing", &["oozing"]),
@@ -1226,7 +1296,9 @@ fn decode_rgba(png_bytes: &[u8]) -> Option<Image> {
     for i in 0..n {
         match info.color_type {
             png::ColorType::Rgba => rgba.extend_from_slice(&src[i * 4..i * 4 + 4]),
-            png::ColorType::Rgb => rgba.extend_from_slice(&[src[i * 3], src[i * 3 + 1], src[i * 3 + 2], 255]),
+            png::ColorType::Rgb => {
+                rgba.extend_from_slice(&[src[i * 3], src[i * 3 + 1], src[i * 3 + 2], 255])
+            }
             png::ColorType::GrayscaleAlpha => {
                 rgba.extend_from_slice(&[src[i * 2], src[i * 2], src[i * 2], src[i * 2 + 1]]);
             }
@@ -1278,16 +1350,60 @@ fn zombie_skin(png_bytes: &[u8]) -> Option<Vec<u8>> {
 fn carried_icons() -> Vec<(String, String)> {
     let mut v: Vec<(String, String)> = Vec::new();
     for same in [
-        "torch", "soul_torch", "redstone_torch", "copper_torch", "end_rod", "lever", "ladder",
-        "rail", "powered_rail", "activator_rail", "detector_rail", "iron_bars", "copper_bars",
-        "exposed_copper_bars", "weathered_copper_bars", "oxidized_copper_bars", "lightning_rod",
-        "allium", "azure_bluet", "blue_orchid", "cactus_flower", "cornflower", "dandelion",
-        "golden_dandelion", "lilac", "peony", "rose_bush", "sunflower", "lily_of_the_valley",
-        "oxeye_daisy", "poppy", "wither_rose", "torchflower", "pitcher_plant", "spore_blossom",
-        "hanging_roots", "glow_lichen", "frogspawn", "sculk_vein", "vine", "twisting_vines",
-        "weeping_vines", "crimson_fungus", "warped_fungus", "crimson_roots", "warped_roots",
-        "seagrass", "short_dry_grass", "tall_dry_grass", "pale_hanging_moss", "sulfur_spike",
-        "cherry_sapling", "pale_oak_sapling", "amethyst_cluster",
+        "torch",
+        "soul_torch",
+        "redstone_torch",
+        "copper_torch",
+        "end_rod",
+        "lever",
+        "ladder",
+        "rail",
+        "powered_rail",
+        "activator_rail",
+        "detector_rail",
+        "iron_bars",
+        "copper_bars",
+        "exposed_copper_bars",
+        "weathered_copper_bars",
+        "oxidized_copper_bars",
+        "lightning_rod",
+        "allium",
+        "azure_bluet",
+        "blue_orchid",
+        "cactus_flower",
+        "cornflower",
+        "dandelion",
+        "golden_dandelion",
+        "lilac",
+        "peony",
+        "rose_bush",
+        "sunflower",
+        "lily_of_the_valley",
+        "oxeye_daisy",
+        "poppy",
+        "wither_rose",
+        "torchflower",
+        "pitcher_plant",
+        "spore_blossom",
+        "hanging_roots",
+        "glow_lichen",
+        "frogspawn",
+        "sculk_vein",
+        "vine",
+        "twisting_vines",
+        "weeping_vines",
+        "crimson_fungus",
+        "warped_fungus",
+        "crimson_roots",
+        "warped_roots",
+        "seagrass",
+        "short_dry_grass",
+        "tall_dry_grass",
+        "pale_hanging_moss",
+        "sulfur_spike",
+        "cherry_sapling",
+        "pale_oak_sapling",
+        "amethyst_cluster",
     ] {
         v.push((format!("{same}_carried"), same.into()));
     }
@@ -1317,7 +1433,10 @@ fn carried_icons() -> Vec<(String, String)> {
         ("acacia", "acacia"),
         ("roofed_oak", "dark_oak"),
     ] {
-        v.push((format!("{bedrock}_carried_sapling"), format!("{java}_sapling")));
+        v.push((
+            format!("{bedrock}_carried_sapling"),
+            format!("{java}_sapling"),
+        ));
     }
     for (color, coral) in [
         ("blue", "tube"),
@@ -1349,9 +1468,7 @@ fn convert_special_models(pack: &Pack, out: &Path, report: &mut Report) -> Resul
         .map(|p| (p.to_ascii_lowercase(), p.to_owned()))
         .collect();
     let read = |path: &str| -> Option<Vec<u8>> {
-        by_lower
-            .get(path)
-            .and_then(|real| pack.read(real).ok())
+        by_lower.get(path).and_then(|real| pack.read(real).ok())
     };
     let textures = out.join("assets/minecraft/textures");
     // Entity textures laid out as the game's own.
@@ -1393,7 +1510,11 @@ fn convert_special_models(pack: &Pack, out: &Path, report: &mut Report) -> Resul
         ),
     ];
     for color in DYES {
-        let bedrock = if color == "light_gray" { "silver" } else { color };
+        let bedrock = if color == "light_gray" {
+            "silver"
+        } else {
+            color
+        };
         entity.push((
             format!("textures/entity/shulker/shulker_{bedrock}.png"),
             vec![format!("entity/shulker/shulker_{color}")],
@@ -1429,7 +1550,11 @@ fn convert_special_models(pack: &Pack, out: &Path, report: &mut Report) -> Resul
         )
     };
     for color in DYES {
-        let bedrock = if color == "light_gray" { "silver" } else { color };
+        let bedrock = if color == "light_gray" {
+            "silver"
+        } else {
+            color
+        };
         if !by_lower.contains_key(&format!("textures/items/bed_{bedrock}.png")) {
             continue;
         }
@@ -1573,7 +1698,10 @@ fn convert_world(pack: &Pack, out: &Path, report: &mut Report) -> Result<()> {
             else {
                 continue;
             };
-            write(&out.join(format!("assets/minecraft/textures/{java}.png")), &bytes)?;
+            write(
+                &out.join(format!("assets/minecraft/textures/{java}.png")),
+                &bytes,
+            )?;
             report.world_textures += 1;
         }
     }
@@ -1643,7 +1771,10 @@ fn implicit_block_animations(out: &Path, report: &mut Report) -> Result<()> {
         if path.extension().and_then(|e| e.to_str()) != Some("png") {
             continue;
         }
-        let stem = path.file_stem().and_then(|n| n.to_str()).unwrap_or_default();
+        let stem = path
+            .file_stem()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
         let meta = path.with_extension("png.mcmeta");
         if meta.exists() || !CODE_ANIMATED_BLOCKS.contains(&stem) {
             continue;
@@ -1684,14 +1815,23 @@ fn convert_block_remaps(pack: &Pack, out: &Path, report: &mut Report) -> Result<
     };
     let legacy = blocks_json_version(&v) < (1, 21, 40);
     let index: std::collections::HashMap<String, String> =
-        texture_index(pack, "textures/terrain_texture.json").into_iter().collect();
+        texture_index(pack, "textures/terrain_texture.json")
+            .into_iter()
+            .collect();
     let defs = crate::world_data::BlockDef::parse_file(&v);
     let named: std::collections::HashSet<String> = defs
         .keys()
-        .map(|k| k.strip_prefix("minecraft:").unwrap_or(k).to_ascii_lowercase())
+        .map(|k| {
+            k.strip_prefix("minecraft:")
+                .unwrap_or(k)
+                .to_ascii_lowercase()
+        })
         .collect();
     for (id, def) in &defs {
-        let id = id.strip_prefix("minecraft:").unwrap_or(id).to_ascii_lowercase();
+        let id = id
+            .strip_prefix("minecraft:")
+            .unwrap_or(id)
+            .to_ascii_lowercase();
         let key = match &def.textures {
             Some(crate::world_data::BlockTextures::All(k)) => k.clone(),
             Some(crate::world_data::BlockTextures::Faces(f)) => {
@@ -1707,7 +1847,9 @@ fn convert_block_remaps(pack: &Pack, out: &Path, report: &mut Report) -> Result<
         if id.contains(':') || !valid_name(&id) {
             continue;
         }
-        let Some(path) = index.get(&key) else { continue };
+        let Some(path) = index.get(&key) else {
+            continue;
+        };
         let mut targets = vec![id.clone()];
         if legacy {
             targets.extend(
@@ -1716,8 +1858,10 @@ fn convert_block_remaps(pack: &Pack, out: &Path, report: &mut Report) -> Result<
                     .filter(|t| *t != id && !named.contains(t)),
             );
         }
-        let targets: Vec<String> =
-            targets.into_iter().filter(|t| !key.eq_ignore_ascii_case(t)).collect();
+        let targets: Vec<String> = targets
+            .into_iter()
+            .filter(|t| !key.eq_ignore_ascii_case(t))
+            .collect();
         if targets.is_empty() {
             continue;
         }
@@ -1729,7 +1873,10 @@ fn convert_block_remaps(pack: &Pack, out: &Path, report: &mut Report) -> Result<
             continue;
         };
         for t in targets {
-            write(&out.join(format!("assets/minecraft/textures/block/{t}.png")), &bytes)?;
+            write(
+                &out.join(format!("assets/minecraft/textures/block/{t}.png")),
+                &bytes,
+            )?;
             report.world_textures += 1;
         }
     }
@@ -1739,7 +1886,10 @@ fn convert_block_remaps(pack: &Pack, out: &Path, report: &mut Report) -> Result<
 /// `blocks.json`'s `format_version` (`[1, 1, 0]` or `"1.21.40"`); none is the oldest.
 fn blocks_json_version(v: &Value) -> (u32, u32, u32) {
     let parts: Vec<u32> = match v.get("format_version") {
-        Some(Value::Array(a)) => a.iter().filter_map(|n| n.as_u64().map(|n| n as u32)).collect(),
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|n| n.as_u64().map(|n| n as u32))
+            .collect(),
         Some(Value::String(s)) => s.split('.').filter_map(|n| n.parse().ok()).collect(),
         _ => Vec::new(),
     };
@@ -1761,15 +1911,26 @@ fn legacy_blocks(id: &str) -> Vec<String> {
         "stained_glass" => each(&DYES, "_stained_glass"),
         "stained_hardened_clay" => each(&DYES, "_terracotta"),
         "stone" => list(&[
-            "stone", "granite", "polished_granite", "diorite", "polished_diorite", "andesite",
+            "stone",
+            "granite",
+            "polished_granite",
+            "diorite",
+            "polished_diorite",
+            "andesite",
             "polished_andesite",
         ]),
-        "planks" => each(&["oak", "spruce", "birch", "jungle", "acacia", "dark_oak"], "_planks"),
+        "planks" => each(
+            &["oak", "spruce", "birch", "jungle", "acacia", "dark_oak"],
+            "_planks",
+        ),
         "sand" => list(&["sand", "red_sand"]),
         "dirt" => list(&["dirt", "coarse_dirt"]),
         "prismarine" => list(&["prismarine", "dark_prismarine", "prismarine_bricks"]),
         "stonebrick" => list(&[
-            "stone_bricks", "mossy_stone_bricks", "cracked_stone_bricks", "chiseled_stone_bricks",
+            "stone_bricks",
+            "mossy_stone_bricks",
+            "cracked_stone_bricks",
+            "chiseled_stone_bricks",
         ]),
         _ => Vec::new(),
     }
@@ -1830,25 +1991,39 @@ fn hex_color(v: &Value) -> Option<[u8; 3]> {
 /// (`texture`), written as the game's `item/<mob>_spawn_egg`.
 fn convert_spawn_eggs(pack: &Pack, out: &Path, report: &mut Report) -> Result<()> {
     let items: std::collections::HashMap<String, String> =
-        texture_index(pack, "textures/item_texture.json").into_iter().collect();
+        texture_index(pack, "textures/item_texture.json")
+            .into_iter()
+            .collect();
     let files: Vec<String> = pack
         .paths()
         .filter(|p| p.starts_with("entity/") && p.ends_with(".json"))
         .map(str::to_owned)
         .collect();
     for file in files {
-        let Ok(v) = pack.read_json(&file) else { continue };
-        let Some(desc) = v.pointer("/minecraft:client_entity/description") else { continue };
+        let Ok(v) = pack.read_json(&file) else {
+            continue;
+        };
+        let Some(desc) = v.pointer("/minecraft:client_entity/description") else {
+            continue;
+        };
         let (Some(id), Some(egg)) = (
             desc.get("identifier").and_then(Value::as_str),
             desc.get("spawn_egg"),
         ) else {
             continue;
         };
-        let Some(mob) = java_mob(id).filter(|m| valid_name(m)) else { continue };
+        let Some(mob) = java_mob(id).filter(|m| valid_name(m)) else {
+            continue;
+        };
         let bytes = if let Some(name) = egg.get("texture").and_then(Value::as_str) {
-            let Some(path) = items.get(name) else { continue };
-            match pack.read(&format!("{path}.png")).ok().or_else(|| texture_png(pack, path, false, false)) {
+            let Some(path) = items.get(name) else {
+                continue;
+            };
+            match pack
+                .read(&format!("{path}.png"))
+                .ok()
+                .or_else(|| texture_png(pack, path, false, false))
+            {
                 Some(b) => b,
                 None => continue,
             }
@@ -1863,17 +2038,30 @@ fn convert_spawn_eggs(pack: &Pack, out: &Path, report: &mut Report) -> Result<()
             for (layer, tint) in [(EGG_BASE, base), (EGG_SPOTS, spots)] {
                 let texels = layer.concat();
                 for i in 0..256 {
-                    let Ok(g) = u8::from_str_radix(&texels[i * 2..i * 2 + 2], 16) else { continue };
+                    let Ok(g) = u8::from_str_radix(&texels[i * 2..i * 2 + 2], 16) else {
+                        continue;
+                    };
                     for c in 0..3 {
                         rgba[i * 4 + c] = (u16::from(g) * u16::from(tint[c]) / 255) as u8;
                     }
                     rgba[i * 4 + 3] = 255;
                 }
             }
-            let Some(png) = encode_png(&Image { width: 16, height: 16, rgba }) else { continue };
+            let Some(png) = encode_png(&Image {
+                width: 16,
+                height: 16,
+                rgba,
+            }) else {
+                continue;
+            };
             png
         };
-        write(&out.join(format!("assets/minecraft/textures/item/{mob}_spawn_egg.png")), &bytes)?;
+        write(
+            &out.join(format!(
+                "assets/minecraft/textures/item/{mob}_spawn_egg.png"
+            )),
+            &bytes,
+        )?;
         report.world_textures += 1;
     }
     Ok(())
@@ -1891,7 +2079,9 @@ fn convert_lang(pack: &Pack, out: &Path, report: &mut Report) -> Result<()> {
         .collect();
     for file in files {
         let code = file[6..file.len() - 5].to_ascii_lowercase();
-        let Ok(bytes) = pack.read(&file) else { continue };
+        let Ok(bytes) = pack.read(&file) else {
+            continue;
+        };
         let mut map = serde_json::Map::new();
         for (key, value) in crate::lang::parse(&String::from_utf8_lossy(&bytes)) {
             for java in java_lang_keys(&key) {
@@ -1916,15 +2106,23 @@ fn java_lang_keys(key: &str) -> Vec<String> {
         return Vec::new();
     };
     let vanilla = |id: &str| {
-        let id = id.strip_prefix("minecraft:").unwrap_or(id).to_ascii_lowercase();
+        let id = id
+            .strip_prefix("minecraft:")
+            .unwrap_or(id)
+            .to_ascii_lowercase();
         (!id.contains(':') && valid_name(&id)).then_some(id)
     };
     if let Some(mob) = rest.strip_prefix("item.spawn_egg.entity.") {
-        return vanilla(mob).map(|m| vec![format!("item.minecraft.{m}_spawn_egg")]).unwrap_or_default();
+        return vanilla(mob)
+            .map(|m| vec![format!("item.minecraft.{m}_spawn_egg")])
+            .unwrap_or_default();
     }
     if let Some(id) = rest.strip_prefix("item.").and_then(vanilla) {
         let item = java_item(&id);
-        return vec![format!("item.minecraft.{item}"), format!("block.minecraft.{item}")];
+        return vec![
+            format!("item.minecraft.{item}"),
+            format!("block.minecraft.{item}"),
+        ];
     }
     if let Some(id) = rest.strip_prefix("tile.").and_then(vanilla) {
         return vec![format!("block.minecraft.{id}")];
@@ -1967,8 +2165,8 @@ fn convert_carried_icons(out: &Path, report: &mut Report) -> Result<()> {
 /// is set (the tinted part) and the dirt in the others; Java draws `grass_block_side` (dirt) and
 /// tints `grass_block_side_overlay` (the fringe) over it.
 fn convert_grass_side(pack: &Pack, out: &Path, report: &mut Report) -> Result<()> {
-    let Some(side) = texture_png(pack, "textures/blocks/grass_side", false, false)
-        .and_then(|b| decode_rgba(&b))
+    let Some(side) =
+        texture_png(pack, "textures/blocks/grass_side", false, false).and_then(|b| decode_rgba(&b))
     else {
         return Ok(());
     };
@@ -1993,8 +2191,15 @@ fn convert_grass_side(pack: &Pack, out: &Path, report: &mut Report) -> Result<()
         }
     }
     let (width, height) = (side.width, side.height);
-    for (name, rgba) in [("grass_block_side", base), ("grass_block_side_overlay", overlay)] {
-        let Some(png) = encode_png(&Image { width, height, rgba }) else {
+    for (name, rgba) in [
+        ("grass_block_side", base),
+        ("grass_block_side_overlay", overlay),
+    ] {
+        let Some(png) = encode_png(&Image {
+            width,
+            height,
+            rgba,
+        }) else {
             continue;
         };
         write(
@@ -2031,7 +2236,10 @@ fn flipbooks(pack: &Pack) -> Vec<Flipbook> {
                     .and_then(Value::as_array)
                     .map(|a| a.iter().filter_map(Value::as_i64).collect())
                     .unwrap_or_default(),
-                blend: e.get("blend_frames").and_then(Value::as_bool).unwrap_or(true),
+                blend: e
+                    .get("blend_frames")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true),
             })
         })
         .collect()
@@ -2191,17 +2399,38 @@ mod tests {
         assert_eq!(j("textures/blocks/leaves_oak"), "block/oak_leaves");
         assert_eq!(j("textures/blocks/leaves_big_oak"), "block/dark_oak_leaves");
         assert_eq!(j("textures/blocks/reeds"), "block/sugar_cane");
-        assert_eq!(j("textures/blocks/double_plant_grass_top"), "block/tall_grass_top");
-        assert_eq!(j("textures/blocks/double_plant_fern_bottom"), "block/large_fern_bottom");
-        assert_eq!(j("textures/blocks/double_plant_syringa_top"), "block/lilac_top");
-        assert_eq!(j("textures/blocks/candles/red_candle_lit"), "block/red_candle_lit");
-        assert_eq!(j("textures/blocks/deepslate/deepslate_bricks"), "block/deepslate_bricks");
+        assert_eq!(
+            j("textures/blocks/double_plant_grass_top"),
+            "block/tall_grass_top"
+        );
+        assert_eq!(
+            j("textures/blocks/double_plant_fern_bottom"),
+            "block/large_fern_bottom"
+        );
+        assert_eq!(
+            j("textures/blocks/double_plant_syringa_top"),
+            "block/lilac_top"
+        );
+        assert_eq!(
+            j("textures/blocks/candles/red_candle_lit"),
+            "block/red_candle_lit"
+        );
+        assert_eq!(
+            j("textures/blocks/deepslate/deepslate_bricks"),
+            "block/deepslate_bricks"
+        );
         assert_eq!(
             j("textures/blocks/huge_fungus/strd_crimson_stem_side"),
             "block/stripped_crimson_stem"
         );
-        assert_eq!(j("textures/blocks/huge_fungus/warped_stem_top"), "block/warped_stem_top");
-        assert_eq!(j("textures/blocks/shulker_top_silver"), "block/light_gray_shulker_box");
+        assert_eq!(
+            j("textures/blocks/huge_fungus/warped_stem_top"),
+            "block/warped_stem_top"
+        );
+        assert_eq!(
+            j("textures/blocks/shulker_top_silver"),
+            "block/light_gray_shulker_box"
+        );
         assert_eq!(j("textures/blocks/sandstone_normal"), "block/sandstone");
         assert!(java_texture("textures/blocks/slab/oak_slab").is_none());
         assert!(java_texture("textures/blocks/deepslate/deepslate_mer").is_none());
@@ -2214,7 +2443,10 @@ mod tests {
             j("textures/items/spawn_eggs/spawn_egg_zombified_piglin"),
             "item/zombified_piglin_spawn_egg"
         );
-        assert_eq!(j("textures/items/harness/harness_silver"), "item/light_gray_harness");
+        assert_eq!(
+            j("textures/items/harness/harness_silver"),
+            "item/light_gray_harness"
+        );
         assert_eq!(j("textures/items/spear/wood_spear"), "item/wooden_spear");
         assert_eq!(
             j("textures/items/nautilus_armor/gold_nautilus_armor"),
@@ -2244,21 +2476,39 @@ mod tests {
             ("textures/items/door_wood", "item/oak_door"),
             ("textures/items/sign_spruce", "item/spruce_sign"),
             ("textures/items/seeds_wheat", "item/wheat_seeds"),
-            ("textures/items/bundle_light_blue_open_front", "item/light_blue_bundle_open_front"),
+            (
+                "textures/items/bundle_light_blue_open_front",
+                "item/light_blue_bundle_open_front",
+            ),
             ("textures/items/gold_horse_armor", "item/golden_horse_armor"),
             ("textures/items/redstone_dust", "item/redstone"),
             ("textures/blocks/planks_big_oak", "block/dark_oak_planks"),
             ("textures/blocks/log_oak_top", "block/oak_log_top"),
-            ("textures/blocks/glass_silver", "block/light_gray_stained_glass"),
-            ("textures/blocks/glazed_terracotta_red", "block/red_glazed_terracotta"),
+            (
+                "textures/blocks/glass_silver",
+                "block/light_gray_stained_glass",
+            ),
+            (
+                "textures/blocks/glazed_terracotta_red",
+                "block/red_glazed_terracotta",
+            ),
             ("textures/blocks/door_iron_lower", "block/iron_door_bottom"),
             ("textures/blocks/wheat_stage_7", "block/wheat_stage7"),
-            ("textures/blocks/coral_fan_blue_dead", "block/dead_tube_coral_fan"),
+            (
+                "textures/blocks/coral_fan_blue_dead",
+                "block/dead_tube_coral_fan",
+            ),
             ("textures/blocks/flower_houstonia", "block/azure_bluet"),
             ("textures/blocks/grass_top", "block/grass_block_top"),
-            ("textures/blocks/stonebrick_cracked", "block/cracked_stone_bricks"),
+            (
+                "textures/blocks/stonebrick_cracked",
+                "block/cracked_stone_bricks",
+            ),
             ("textures/blocks/cherry_log_side", "block/cherry_log"),
-            ("textures/blocks/rail_golden_powered", "block/powered_rail_on"),
+            (
+                "textures/blocks/rail_golden_powered",
+                "block/powered_rail_on",
+            ),
         ] {
             assert_eq!(j(bedrock), java, "{bedrock}");
         }
@@ -2297,10 +2547,19 @@ mod tests {
         let mut rgba = Vec::new();
         for y in 0..1024u32 {
             for x in 0..1024u32 {
-                rgba.extend_from_slice(if (x + y) % 2 == 0 { &[200, 0, 0, 255] } else { &[0, 0, 0, 0] });
+                rgba.extend_from_slice(if (x + y) % 2 == 0 {
+                    &[200, 0, 0, 255]
+                } else {
+                    &[0, 0, 0, 0]
+                });
             }
         }
-        let png = encode_png(&Image { width: 1024, height: 1024, rgba }).unwrap();
+        let png = encode_png(&Image {
+            width: 1024,
+            height: 1024,
+            rgba,
+        })
+        .unwrap();
         let small = fit_to_atlas(&png, false).unwrap();
         let px = decode_png_for_test(&small);
         assert_eq!(px.len(), 512 * 512);
@@ -2590,46 +2849,85 @@ mod tests {
         fs::write(dir.join("campfire_fire.png.mcmeta"), b"{}").unwrap();
         let mut report = Report::default();
         implicit_block_animations(&out, &mut report).unwrap();
-        assert_eq!(fs::read(dir.join("fire_0.png.mcmeta")).unwrap(), br#"{"animation":{}}"#);
+        assert_eq!(
+            fs::read(dir.join("fire_0.png.mcmeta")).unwrap(),
+            br#"{"animation":{}}"#
+        );
         assert!(!dir.join("stone.png.mcmeta").exists());
         assert!(!dir.join("prismarine.png.mcmeta").exists());
-        assert_eq!(fs::read(dir.join("campfire_fire.png.mcmeta")).unwrap(), b"{}");
+        assert_eq!(
+            fs::read(dir.join("campfire_fire.png.mcmeta")).unwrap(),
+            b"{}"
+        );
     }
 
     #[test]
     fn blocks_json_remap_and_lang_names() {
         let src = tmp("remap");
         put(&src, "manifest.json", br#"{"format_version":2,"header":{"name":"r","uuid":"u","version":[1,0,0]},"modules":[]}"#);
-        put(&src, "blocks.json", br#"{"sponge":{"textures":"my_sponge"},"stone":{"textures":"stone"}}"#);
-        put(&src, "textures/terrain_texture.json", br#"{"texture_data":{"my_sponge":{"textures":"textures/my/sponge"}}}"#);
+        put(
+            &src,
+            "blocks.json",
+            br#"{"sponge":{"textures":"my_sponge"},"stone":{"textures":"stone"}}"#,
+        );
+        put(
+            &src,
+            "textures/terrain_texture.json",
+            br#"{"texture_data":{"my_sponge":{"textures":"textures/my/sponge"}}}"#,
+        );
         put(&src, "textures/my/sponge.png", b"\x89PNGsponge");
         put(&src, "texts/pt_BR.lang", "item.paper.name=Papel\ntile.sponge.name=Esponja\nentity.pig.name=Porco\nitem.wood_sword.name=Espada\nitem.ns:x.name=X\n".as_bytes());
         let out = tmp("remap_out");
         to_java(&Pack::open(&src).unwrap(), &out, (64, 0)).unwrap();
-        assert_eq!(fs::read(out.join("assets/minecraft/textures/block/sponge.png")).unwrap(), b"\x89PNGsponge");
+        assert_eq!(
+            fs::read(out.join("assets/minecraft/textures/block/sponge.png")).unwrap(),
+            b"\x89PNGsponge"
+        );
         // No `format_version`: older than the flattening, the wet sponge too.
-        assert_eq!(fs::read(out.join("assets/minecraft/textures/block/wet_sponge.png")).unwrap(), b"\x89PNGsponge");
-        assert!(!out.join("assets/minecraft/textures/block/stone.png").exists());
-        let lang: Value =
-            serde_json::from_slice(&fs::read(out.join("assets/minecraft/lang/pt_br.json")).unwrap()).unwrap();
+        assert_eq!(
+            fs::read(out.join("assets/minecraft/textures/block/wet_sponge.png")).unwrap(),
+            b"\x89PNGsponge"
+        );
+        assert!(
+            !out.join("assets/minecraft/textures/block/stone.png")
+                .exists()
+        );
+        let lang: Value = serde_json::from_slice(
+            &fs::read(out.join("assets/minecraft/lang/pt_br.json")).unwrap(),
+        )
+        .unwrap();
         assert_eq!(lang["item.minecraft.paper"], "Papel");
         assert_eq!(lang["block.minecraft.sponge"], "Esponja");
         assert_eq!(lang["entity.minecraft.pig"], "Porco");
         assert_eq!(lang["item.minecraft.wooden_sword"], "Espada");
         assert_eq!(lang.as_object().unwrap().len(), 6);
         // A flattened file: `sponge` is only the dry one.
-        put(&src, "blocks.json", br#"{"format_version":"1.21.40","sponge":{"textures":"my_sponge"}}"#);
+        put(
+            &src,
+            "blocks.json",
+            br#"{"format_version":"1.21.40","sponge":{"textures":"my_sponge"}}"#,
+        );
         let out2 = tmp("remap_out2");
         to_java(&Pack::open(&src).unwrap(), &out2, (64, 0)).unwrap();
-        assert!(out2.join("assets/minecraft/textures/block/sponge.png").exists());
-        assert!(!out2.join("assets/minecraft/textures/block/wet_sponge.png").exists());
+        assert!(
+            out2.join("assets/minecraft/textures/block/sponge.png")
+                .exists()
+        );
+        assert!(
+            !out2
+                .join("assets/minecraft/textures/block/wet_sponge.png")
+                .exists()
+        );
         let _ = fs::remove_dir_all(&out2);
         // A vanilla mob's two-colour spawn egg.
         put(&src, "entity/pig.json", br##"{"format_version":"1.10.0","minecraft:client_entity":{"description":
             {"identifier":"minecraft:pig","spawn_egg":{"base_color":"#FF0000","overlay_color":"#0000FF"}}}}"##);
         let out3 = tmp("remap_out3");
         to_java(&Pack::open(&src).unwrap(), &out3, (64, 0)).unwrap();
-        let egg = decode_rgba(&fs::read(out3.join("assets/minecraft/textures/item/pig_spawn_egg.png")).unwrap()).unwrap();
+        let egg = decode_rgba(
+            &fs::read(out3.join("assets/minecraft/textures/item/pig_spawn_egg.png")).unwrap(),
+        )
+        .unwrap();
         let at = |x: usize, y: usize| &egg.rgba[(y * 16 + x) * 4..(y * 16 + x) * 4 + 4];
         assert_eq!(at(0, 0)[3], 0);
         assert_eq!(at(7, 5), &[0xf4, 0, 0, 255][..]);
@@ -2672,22 +2970,33 @@ mod tests {
         assert_eq!((r.textures, r.missing_textures), (3, 1));
         // Data copied as is.
         assert!(
-            out.join(format!("assets/horizon_bedrock/{ns}/entity/zombie.entity.json"))
-                .exists()
+            out.join(format!(
+                "assets/horizon_bedrock/{ns}/entity/zombie.entity.json"
+            ))
+            .exists()
         );
         assert!(
-            out.join(format!("assets/horizon_bedrock/{ns}/animations/a.animation.json"))
-                .exists()
+            out.join(format!(
+                "assets/horizon_bedrock/{ns}/animations/a.animation.json"
+            ))
+            .exists()
         );
         assert!(
-            out.join(format!("assets/horizon_bedrock/{ns}/models/entity/m.geo.json"))
-                .exists()
+            out.join(format!(
+                "assets/horizon_bedrock/{ns}/models/entity/m.geo.json"
+            ))
+            .exists()
         );
         assert!(
-            out.join(format!("assets/horizon_bedrock/{ns}/sounds/sound_definitions.json"))
+            out.join(format!(
+                "assets/horizon_bedrock/{ns}/sounds/sound_definitions.json"
+            ))
+            .exists()
+        );
+        assert!(
+            !out.join(format!("assets/horizon_bedrock/{ns}/texts/en_US.lang"))
                 .exists()
         );
-        assert!(!out.join(format!("assets/horizon_bedrock/{ns}/texts/en_US.lang")).exists());
         // Sounds: per namespace, Java names, averaged ranges, wav skipped.
         let sj: Value =
             serde_json::from_slice(&fs::read(out.join("assets/demo/sounds.json")).unwrap())

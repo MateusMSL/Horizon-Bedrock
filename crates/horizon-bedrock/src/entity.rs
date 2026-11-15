@@ -6,7 +6,9 @@
 //! animations. [`Instance::update`] runs a frame and gives a [`Frame`] the renderer draws.
 //! The game answers `query.*` through [`Host`]; nothing here reads game state itself.
 
-use crate::animation::{Children, Env, Event, Library, Pose, Run, Scalar, Scope, compile, compile_lines};
+use crate::animation::{
+    Children, Env, Event, Library, Pose, Run, Scalar, Scope, compile, compile_lines,
+};
 use crate::molang::{Host, Program, ResKind, Rng, Value, Vars};
 use serde_json::Value as Json;
 use std::collections::HashMap;
@@ -552,9 +554,9 @@ impl Host for WithBones<'_> {
             None => (self.origins, self.pivots, self.rotations),
         };
         let placed = |o: [f32; 3]| match &self.place {
-            Some(m) => std::array::from_fn(|r| {
-                m[r][0] * o[0] + m[r][1] * o[1] + m[r][2] * o[2] + m[r][3]
-            }),
+            Some(m) => {
+                std::array::from_fn(|r| m[r][0] * o[0] + m[r][1] * o[1] + m[r][2] * o[2] + m[r][3])
+            }
             None => o,
         };
         let value = match name {
@@ -658,7 +660,11 @@ pub(crate) fn rotation_degrees(m: &Mat3) -> [f32; 3] {
 /// model's space), the way a pack aims a glow at the camera: its pitch and yaw from the bone's
 /// pivot, keeping the pack's roll.
 fn face_camera(geometry: &crate::geometry::Geometry, pose: &mut Pose, camera: [f32; 3]) {
-    if !pose.bones.values().any(|b| b.entity_frame || b.rotation_entity != [0.0; 3]) {
+    if !pose
+        .bones
+        .values()
+        .any(|b| b.entity_frame || b.rotation_entity != [0.0; 3])
+    {
         return;
     }
     let (origins, _, _) = bone_origins(geometry, pose);
@@ -679,7 +685,11 @@ fn face_camera(geometry: &crate::geometry::Geometry, pose: &mut Pose, camera: [f
         }
         let pitch = (d[1] / len).clamp(-1.0, 1.0).asin().to_degrees();
         let yaw = d[0].atan2(d[2]).to_degrees();
-        b.rotation_entity = [pitch - b.rotation[0], yaw - b.rotation[1], b.rotation_entity[2]];
+        b.rotation_entity = [
+            pitch - b.rotation[0],
+            yaw - b.rotation[1],
+            b.rotation_entity[2],
+        ];
     }
 }
 
@@ -696,7 +706,11 @@ pub fn resolve_entity_rotations_under(
     pose: &mut Pose,
     root: Option<Mat3>,
 ) {
-    if !pose.bones.values().any(|b| b.entity_frame || b.rotation_entity != [0.0; 3]) {
+    if !pose
+        .bones
+        .values()
+        .any(|b| b.entity_frame || b.rotation_entity != [0.0; 3])
+    {
         return;
     }
     let index: HashMap<String, usize> = geometry
@@ -824,7 +838,10 @@ fn bone_origin_moved(
     pose: &Pose,
     bone: &str,
 ) -> Option<[f32; 3]> {
-    let start = geometry.bones.iter().find(|b| b.name.eq_ignore_ascii_case(bone))?;
+    let start = geometry
+        .bones
+        .iter()
+        .find(|b| b.name.eq_ignore_ascii_case(bone))?;
     let mut p = start.pivot;
     let mut cur = Some(start);
     let mut guard = 0;
@@ -837,7 +854,12 @@ fn bone_origin_moved(
         cur = b
             .parent
             .as_ref()
-            .and_then(|n| geometry.bones.iter().find(|x| x.name.eq_ignore_ascii_case(n)))
+            .and_then(|n| {
+                geometry
+                    .bones
+                    .iter()
+                    .find(|x| x.name.eq_ignore_ascii_case(n))
+            })
             .filter(|_| guard < 64);
     }
     Some(p)
@@ -851,13 +873,20 @@ pub fn bone_point(
     bone: &str,
     point: [f32; 3],
 ) -> Option<[f32; 3]> {
-    let start = geometry.bones.iter().find(|b| b.name.eq_ignore_ascii_case(bone))?;
+    let start = geometry
+        .bones
+        .iter()
+        .find(|b| b.name.eq_ignore_ascii_case(bone))?;
     let mut p = std::array::from_fn(|i| start.pivot[i] + point[i]);
     let mut cur = Some(start);
     let mut guard = 0;
     while let Some(b) = cur {
         let local = pose.get(&b.name).cloned().unwrap_or_default();
-        let scale = if local.scale == [0.0; 3] { [1.0; 3] } else { local.scale };
+        let scale = if local.scale == [0.0; 3] {
+            [1.0; 3]
+        } else {
+            local.scale
+        };
         let rel = [
             (p[0] - b.pivot[0]) * scale[0],
             (p[1] - b.pivot[1]) * scale[1],
@@ -870,7 +899,12 @@ pub fn bone_point(
         cur = b
             .parent
             .as_ref()
-            .and_then(|n| geometry.bones.iter().find(|x| x.name.eq_ignore_ascii_case(n)))
+            .and_then(|n| {
+                geometry
+                    .bones
+                    .iter()
+                    .find(|x| x.name.eq_ignore_ascii_case(n))
+            })
             .filter(|_| guard < 64);
     }
     Some(p)
@@ -884,16 +918,21 @@ pub fn bone_world_rotation(
     bone: &str,
 ) -> Option<Mat3> {
     let mut chain = Vec::new();
-    let mut cur = geometry.bones.iter().find(|b| b.name.eq_ignore_ascii_case(bone));
+    let mut cur = geometry
+        .bones
+        .iter()
+        .find(|b| b.name.eq_ignore_ascii_case(bone));
     while let Some(b) = cur {
         chain.push(b);
         if chain.len() > 64 {
             break;
         }
-        cur = b
-            .parent
-            .as_ref()
-            .and_then(|n| geometry.bones.iter().find(|x| x.name.eq_ignore_ascii_case(n)));
+        cur = b.parent.as_ref().and_then(|n| {
+            geometry
+                .bones
+                .iter()
+                .find(|x| x.name.eq_ignore_ascii_case(n))
+        });
     }
     if chain.is_empty() {
         return None;
@@ -901,7 +940,8 @@ pub fn bone_world_rotation(
     let mut m: Mat3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     for b in chain.iter().rev() {
         let own = pose.get(&b.name).cloned().unwrap_or_default();
-        let turn = std::array::from_fn(|k| b.rotation[k] + own.rotation[k] + own.rotation_entity[k]);
+        let turn =
+            std::array::from_fn(|k| b.rotation[k] + own.rotation[k] + own.rotation_entity[k]);
         m = mat_mul(&m, &rotation_matrix(turn));
     }
     Some(m)
@@ -920,7 +960,9 @@ pub fn bone_place(
         let p = bone_point(geometry, pose, bone, e).unwrap_or(o);
         std::array::from_fn(|i| p[i] - o[i])
     });
-    Some(std::array::from_fn(|r| [axes[0][r], axes[1][r], axes[2][r], o[r]]))
+    Some(std::array::from_fn(|r| {
+        [axes[0][r], axes[1][r], axes[2][r], o[r]]
+    }))
 }
 
 /// One entity (or held item) in the world.
@@ -1074,23 +1116,23 @@ impl Instance {
             };
             let mut pose = Pose::default();
             if let Some(models) = assets.geometries {
-                pose.rest = self
-                    .rest
-                    .get_or_insert_with(|| {
-                        let mut rest = HashMap::new();
-                        let mut names: Vec<&String> = def.geometry.values().collect();
-                        names.sort();
-                        for name in names {
-                            let id = name.to_ascii_lowercase();
-                            if let Some(g) = models.get(&id).or_else(|| {
-                                id.split_once(':').and_then(|(own, _)| models.get(own))
-                            }) {
-                                g.rest_offsets(&mut rest);
+                pose.rest =
+                    self.rest
+                        .get_or_insert_with(|| {
+                            let mut rest = HashMap::new();
+                            let mut names: Vec<&String> = def.geometry.values().collect();
+                            names.sort();
+                            for name in names {
+                                let id = name.to_ascii_lowercase();
+                                if let Some(g) = models.get(&id).or_else(|| {
+                                    id.split_once(':').and_then(|(own, _)| models.get(own))
+                                }) {
+                                    g.rest_offsets(&mut rest);
+                                }
                             }
-                        }
-                        std::sync::Arc::new(rest)
-                    })
-                    .clone();
+                            std::sync::Arc::new(rest)
+                        })
+                        .clone();
             }
             let mut played: Vec<&str> = Vec::with_capacity(def.animate.len());
             for (name, cond) in &def.animate {
@@ -1201,24 +1243,25 @@ impl Instance {
                 self.origins = origins
                     .into_iter()
                     .map(|(name, now)| {
-                        let mean = self.origins.get(&name).map_or(now, |old| {
-                            std::array::from_fn(|i| (now[i] + old[i]) * 0.5)
-                        });
+                        let mean = self
+                            .origins
+                            .get(&name)
+                            .map_or(now, |old| std::array::from_fn(|i| (now[i] + old[i]) * 0.5));
                         (name, mean)
                     })
                     .collect();
-                self.moved = g
-                    .bones
-                    .iter()
-                    .filter_map(|b| {
-                        let name = b.name.to_ascii_lowercase();
-                        let now = bone_origin_moved(g, &frame.pose, &b.name)?;
-                        let mean = self.moved.get(&name).map_or(now, |old| {
-                            std::array::from_fn(|i| (now[i] + old[i]) * 0.5)
-                        });
-                        Some((name, mean))
-                    })
-                    .collect();
+                self.moved =
+                    g.bones
+                        .iter()
+                        .filter_map(|b| {
+                            let name = b.name.to_ascii_lowercase();
+                            let now = bone_origin_moved(g, &frame.pose, &b.name)?;
+                            let mean = self.moved.get(&name).map_or(now, |old| {
+                                std::array::from_fn(|i| (now[i] + old[i]) * 0.5)
+                            });
+                            Some((name, mean))
+                        })
+                        .collect();
                 self.pivots = pivots;
                 self.rotations = rotations;
             }
@@ -1310,7 +1353,7 @@ impl Instance {
         let start = out.len();
         for (index, t) in rc.textures.iter().enumerate() {
             let v = run(host, &mut self.vars, &mut self.rng, t);
-                let Some(texture) = name_of(&v).and_then(|k| def.textures.get(&k).cloned()) else {
+            let Some(texture) = name_of(&v).and_then(|k| def.textures.get(&k).cloned()) else {
                 continue;
             };
             out.push(Layer {

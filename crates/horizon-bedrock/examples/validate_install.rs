@@ -21,7 +21,11 @@ fn walk(dir: &Path, base: &Path, out: &mut Vec<(String, PathBuf)>) {
         if p.is_dir() {
             walk(&p, base, out);
         } else {
-            let rel = p.strip_prefix(base).unwrap().to_string_lossy().replace('\\', "/");
+            let rel = p
+                .strip_prefix(base)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
             out.push((rel, p));
         }
     }
@@ -50,13 +54,23 @@ fn listing(dir: &Path) -> BTreeMap<String, u64> {
 }
 
 fn main() {
-    let src = PathBuf::from(std::env::args().nth(1).expect("usage: validate_install <pack folder>"));
+    let src = PathBuf::from(
+        std::env::args()
+            .nth(1)
+            .expect("usage: validate_install <pack folder>"),
+    );
     if src.is_file() {
         let packs = Pack::open_all(&src, &Options::default()).expect("open");
         let (packs, missing) = order_by_dependencies(packs);
         for p in &packs {
             let m = p.manifest();
-            println!("pack {} {:?} resource={} files={}", m.name, m.version, m.is_resource_pack(), p.paths().count());
+            println!(
+                "pack {} {:?} resource={} files={}",
+                m.name,
+                m.version,
+                m.is_resource_pack(),
+                p.paths().count()
+            );
         }
         for (p, d) in &missing {
             println!("missing dependency {d} of {p}");
@@ -68,7 +82,14 @@ fn main() {
             println!("{r:?}");
         }
         let b = Bundle::load(&out);
-        println!("entities {} attachables {} geometries {} settings {} files {}", b.entities.len(), b.attachables.len(), b.geometries.len(), b.settings.len(), listing(&out).len());
+        println!(
+            "entities {} attachables {} geometries {} settings {} files {}",
+            b.entities.len(),
+            b.attachables.len(),
+            b.geometries.len(),
+            b.settings.len(),
+            listing(&out).len()
+        );
         let _ = fs::remove_dir_all(&out);
         return;
     }
@@ -83,7 +104,9 @@ fn main() {
         .collect();
     let bp_manifest = br#"{"format_version":2,"header":{"name":"bp","description":"","uuid":"00000000-0000-4000-8000-0000000000b0","version":[1,0,0],"min_engine_version":[1,20,0]},"modules":[{"type":"data","uuid":"00000000-0000-4000-8000-0000000000b1","version":[1,0,0]}]}"#.to_vec();
     let with_prefix = |prefix: &str, f: &[(String, Vec<u8>)]| -> Vec<(String, Vec<u8>)> {
-        f.iter().map(|(n, b)| (format!("{prefix}{n}"), b.clone())).collect()
+        f.iter()
+            .map(|(n, b)| (format!("{prefix}{n}"), b.clone()))
+            .collect()
     };
     let mcpack = zip_of(&rp);
     let mut variants: Vec<(&str, PathBuf)> = Vec::new();
@@ -94,27 +117,46 @@ fn main() {
         variants.push((name, p));
     };
     put("mcpack (files at root)", "a.mcpack", mcpack.clone());
-    put("zip (wrapper folder)", "b.zip", zip_of(&with_prefix("Wrapper/", &rp)));
+    put(
+        "zip (wrapper folder)",
+        "b.zip",
+        zip_of(&with_prefix("Wrapper/", &rp)),
+    );
     let mut addon = with_prefix("RP/", &rp);
     addon.push(("BP/manifest.json".into(), bp_manifest.clone()));
     put("mcaddon (RP + BP folders)", "c.mcaddon", zip_of(&addon));
     put(
         "mcaddon (nested mcpack)",
         "d.mcaddon",
-        zip_of(&[("rp.mcpack".into(), mcpack.clone()), ("bp.mcpack".into(), zip_of(&[("manifest.json".into(), bp_manifest.clone())]))]),
+        zip_of(&[
+            ("rp.mcpack".into(), mcpack.clone()),
+            (
+                "bp.mcpack".into(),
+                zip_of(&[("manifest.json".into(), bp_manifest.clone())]),
+            ),
+        ]),
     );
     let mut world = with_prefix("resource_packs/Demo/", &rp);
     world.push(("level.dat".into(), vec![0; 8]));
-    world.push(("behavior_packs/bp/manifest.json".into(), bp_manifest.clone()));
+    world.push((
+        "behavior_packs/bp/manifest.json".into(),
+        bp_manifest.clone(),
+    ));
     put("mcworld", "e.mcworld", zip_of(&world));
     put("mctemplate", "f.mctemplate", zip_of(&world));
-    let backslash: Vec<(String, Vec<u8>)> = rp.iter().map(|(n, b)| (format!("Demo\\{}", n.replace('/', "\\")), b.clone())).collect();
+    let backslash: Vec<(String, Vec<u8>)> = rp
+        .iter()
+        .map(|(n, b)| (format!("Demo\\{}", n.replace('/', "\\")), b.clone()))
+        .collect();
     put("zip (backslash names)", "g.mcpack", zip_of(&backslash));
 
     let convert = |path: &Path, out: &Path| -> Result<(usize, usize), String> {
         let packs = Pack::open_all(path, &Options::default()).map_err(|e| e.to_string())?;
         let (packs, _) = order_by_dependencies(
-            packs.into_iter().filter(|p| p.manifest().is_resource_pack()).collect(),
+            packs
+                .into_iter()
+                .filter(|p| p.manifest().is_resource_pack())
+                .collect(),
         );
         if packs.is_empty() {
             return Err("no resource pack".into());
@@ -128,15 +170,31 @@ fn main() {
     let base_out = work.join("out-folder");
     let base = convert(&src, &base_out).expect("folder");
     let base_list = listing(&base_out);
-    println!("{:<30} entities {:>4} attachables {:>4} files {:>5}", "folder", base.0, base.1, base_list.len());
+    println!(
+        "{:<30} entities {:>4} attachables {:>4} files {:>5}",
+        "folder",
+        base.0,
+        base.1,
+        base_list.len()
+    );
     let mut bad = 0;
     for (name, path) in &variants {
-        let out = work.join(format!("out-{}", path.file_name().unwrap().to_string_lossy()));
+        let out = work.join(format!(
+            "out-{}",
+            path.file_name().unwrap().to_string_lossy()
+        ));
         match convert(path, &out) {
             Ok(n) => {
                 let l = listing(&out);
                 let same = l == base_list && n == base;
-                println!("{:<30} entities {:>4} attachables {:>4} files {:>5}  {}", name, n.0, n.1, l.len(), if same { "OK" } else { "DIFF" });
+                println!(
+                    "{:<30} entities {:>4} attachables {:>4} files {:>5}  {}",
+                    name,
+                    n.0,
+                    n.1,
+                    l.len(),
+                    if same { "OK" } else { "DIFF" }
+                );
                 if !same {
                     bad += 1;
                 }

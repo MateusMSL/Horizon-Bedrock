@@ -1355,13 +1355,7 @@ impl HudAtlas {
                 && (gh <= 512
                     || name.starts_with("font/")
                     || (gh <= 1024 && name.starts_with("entity/bedrock/"))))
-            .then_some((
-                (name, w, h, pixels),
-                flags,
-                gui_size,
-                animated,
-                maps,
-            ))
+            .then_some(((name, w, h, pixels), flags, gui_size, animated, maps))
         };
         let threads = std::thread::available_parallelism().map_or(2, |n| n.get());
         let chunk = files.len().div_ceil(threads).max(1);

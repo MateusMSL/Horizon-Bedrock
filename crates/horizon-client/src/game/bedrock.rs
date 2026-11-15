@@ -2,8 +2,8 @@
 //! ([`horizon_client::mobs::bedrock`]) queue them; here they are played and drawn.
 
 use super::Game;
-use horizon_client::mesher::Vertex;
 use horizon_client::blocks::{BlockFacts, Fluid};
+use horizon_client::mesher::Vertex;
 use horizon_client::mobs::bedrock::{Emitted, Ground};
 use horizon_client::world::World;
 
@@ -21,7 +21,8 @@ impl Ground for Blocks<'_, '_> {
         let state = self.world.block(b[0] as i32, b[1] as i32, b[2] as i32);
         match self.collision.cached_shapes().cached_shape(state) {
             Ok(Some(shape)) if !shape.is_empty() => {
-                p[1] - b[1] < shape.max_at(horizon_core::geometry::Axis::Y, p[0] - b[0], p[2] - b[2])
+                p[1] - b[1]
+                    < shape.max_at(horizon_core::geometry::Axis::Y, p[0] - b[0], p[2] - b[2])
             }
             _ => false,
         }
@@ -58,7 +59,9 @@ impl Game<'_> {
         };
         let sprites = &self.gui.atlas.sprites;
         let lookup = |name: &str| sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
-        horizon_client::mobs::render::set_first_person_arm_heights(self.heights.interpolated(alpha));
+        horizon_client::mobs::render::set_first_person_arm_heights(
+            self.heights.interpolated(alpha),
+        );
         horizon_client::mobs::render::first_person_item(
             player,
             item,
@@ -106,7 +109,11 @@ impl Game<'_> {
         // The game's own particles the pack draws (rain splashes, water splashes).
         let requests = horizon_client_render::bedrock_particles::take();
         if !requests.is_empty() && horizon_client::mobs::bedrock_debug::debug() {
-            log::info!("bedrock: {} game particles to the pack (first {})", requests.len(), requests[0].effect);
+            log::info!(
+                "bedrock: {} game particles to the pack (first {})",
+                requests.len(),
+                requests[0].effect
+            );
         }
         for r in requests {
             bedrock.spawn_particle(
