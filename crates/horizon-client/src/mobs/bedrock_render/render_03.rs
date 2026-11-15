@@ -74,7 +74,7 @@ fn lift_toward_camera(vertices: &mut [Vertex], push: f32) {
 fn screen_shapes(quads: &[Vertex]) -> Vec<ScreenShape> {
     let mut shapes: Vec<ScreenShape> = Vec::new();
     let mut seen: Vec<glam::Vec3> = Vec::new();
-    for q in quads.chunks_exact(4) {
+    for q in quads.as_chunks::<4>().0 {
         let p: [glam::Vec3; 4] = std::array::from_fn(|i| glam::Vec3::from_array(q[i].pos));
         // Edge-on faces (the sides of a flat shape) cover no pixel.
         if (p[2] - p[0]).cross(p[3] - p[1]).length() < 1e-5 {
@@ -134,7 +134,7 @@ fn clip_to_screen_shapes(vertices: &mut Vec<Vertex>, start: usize, shapes: &[Scr
     }
     let tail = vertices.split_off(start);
     for shape in shapes {
-        for quad in tail.chunks_exact(4) {
+        for quad in tail.as_chunks::<4>().0 {
             let mut poly: Vec<Vertex> = quad.to_vec();
             // The four edge planes through the camera, then the face's own plane: what is
             // behind the mask fails its depth (Bedrock's masks write depth, colour off).
@@ -733,7 +733,7 @@ fn render_bedrock(
             );
             if flags.invert_culling {
                 // The faces the game culls are the front ones: turn every quad around.
-                for quad in out[start..].chunks_exact_mut(4) {
+                for quad in out[start..].as_chunks_mut::<4>().0 {
                     quad.swap(1, 3);
                     for v in quad {
                         v.normal = v.normal.map(i8::saturating_neg);

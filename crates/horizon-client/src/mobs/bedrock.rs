@@ -4197,15 +4197,15 @@ mod tests {
         builtin.add_builtins();
         geos.extend(builtin.geometries);
         for p in pack.paths().map(str::to_owned).collect::<Vec<_>>() {
-            if p.starts_with("models/") && p.ends_with(".json") {
-                if let Ok(list) = pack
+            if p.starts_with("models/")
+                && p.ends_with(".json")
+                && let Ok(list) = pack
                     .read_json(&p)
                     .map_err(|_| ())
                     .and_then(|v| geometry::parse_file(&v).map_err(|_| ()))
-                {
-                    for g in list {
-                        geos.insert(g.id.to_ascii_lowercase(), g);
-                    }
+            {
+                for g in list {
+                    geos.insert(g.id.to_ascii_lowercase(), g);
                 }
             }
         }
