@@ -1442,6 +1442,8 @@ impl Audio {
         } else {
             Err("no output on a dedicated server".into())
         };
+        // Without the `audio` feature `Stream` has no values: the `Ok` arm cannot run.
+        #[cfg_attr(not(feature = "audio"), allow(unreachable_code))]
         let (stream, live) = match opened {
             Ok(v) => (Some(v), true),
             Err(e) => {
