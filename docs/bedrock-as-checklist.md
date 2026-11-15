@@ -474,7 +474,7 @@ Procedimento (A&S 1.12): colocar a Cushion direto no mundo, renomear uma Name Ta
 ---
 
 ## 4. Morphs
-Obs. geral: com a mão vazia aparece a mão da skin original; segurando item, a mão do Morph aparece normal. Bug só da mão vazia.
+Obs. geral: os Morphs se transformam certo. Em 1ª pessoa com a mão vazia aparece a mão da skin original; segurando item, a do Morph. Ferramentas e armaduras não encaixam no corpo do Morph.
 - [x] Disabled (modelo padrão)
 - [x] Mini Me (jogador bebê)
 - [ ] Rana (garota sapo)
@@ -482,8 +482,8 @@ Obs. geral: com a mão vazia aparece a mão da skin original; segurando item, a 
 - [ ] Lucy (Axolote)
 - [ ] Ash (cavaleiro Blaze)
 - [x] Iris (olho do Ender)
-- [ ] Bandit (raposa)
-- [ ] Rusty (golem de redstone)
+- [x] Bandit (raposa)
+- [x] Rusty (golem de redstone)
 - [ ] Echo (Sculk Whisperer)
 - [x] Goober (Slime)
 - [ ] Sully (Sulfur Cube)

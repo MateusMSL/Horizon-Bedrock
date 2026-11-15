@@ -118,6 +118,7 @@ Junta as listas pedidas na conversa (lista de tarefas da sessão, notas "Anotado
 - [ ] Monte de neve com pá: neve ausente e pá dentro da terra; globo de neve pequeno dentro da terra e incompleto.
 - [ ] Meias de Natal: botas tratadas como bota vestida do suporte em vez de item na mão.
 - [ ] Pelúcia da lã cinza-clara ausente.
-- [ ] Morphs: mão vazia mostra a mão da skin original (com item aparece a do Morph).
+- [ ] Morphs: em 1ª pessoa a mão vazia mostra a mão da skin original (com item aparece a do Morph).
+- [ ] Morphs: ferramentas e armaduras não encaixam no corpo do Morph (testado em raposa, olho do fim e golem de redstone).
 - [ ] Costumes: trim aparece na armadura de couro, mas nenhuma fantasia (opção ligada).
 - [ ] Abóboras e Snow Golem sempre com o mesmo rosto (sem variações).

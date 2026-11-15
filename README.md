@@ -80,7 +80,7 @@ Checked in game with Actions & Stuff, side by side with Bedrock.
 
 **Sounds and more**
 - New sword swings, the axolotl bucket companion and footsteps in step with the animations
-- Morphs: Mini Me, Iris and Goober
+- Morphs: Mini Me, Iris, Goober, Bandit and Rusty
 
 Full list, item by item: [Actions & Stuff checklist](docs/bedrock-as-checklist.md).
 
@@ -95,7 +95,7 @@ Things that don't work yet and will be fixed in future updates:
 - Some **props** don't appear (chimney, pumpkin patch, snowman, Backrooms door…), and flames, glows and particles of some props sit in the wrong place
 - **Placeable items** on armour stands appear away from the stand
 - **Interactive props** don't react when punched (piñatas, big pumpkin, mushrooms)
-- With an empty hand, **morphs** show your normal skin's hand
+- **Morphs:** with an empty hand, first person shows your normal skin's hand, and tools and armour don't fit the morph's body
 - **Pumpkins** and snow golems always have the same face
 - **Wolves** howl on any night, not only at full moon
 
