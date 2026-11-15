@@ -11,7 +11,7 @@ Ao marcar, anotar a versão da engine (`ENGINE_BUILD`) entre parênteses. Bugs e
 
 ### 1.1 Animações do jogador (1ª e 3ª pessoa)
 - [ ] Movimento: correr, andar direcional, pular, aterrissar, nadar
-  - Obs.: voando, a armadura desconecta do corpo
+  - Obs.: voando de elytra a armadura soltava do corpo: corrigido (v271, validado)
 - [ ] Idles (poses paradas)
   - Obs.: algumas existem; falta verificar todas
 - [x] Ferramentas: machado, picareta, pá, enxada
@@ -103,7 +103,7 @@ Teste: `/effect @s strength infinite 255 true`; queda: `/summon cow ~~50~5`.
 - [x] Ferro
 - [x] Ouro
 - [x] Diamante
-- [~] Netherite (contorno/brilho do encantamento ajustado v268/v269, aguardando validação)
+- [x] Netherite (contorno do encantamento v268/v269; brilho pulsante na cor do setting v272)
 - [x] Casco de tartaruga (anima nadando, "ganha vida")
 - [x] Armour Shimmer em diamante, ferro, ouro, cobre não encantados (pack setting "Armour Shimmer")
 - [x] Armadura 3D quando segurada na mão
@@ -112,11 +112,11 @@ Teste: `/effect @s strength infinite 255 true`; queda: `/summon cow ~~50~5`.
 ### 1.8 Encantamento (contorno e glint custom)
 - [x] Espada 2D: contorno (v255+)
 - [x] Cor do glint pelo pack setting (v258/v259)
-- [~] Intensidade do contorno/pulso vs luz do mundo (v268/v269)
+- [x] Intensidade do contorno/pulso vs luz do mundo (v268/v269)
 - [x] Armadura vestida
 - [~] Armadura segurada
   - Obs.: aparece, sem encantamento
-- [ ] Elytra
+- [x] Elytra (glint colado na asa, v273)
 - [x] Escudo (também com banner)
 - [x] Carrot on a Stick e Warped Fungus on a Stick
 - [ ] Bússola de magnetita
@@ -140,8 +140,7 @@ Pack setting "Holstered Weapons": Back Rear, Back Front, Belt Left, Belt Right (
 - [ ] Desmarcar todos desliga
 
 ### 1.10 Suporte de armadura
-- [~] 12 poses (Sneak + Usar item no suporte)
-  - Obs.: só coloca o item; poses não mudam
+- [x] 12 poses (Sneak + Usar item no suporte) (v274)
 - [ ] Desempenho
 
 ### 1.11 Camas customizadas
@@ -179,7 +178,7 @@ Detalhe por item em `docs/bedrock-items-3d.md`.
 
 ## 2. Nametags
 
-Status: PULADO por enquanto (2.1 a 2.6).
+Status: PULADO por enquanto (2.1 a 2.6); avaliar cada nametag individualmente.
 
 ### 2.1 General
 - [ ] Qualquer mob (menos Ender Dragon): `Baby` mantém filhote
@@ -242,7 +241,8 @@ Pack setting "Seasonal Mob Variants" faz spawn natural o ano todo; ou nametag `H
 - [ ] Shulker: `Pumpkin` (projéteis viram abóboras brilhantes com o setting)
 - [ ] Traça: `Centipede` (onda de perninhas)
 - [ ] Esqueleto e Bogged: `Scarecrow`
-- [ ] Slime: `Skull`
+- [~] Slime: `Skull`
+  - Obs.: nametag `Halloween` não deixa o slime como a variante de caveira.
 - [ ] Aranha e aranha da caverna: `Skull`
 - [ ] Stray: `Grim Reaper`, `Reaper` (lanterna brilhante balançando)
 - [ ] Strider: `Demon` / `Demon Stridling`
@@ -321,97 +321,141 @@ Spawn natural no bioma ou nametag `Pale`; "Entity Biome Variants" desliga. Olhos
 
 ## 3. Props
 
-Status: PULADO por enquanto; retomar pendentes depois.
+Status: PULADO por enquanto; retomar pendentes depois. Validações já concluídas ficam registradas.
 
 Suporte de armadura renomeado `§§` ou `Prop` (`/summon armor_stand §§`). Variantes a 45°: `/execute as @n[type=armor_stand] at @s run tp @s ~~~ 45`.
 - [x] Posicionamento do prop no suporte (v253)
+- [~] Escudo no suporte `Prop`: divergência do Bedrock
+  - Obs.: no Bedrock o escudo não tem Prop especial e o suporte continua visível com as poses comuns; no Horizon só o escudo e a base pequena de Prop aparecem, sem o corpo do suporte.
+
+Problema visual recorrente (vários props): chamas, brilhos e partículas desalinhados/acima do lugar (candelabro, bolo, crânio com vela, lanterna da alma, gárgula, cogumelos, fogueiras, lápide). Provável causa comum; investigar junto com o offset do Placeable Item (3.4).
 
 ### 3.1 Static Props
-- [ ] Farinha de osso: restos de esqueleto
-- [ ] Tijolos: chaminé (fumaça)
-- [ ] Bolo: bolo de festa
-- [ ] Cenoura: pilha de cenouras
-- [ ] Pedregulho: aglomerado de pedras
-- [ ] Biscoito: pote de biscoitos
-- [ ] Cabeça de creeper: estátua de anatomia
-- [ ] Pena: forte de travesseiros
-- [ ] Caco Heartbreak: cerâmica quebrada
-- [ ] Balde de lava: lava lamp
-- [ ] Barco de mangue: trenó festivo
-- [ ] Tapete de musgo: cobertura musgosa
-- [ ] Pedregulho musgoso: aglomerado musgoso
-- [ ] Espeleotema pontiagudo: gárgula
-- [ ] Abóbora: canteiro de abóboras
-- [ ] Vela vermelha: candelabro
+- [x] Farinha de osso: restos de esqueleto
+- [~] Tijolos: chaminé (fumaça)
+  - Obs.: Prop não aplicado no Horizon.
+- [x] Bolo: bolo de festa
+  - Obs.: fogo e brilhos mal posicionados (problema recorrente).
+- [x] Cenoura: pilha de cenouras
+- [x] Pedregulho: aglomerado de pedras
+- [~] Biscoito: pote de biscoitos
+  - Obs.: um biscoito atravessa o vidro do pote (imagem no Notion).
+- [x] Cabeça de creeper: estátua de anatomia
+- [x] Pena: forte de travesseiros
+- [x] Caco Heartbreak: cerâmica quebrada
+- [x] Balde de lava: lava lamp
+  - Obs.: textura opaca, sem a translucidez esperada; bolhas internas escondidas. Revisar transparência/material (imagem no Notion).
+- [x] Barco de mangue: trenó festivo
+- [x] Tapete de musgo: cobertura musgosa
+- [x] Pedregulho musgoso: aglomerado musgoso
+- [x] Espeleotema pontiagudo: gárgula
+  - Obs.: brilho dos olhos desalinhado dos olhos.
+- [~] Abóbora: canteiro de abóboras
+  - Obs.: existe no Bedrock; no Horizon mostra só a abóbora na mão do suporte.
+- [x] Vela vermelha: candelabro
+  - Obs.: brilhos fracos e pontas das velas apagadas (imagem no Notion).
 - [ ] Tocha de redstone: pilha de blocos de redstone
-- [ ] Crânio de esqueleto: crânio com vela
-- [ ] Bloco de neve: boneco de neve
-- [ ] Neve: cobertura de neve
-- [ ] Lanterna da alma: lâmpada gótica
-- [ ] Tocha da alma: pilar de fogo de pedra
-- [ ] Alçapão de abeto: roda d'água (respingos na água, sons)
-- [ ] Tijolos de pedra: pilha de tijolos
-- [ ] Tocha: braseiro medieval (partículas)
-- [ ] Balde d'água: banheira de pássaros
-- [ ] Escadas de lã: tendas (todas as cores)
+- [x] Crânio de esqueleto: crânio com vela
+  - Obs.: brilho e chama desalinhados (imagem no Notion).
+- [~] Bloco de neve: boneco de neve
+  - Obs.: Prop não aplicado.
+- [~] Neve: cobertura de neve
+  - Obs.: gera boneco de neve em vez da cobertura.
+- [x] Lanterna da alma: lâmpada gótica
+  - Obs.: brilho central estranho, chama interna mal posicionada.
+- [~] Tocha da alma: pilar de fogo de pedra
+  - Obs.: Prop não aplicado.
+- [x] Alçapão de abeto: roda d'água (respingos na água, sons)
+  - Obs.: Shift + clique não troca a pose/animação; só a variação da base aplica.
+- [x] Tijolos de pedra: pilha de tijolos
+- [x] Tocha: braseiro medieval (partículas)
+  - Obs.: braseiro apagado, sem partículas.
+- [x] Balde d'água: banheira de pássaros
+  - Obs.: sem animação/efeito perceptível; confirmar no Bedrock se é esperado.
+- [x] Escadas de lã: tendas (todas as cores)
+
+Testados fora da lista do guia:
+- [~] Carrinho de mina com baú: Prop diferente do esperado.
+- [~] Melancia inteira e fatia de melancia: nenhum dos dois aplicou.
 
 ### 3.2 Interactive Props (animam ao socar)
-- [ ] Cogumelo marrom: 3D
+Soco no prop: v275 (`query.hurt_direction` alternando) não resolveu, props seguem sem reagir; só no sobrevivência (no criativo o soco quebra o suporte, como no Bedrock).
+- [~] Cogumelo marrom: 3D
+  - Obs.: modelo certo. Soco não interage; Shift + clique dá uma balançada (verificar). Partículas muito acima do cogumelo.
 - [ ] Fogueira: 4 estados (acesa, apagada, cinzas, sem fogo), partículas e sons
-- [ ] Carrot on a Stick: pinhata Strider
+- [~] Carrot on a Stick: pinhata Strider
+  - Obs.: modelo ok, não reage a golpes.
 - [ ] Mesa de cartografia: globo
-- [ ] Tijolos de pedra cinzelados: lápide de zumbi (ganha vida à meia-noite)
-- [ ] Sementes de cacau: casa de gengibre (3 batidas na porta)
-- [ ] Fungo carmesim: 3D
-- [ ] Pá de diamante: monte de neve com pá
-- [ ] Olho de Ender: retrato de Enderman (olhos seguem, jump scare)
+- [~] Tijolos de pedra cinzelados: lápide de zumbi (ganha vida à meia-noite)
+  - Obs.: o zumbi que surge está morrendo; partícula um pouco acima.
+- [~] Sementes de cacau: casa de gengibre (3 batidas na porta)
+  - Obs.: porta anima após 3 interações, mas só com Shift + clique direito; bater não funciona.
+- [~] Fungo carmesim: 3D
+  - Obs.: mesmos problemas dos cogumelos (Shift/golpe e partículas).
+- [~] Pá de diamante: monte de neve com pá
+  - Obs.: neve sobre a pá ausente; pá parcialmente dentro da terra.
+- [x] Olho de Ender: retrato de Enderman (olhos seguem, jump scare)
+  - Obs.: validado após atualização do addon.
 - [ ] Fornalha: lareira (chamas, sons)
-- [ ] Moldura brilhante: entrada dos Backrooms (fita azul, porta)
-- [ ] Jack o'Lantern: abóbora grande (tampa pula)
-- [ ] Leaf Litter: folhas com ancinho (puff)
-- [ ] Couro: varal de curtume (chão/parede)
-- [ ] Porta de mangue: caixão de vampiro (acorda)
-- [ ] Alçapão de pale oak: moinho (pás grande/pequena, velocidade, orientação/hélice, sons)
-- [ ] Balde de neve fofa: globo de neve grande
-- [ ] Trilho: trem de brinquedo
-- [ ] Cogumelo vermelho: 3D
-- [ ] Bola de neve: globo de neve pequeno
-- [ ] Fogueira da alma: partículas e sons
-- [ ] Barco de abeto: carroça (poses; blocos dentro)
-- [ ] Cerca de abeto: suporte de armas (tamanhos)
-- [ ] Folhas de abeto: guirlanda
-- [ ] Muda de abeto: árvore de Natal
-- [ ] Graveto: pilha de lenha (poses)
-- [ ] Açúcar: balde de doces de abóbora
+- [~] Moldura brilhante: entrada dos Backrooms (fita azul, porta)
+  - Obs.: não funcionou.
+- [~] Jack o'Lantern: abóbora grande (tampa pula)
+  - Obs.: não funcionou.
+- [~] Leaf Litter: folhas com ancinho (puff)
+  - Obs.: funciona com Shift; ao pisar não reage (verificar se deveria).
+- [x] Couro: varal de curtume (chão/parede)
+- [x] Porta de mangue: caixão de vampiro (acorda)
+- [x] Alçapão de pale oak: moinho (pás grande/pequena, velocidade, orientação/hélice, sons)
+- [x] Balde de neve fofa: globo de neve grande
+- [x] Trilho: trem de brinquedo
+- [~] Cogumelo vermelho: 3D
+  - Obs.: igual ao cogumelo marrom.
+- [~] Bola de neve: globo de neve pequeno
+  - Obs.: dentro da terra e com partes do modelo faltando.
+- [~] Fogueira da alma: partículas e sons
+  - Obs.: mesmo problema de posicionamento de partículas/chamas da fogueira comum.
+- [x] Barco de abeto: carroça (poses; blocos dentro)
+- [x] Cerca de abeto: suporte de armas (tamanhos)
+- [x] Folhas de abeto: guirlanda
+- [x] Muda de abeto: árvore de Natal
+- [x] Graveto: pilha de lenha (poses)
+- [x] Açúcar: balde de doces de abóbora
 - [ ] Bagas doces: azevinho em vaso
-- [ ] Baú armadilha: Jack in the Box (jump scare)
-- [ ] Twisting Vines: bengala verde (45° = grande)
-- [ ] Fungo distorcido: 3D
-- [ ] Warped Fungus on a Stick: pinhata Lhama
-- [ ] Weeping Vines: bengala vermelha (45° = grande)
-- [ ] Trigo: espantalho (ganha vida à noite, 2 idles, partículas)
-- [ ] Vela branca: vela festiva
-- [ ] Botas de couro: meias de Natal
-- [ ] Bundles: presentes (animação e sons)
-- [ ] Lãs: pelúcias
+- [x] Baú armadilha: Jack in the Box (jump scare)
+- [x] Twisting Vines: bengala verde (45° = grande)
+- [~] Fungo distorcido: 3D
+  - Obs.: mesmos problemas dos cogumelos.
+- [~] Warped Fungus on a Stick: pinhata Lhama
+  - Obs.: modelo ok, não reage a golpes (mesmo problema da pinhata Strider).
+- [x] Weeping Vines: bengala vermelha (45° = grande)
+- [~] Trigo: espantalho (ganha vida à noite, 2 idles, partículas)
+  - Obs.: ganha vida também de dia; condição de horário errada.
+- [~] Vela branca: vela festiva
+  - Obs.: mesmo problema visual da vela vermelha.
+- [~] Botas de couro: meias de Natal
+  - Obs.: o item é tratado como a bota vestida do suporte, não como item na mão; impede o teste.
+- [x] Bundles: presentes (animação e sons)
+- [~] Lãs: pelúcias
+  - Obs.: a lã cinza-clara fica sem a pelúcia.
 
 ### 3.3 Cycling Props (Agachar + Interagir troca variante)
-- [ ] Tapetes: toldo / tapete
-- [ ] Baiacu: balões de festa
+- [x] Tapetes: toldo / tapete
+- [x] Baiacu: balões de festa
 
 ### 3.4 Placeable Items
 
 Status: PULADO por enquanto.
+
 Suporte renomeado `§§§§` ou `Item`.
-- [x] Posicionamento (v253)
+- [~] Posicionamento (v253)
+  - Obs.: voltou a deslocar: itens ~3 blocos acima e 2 à esquerda do pé do suporte. Pode ser o mesmo offset das chamas do candelabro.
 - [ ] Qualquer item (menos armadura)
-- [ ] Poses: em pé, encostado, deitado, de lado, pendurado (interagir troca)
+- [ ] Poses: em pé, encostado, deitado, de lado, pendurado (interagir troca; agachar + usar, v274)
 - [ ] Animações na 1ª pose: pérola do Ender, olho do Ender, totem, cristal do End, estrela do Nether, wind charge, estátua de Copper Golem
 
 ### 3.5 Cushions
-3 animações de sentar que amassam a almofada. Versão invisível: `§` antes de cada letra (ex.: `§s§o§f§a`).
-- [~] Sentar (3 animações aleatórias)
-  - Obs.: senta, mas sempre a mesma animação
+Procedimento (A&S 1.12): colocar a Cushion direto no mundo, renomear uma Name Tag na bigorna com a variante (ex.: `Sofa`, `Chair`, `Stool`) e usar a Name Tag na Cushion. Sem suporte de armadura. A cor da lã define cor/padrão. Sofá, cadeira e banco: uma linha (String) sob a Cushion ajusta a altura. Nome invisível: `§` antes de cada letra, minúsculas, sem espaços (ex.: `§s§o§f§a`).
+- [ ] Sentar: retestar com o procedimento correto; jogador senta, almofada comprime, 3 animações aleatórias
 - [ ] Ground Cover: `Moss`, `Snow`, `Sand`, `Leaves`, `Cold Leaves`, `Pale Leaves`, `Orange Leaves`, `Warm Leaves`, `Pale Moss`, `Nether Wart`, `Warped Wart` (com ou sem "Cover")
 - [ ] Misc: `Straw`, `Shingles`/`Brick Tiles`, `Whoopee`/`Whoopee Cushion` (som de pum), `Quilted` (padrão por cor)
 - [ ] Sofa/Couch: normal, `Left`, `Right`, `Middle`, `Middle Legs`, `Corner`; `Cowch`
@@ -431,30 +475,33 @@ Suporte renomeado `§§§§` ou `Item`.
 ---
 
 ## 4. Morphs
-- [ ] Disabled (modelo padrão)
-- [ ] Mini Me (jogador bebê)
+Obs. geral: os Morphs se transformam certo. Em 1ª pessoa com a mão vazia aparece a mão da skin original; segurando item, a do Morph. Ferramentas e armaduras não encaixam no corpo do Morph.
+- [x] Disabled (modelo padrão)
+- [x] Mini Me (jogador bebê)
 - [ ] Rana (garota sapo)
 - [ ] Pixie (Allay)
 - [ ] Lucy (Axolote)
 - [ ] Ash (cavaleiro Blaze)
-- [ ] Iris (olho do Ender)
-- [ ] Bandit (raposa)
-- [ ] Rusty (golem de redstone)
+- [x] Iris (olho do Ender)
+- [x] Bandit (raposa)
+- [x] Rusty (golem de redstone)
 - [ ] Echo (Sculk Whisperer)
-- [ ] Goober (Slime)
+- [x] Goober (Slime)
 - [ ] Sully (Sulfur Cube)
 - [ ] Russell (Bushling: folhas mudam de cor por bioma, variante por madeira, sons)
 
 ---
 
 ## 5. Costumes
-Couro + acabamento de armadura (trim) vira a fantasia. Também em mobs via dispensador.
-- [ ] Rana Puffercoat: Shaper
-- [ ] Elf Attire: Wild
-- [ ] Santa Getup: Snout
-- [ ] Viking Armour: Rib
-- [ ] Party Set: Host
-- [ ] Hazmat Suit: Silence
+Couro + acabamento de armadura (trim) deveria virar a fantasia. Também em mobs via dispensador.
+
+Obs.: o trim aparece normal na armadura de couro, mas nenhuma fantasia aparece, com a opção "Costume" ligada. Investigar; confirmar também o subpack ativo (Full, Vanilla ou Custom Experience).
+- [~] Rana Puffercoat: Shaper
+- [~] Elf Attire: Wild
+- [~] Santa Getup: Snout
+- [~] Viking Armour: Rib
+- [~] Party Set: Host
+- [~] Hazmat Suit: Silence
 - [ ] Fantasia em mob (zumbi via dispensador)
 
 ---
@@ -483,8 +530,9 @@ Skins com expressões (skin pack ou template próprio).
 - [ ] Logo Oreville (Cole) no slot de capacete da UI
 - [ ] Creeper carregado mais eletrificado
 - [ ] Casco de tartaruga ganha vida e nada junto
-- [ ] Abóboras com variações de rosto
-- [ ] Abóbora pálida (3% de chance)
+- [~] Abóboras com variações de rosto
+  - Obs.: todas com o mesmo rosto; o Snow Golem também sempre com o mesmo rosto.
+- [x] Abóbora pálida (3% de chance)
 - [ ] Easter eggs de nametag: `Goldie`, `Pig`, `Beanie`/`Green`, `Muddy`, `jeb_`, `Villager32`, `William`, `Brian`, `Chickle` (ver 2.1)
 - [ ] Almofada `Whoopee`
 
@@ -492,7 +540,8 @@ Skins com expressões (skin pack ou template próprio).
 
 ## 9. Texture Styles (subpacks)
 - [ ] Full Experience (tudo)
-- [ ] Vanilla Experience (animações e 3D com texturas vanilla)
+- [~] Vanilla Experience (animações e 3D com texturas vanilla)
+  - Obs.: com outro resource pack por cima, itens bugam. Revisar.
 - [ ] Custom Experience (animações e 3D, compatível com outros texture packs acima)
 
 ---

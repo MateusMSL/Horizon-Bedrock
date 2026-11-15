@@ -93,10 +93,35 @@ Junta as listas pedidas na conversa (lista de tarefas da sessão, notas "Anotado
 - [ ] Armadura segurada sem encantamento.
 - [ ] Bússola de recuperação gira infinitamente, não aponta a morte.
 - [ ] Maçã dourada encantada: textura bugada em 1ª pessoa.
-- [?] Suporte de armadura: poses não mudam (Sneak + Usar). v274, aguardando validação.
+- [x] Suporte de armadura: poses trocam com agachar + usar (v274, validado).
 - [ ] Camas 3D do pack não aplicadas.
 - [ ] Arreio de Happy Ghast na mão mostra a textura do ghast em vez do item.
 - [ ] Vitória-régia: flores e variação de textura ausentes.
 - [ ] Semente jogada sem animação/partícula de plantio.
 - [ ] Almofada: sempre a mesma animação de sentar (3 aleatórias).
-- [?] Props interativos que animam ao socar (v275, `hurt_direction` alternando por golpe), aguardando validação.
+- [ ] Props interativos não reagem ao soco mesmo com a v275 (`hurt_direction` alternando por golpe). Investigar o que o pack lê no golpe.
+
+## Do checklist A&S, Props, Morphs, Costumes e Secrets (Notion 2026-11-15)
+
+- [ ] Chamas, brilhos e partículas de props desalinhados/acima do lugar (candelabro, bolo, crânio com vela, lanterna da alma, gárgula, cogumelos e fungos, fogueiras, lápide). Provável causa comum com o offset do Placeable Item.
+- [ ] Placeable Item (`Item`/`§§§§`) voltou a deslocar: ~3 blocos acima e 2 à esquerda do pé do suporte (era v253).
+- [ ] Props não aplicados: chaminé (tijolos), canteiro de abóboras, boneco de neve (bloco de neve), pilar de fogo (tocha da alma), entrada dos Backrooms (moldura brilhante), abóbora grande (Jack o'Lantern), melancia e fatia, carrinho com baú.
+- [ ] Neve gera boneco de neve em vez da cobertura de neve.
+- [ ] Escudo em suporte `Prop` esconde o corpo do suporte (no Bedrock o suporte segue normal).
+- [ ] Props de soco não reagem: pinhatas Strider e Lhama, cogumelos/fungos, casa de gengibre (só com Shift). Validar com v275 no sobrevivência.
+- [ ] Roda d'água: Shift + clique não troca pose/animação.
+- [ ] Espantalho ganha vida de dia (condição de horário).
+- [ ] Lápide: o zumbi que surge está morrendo.
+- [ ] Braseiro (tocha) apagado e sem partículas.
+- [ ] Lava lamp opaca (sem translucidez).
+- [ ] Biscoito atravessa o vidro do pote.
+- [ ] Monte de neve com pá: neve ausente e pá dentro da terra; globo de neve pequeno dentro da terra e incompleto.
+- [ ] Meias de Natal: botas tratadas como bota vestida do suporte em vez de item na mão.
+- [ ] Pelúcia da lã cinza-clara ausente.
+- [ ] Morphs: em 1ª pessoa a mão vazia mostra a mão da skin original (com item aparece a do Morph).
+- [ ] Morphs: ferramentas e armaduras não encaixam no corpo do Morph (testado em raposa, olho do fim e golem de redstone).
+- [ ] Costumes: trim aparece na armadura de couro, mas nenhuma fantasia (opção ligada).
+- [ ] Abóboras e Snow Golem sempre com o mesmo rosto (sem variações).
+- [ ] Glows com shader pack ligado: olhos brilhantes, tochas, allays e outros brilhos ficam bugados. Revisar a passagem emissiva com shaders.
+- [ ] Texture Style Vanilla Experience com outro resource pack por cima: itens bugam.
+- [ ] Nametags: avaliar uma a uma; `Halloween` no slime não aplica a variante de caveira.
