@@ -1,121 +1,125 @@
 <p align="center">
-  <img src="docs/media/banner.webp" alt="Horizon: Minecraft Java rebuilt in Rust, with Bedrock add-on support" width="100%">
+  <img src="docs/media/banner.webp" alt="Horizon Bedrock: Minecraft Java with Bedrock add-ons" width="100%">
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Minecraft-Java%2026.3-5D9C3F" alt="Minecraft Java 26.3">
-  <img src="https://img.shields.io/badge/Rust-stable-B7410E?logo=rust&logoColor=white" alt="Rust">
-  <img src="https://img.shields.io/badge/Bedrock%20add--ons-in%20progress-F0795A" alt="Bedrock add-ons in progress">
-  <img src="https://img.shields.io/badge/engine-v196-2A2470" alt="Engine build v196">
+  <img src="https://img.shields.io/badge/Bedrock%20.mcpack-supported-F0795A" alt=".mcpack supported">
+  <img src="https://img.shields.io/badge/.mcaddon-coming%20later-8A8A8A" alt=".mcaddon coming later">
   <img src="https://img.shields.io/badge/platform-Windows-2A2470" alt="Windows">
   <a href="#project-status"><img src="https://img.shields.io/badge/player--visible%20gaps-0%20open-F0795A" alt="Player-visible gaps open"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3B2F7E" alt="MIT license"></a>
 </p>
 
 <p align="center">
-  <a href="#download"><b>Download</b></a> ·
-  <a href="docs/bedrock.md"><b>Documentation</b></a> ·
-  <a href="https://github.com/MateusMSL/BR-.mcpack-reader/releases"><b>Release notes</b></a> ·
-  <a href="docs/bedrock-roadmap.md"><b>Roadmap</b></a> ·
-  <a href="#project-status"><b>Project status</b></a> ·
-  <a href="#contributing"><b>Contributing</b></a>
+  <a href="#-what-is-this"><b>What is this</b></a> ·
+  <a href="#-how-to-play"><b>How to play</b></a> ·
+  <a href="#-what-already-works"><b>What works</b></a> ·
+  <a href="#-known-problems"><b>Known problems</b></a> ·
+  <a href="docs/bedrock-roadmap.md"><b>Changelog</b></a>
 </p>
 
 # Horizon: Bedrock add-ons
 
-A fork of [Horizon](https://github.com/horizon-rust/horizon), Minecraft: Java Edition 26.3 rewritten in Rust, focused on one thing: a **generic Bedrock add-on engine**. Drop a `.mcpack` / `.mcaddon` resource pack into `resourcepacks/` and Java mobs, held items, first-person hands, particles and sounds take the pack's look and animations. Free, open source and unofficial.
+## 🧩 What is this
 
-> Not an official Minecraft product, nor approved by or associated with Mojang or Microsoft. This project contains no Minecraft code, assets or data: you need your own copy of Java Edition 26.3. Third-party packs are never part of the repository.
+**Horizon Bedrock** is a fork (a copy with extra features) of [Horizon](https://github.com/horizon-rust/horizon), a version of **Minecraft: Java Edition 26.3** rebuilt from scratch.
 
-## Download
+This fork adds one thing on top: it lets the Java game **use Bedrock resource packs** (`.mcpack`). Mobs, armour, items in your hand, animations, particles and sounds take the look of the pack, the same way they do in Bedrock.
 
-Get the latest build from [Releases](https://github.com/MateusMSL/BR-.mcpack-reader/releases) (Windows x64), or [build from source](#build-from-source).
-
-**You need** a Microsoft account that owns Java Edition and a GPU with Vulkan or DirectX 12. An existing Minecraft install is reused.
-
-## What works today
-
-- **Entities:** client entities, geometry, render controllers, materials, animations and animation controllers, all driven by the pack's Molang (every expression of the test pack is interpreted).
-- **Held items (attachables):** items in the main and off hand, head, torso and other slots, with the pack's bindings, animations and per-bone materials; the holder's arm follows the attachable's animation.
-- **First person:** the pack's own first-person skeleton, camera at the eye, walk sway, item swings and use animations (tools, buckets, flint and steel in progress).
-- **Particles and sounds:** the pack's particles simulated on the CPU, sound definitions played by the animations.
-- **Debugging:** a hot-reloaded `bedrock-debug.json` (bone dumps, hide/solo/move/rotate bones, per-frame first-person trace) and the [`scan_pack`](docs/bedrock.md#testing-it) tool.
-
-Rules are generic and Bedrock-faithful: nothing is adjusted per pack or per item.
-
-Test pack: **Actions & Stuff 1.1.68** (Oreville).
-
-| Measure | Value |
+| Today | Later |
 | --- | --- |
-| Pack files read (4,483 JSON) | 100%, 0 failures |
-| Molang (199,430 expressions) | 100% interpreted, 0 failures |
-| Ignored keys (`audit_pack`) | 0 |
-| Client entities checked in game | 18 of 128 |
-| Client entities with a known error | 20 of 128 |
+| ✅ Bedrock resource packs (`.mcpack`) | 🔜 Full add-ons (`.mcaddon`) with behaviour packs: new mobs, items and game rules |
 
-Details: [docs/bedrock-status.md](docs/bedrock-status.md), [docs/bedrock-coverage.md](docs/bedrock-coverage.md), [docs/bedrock-validation.md](docs/bedrock-validation.md).
+The main test pack is **[Actions & Stuff](https://guides.orevillestudios.com/actions-and-stuff)** (Oreville Studios), one of the biggest animation packs for Bedrock. If it works with Actions & Stuff, most simpler packs work too.
 
-## Using a pack
+> Free and unofficial. Not made by, approved by or connected to Mojang or Microsoft. You need your own copy of Minecraft: Java Edition. Packs from other creators are never included here: get them from their official pages.
 
-1. Put the `.mcpack`, `.mcaddon`, folder or zip in `resourcepacks/`.
-2. Select it in the pack screen.
-3. The pack is converted once to `.horizon-cache/bedrock/` (again only when the file changes).
+<p align="center">
+  <img src="docs/media/readme/survival.webp" alt="Horizon in survival" width="49%">
+  <img src="docs/media/readme/valley.webp" alt="A valley in Horizon" width="49%">
+</p>
 
-How it fits together: [docs/bedrock.md](docs/bedrock.md).
+## 🎮 How to play
 
-## Build from source
+**You need:** a Windows PC, a Microsoft account that owns Minecraft: Java Edition, and the official [Horizon launcher](https://playhorizon.dev).
 
-Needs Rust 1.90+, Python 3.10+ and JDK 25. `horizon-prepare` builds the game's resources from **your own copy** of Java Edition 26.3 and never downloads it:
+1. Install the **Horizon launcher** and let it install a version once (tab **Versions**).
+2. Get the **Horizon Bedrock** game build and add it in the launcher: **Versions → Import a game build**. Ready-made downloads will be on the [Releases](https://github.com/MateusMSL/Horizon-Bedrock/releases) page; until then, the [installation guide](docs/bedrock-instalacao.md) (in Portuguese) shows how to build it.
+3. Put your `.mcpack` in the `addons` folder of that version and turn it on in **Options → Add-ons**.
+4. Press **Play**. The first start with a new pack takes about a minute (the pack is prepared once).
 
-1. **Client:** play 26.3 once in the official launcher (Horizon reads `~/.minecraft`, or `--minecraft-dir` / `HORIZON_MINECRAFT_DIR`).
-2. **Server jar:** the 26.3 server jar, passed once with `--server-jar` or `HORIZON_SERVER_JAR`.
+## ✅ What already works
+
+Checked in game with Actions & Stuff, side by side with Bedrock.
+
+**Your character**
+- Walking, tools, spyglass, brush, eating and drinking animations
+- Sword combat stance and attacks, in first and third person
+- Riding: leaning into turns and the first-person bob
+- Special moves: elytra barrel roll, superhero landing, diving, water bucket clutch
+- Elytra flight with armour on
+
+**Mobs**
+- New movement, idle, attack and hurt animations
+- Faces that follow you with their eyes and move their eyebrows
+- 3D armour, tools and weapons on zombies, skeletons and others
+- Mounts leaning into turns, with the rider leaning too
+- The reworked witch
+
+**Armour and items**
+- 3D armour for every material, including the living turtle helmet
+- The armour shimmer, and 3D armour, elytra and shields in your hand
+- The custom enchantment outline and glint, in the colour picked in the pack's settings
+
+**Decorations (props on armour stands)**
+- Most static props: skeleton remains, cake, carrot pile, cookie jar, pillow fort, sleigh, tents and more
+- Many interactive props: vampire coffin, windmill, toy train, snow globe, Jack in the Box, wagon, weapon rack, presents
+- Switching variants by crouching and using: carpets and party balloons
+- Armour stand poses: crouch and use a stand to go through its 13 poses
+
+**Sounds and more**
+- New sword swings, the axolotl bucket companion and footsteps in step with the animations
+- Morphs: Mini Me, Iris and Goober
+
+Full list, item by item: [Actions & Stuff checklist](docs/bedrock-as-checklist.md).
+
+## 🛠️ Known problems
+
+Things that don't work yet and will be fixed in future updates:
+
+- **Death animations** of players and mobs are not played yet
+- **Weapons on your back and belt** (Holstered Weapons) don't show
+- **Fishing rod** cast and reel, the **map** held in first person and **climbing ladders** have no animation
+- **Beds** and **costumes** (leather armour with trims) keep the normal look
+- Some **props** don't appear (chimney, pumpkin patch, snowman, Backrooms door…), and flames, glows and particles of some props sit in the wrong place
+- **Placeable items** on armour stands appear away from the stand
+- **Interactive props** don't react when punched (piñatas, big pumpkin, mushrooms)
+- With an empty hand, **morphs** show your normal skin's hand
+- **Pumpkins** and snow golems always have the same face
+- **Wolves** howl on any night, not only at full moon
+
+Everything still open: [pending list](docs/bedrock-pendencias.md) (in Portuguese).
+
+## 👩‍💻 For developers
+
+How the add-on engine works: [docs/bedrock.md](docs/bedrock.md). Build from source:
 
 ```sh
-git clone https://github.com/MateusMSL/BR-.mcpack-reader.git
-cd BR-.mcpack-reader
+git clone https://github.com/MateusMSL/Horizon-Bedrock.git
+cd Horizon-Bedrock
 cargo run --release -p horizon-prepare -- --prepare --server-jar ~/Downloads/server.jar
 cargo run --release -p horizon-client
 ```
 
-Check a pack without the game:
-
-```sh
-cargo run --release -p horizon-bedrock --example scan_pack -- <pack>
-cargo run --release -p horizon-bedrock --example convert_pack -- <pack> <out>
-```
-
-Prepared files land in the gitignored `.local/`: never commit or share them.
-
-## Roadmap
-
-Pending items and every engine build (v1xx) are in [docs/bedrock-roadmap.md](docs/bedrock-roadmap.md). Open work:
-
-- Flint and steel use animation (first and third person)
-- Invisible or badly textured items (tools, fishing rod), checked in first person and third person from behind and the front
-- Items swinging forever in the off hand
-- Missing particles (rain on the ground, water splashes, ground fire) and ambient mechanics
-- Checklist of every animation in the pack, with its variables
-- Java fire block using the pack's animated texture
-- Armor stand with the pack's armours, minecart, boat and lever models, ghast harness glow, sulfur cube
-
-## Contributing
-
-Issues and pull requests are welcome: read [CONTRIBUTING.md](CONTRIBUTING.md). Fixes must be generic engine rules, never per-pack or per-item.
-
-```sh
-git config core.hooksPath .githooks
-python3 tools/pr_ready.py
-```
-
-Never commit game files, decompiled source, prepared resources or third-party packs.
+Contributions are welcome: read [CONTRIBUTING.md](CONTRIBUTING.md). Fixes must be general rules of the engine, never made for one pack or one item. Never commit game files or packs from other creators.
 
 ## Project status
 
 **Player-visible gaps: 0 open** of the 833 the [port ledger](tools/port_ledger.py) found, reading every vanilla 26.3 method against Horizon's code: vanilla behaviour a player would notice that Horizon doesn't have yet. By area: Animals [0](https://github.com/horizon-rust/horizon/issues/3512); Monsters and bosses [0](https://github.com/horizon-rust/horizon/issues/3513); Entities, projectiles, vehicles and decorations [0](https://github.com/horizon-rust/horizon/issues/3514); Items, enchantments and inventories [0](https://github.com/horizon-rust/horizon/issues/3515); Blocks, redstone and fluids [0](https://github.com/horizon-rust/horizon/issues/3516); World, world generation and saves [0](https://github.com/horizon-rust/horizon/issues/3517); Screens, HUD and client packets [0](https://github.com/horizon-rust/horizon/issues/3518); Entity and block rendering, models [0](https://github.com/horizon-rust/horizon/issues/3519); Server and players on the server [0](https://github.com/horizon-rust/horizon/issues/3520); Mob AI, villagers and raids [0](https://github.com/horizon-rust/horizon/issues/3521). This number goes down as gaps close (`tools/parity_gaps.py`); the table below says what the harnesses compare. These are upstream Horizon's numbers for the Java game this fork builds on.
 
-Early. Parsing and Molang are complete for the test pack; in-game validation is in progress (see the table above and the error list in [docs/bedrock-status.md](docs/bedrock-status.md)). The Java game itself comes from upstream Horizon; this fork does not track its parity numbers.
-
-The table is the project's own audit of what the harnesses compare, subsystem by subsystem: a score says how much of that subsystem the harnesses cover and pass, not that nothing else differs from vanilla. What players still run into: [known issues](docs/known-issues.md).
+<details>
+<summary>What the upstream harnesses compare (technical)</summary>
 
 ### What the harnesses compare
 
@@ -138,9 +142,7 @@ Scores: 0 (absent), 0.25 (started), 0.5 (playable, major features missing), 0.75
 | Audio | 1 | None: the sound engine, sound events, music, situational music, ambience and subtitles match vanilla |
 | Block behaviours and ticking | 1 | None: block updates, random ticks, redstone, dispensers (6,000 cases), crafters (4,000), container spills (4,000), copper golems and the sculk family (435 scenarios) match |
 
-### Known issues
-
-See [docs/bedrock-status.md](docs/bedrock-status.md): mobs (slime shell, mooshroom, sulfur cube, ghast animations, breeze, phantom smoke...), glow (spider and enderman eyes, harness, torch, armour glint) and engine gaps (inventory/GUI items, spectator and emote queries, non-pack entities).
+</details>
 
 ## Licence
 
