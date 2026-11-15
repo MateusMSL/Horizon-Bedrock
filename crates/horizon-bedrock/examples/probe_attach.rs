@@ -11,7 +11,7 @@ struct H {
     slot: String,
 }
 impl Host for H {
-    fn query(&mut self, name: &str, args: &[Value]) -> Value {
+    fn query(&mut self, name: &str, _args: &[Value]) -> Value {
         match name {
             "is_attached" | "is_alive" | "is_on_ground" | "graphics_mode_is_any" => Value::Num(1.0),
             "delta_time" => Value::Num(0.05),
@@ -64,10 +64,10 @@ fn main() {
                 geos.insert(g.id.to_ascii_lowercase(), g);
             }
         }
-        if p.starts_with("attachables/") {
-            if let Some(d) = ClientEntity::parse(&v) {
-                defs.push(d)
-            }
+        if p.starts_with("attachables/")
+            && let Some(d) = ClientEntity::parse(&v)
+        {
+            defs.push(d)
         }
     }
     let assets = Assets {

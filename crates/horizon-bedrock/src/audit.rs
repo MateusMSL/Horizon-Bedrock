@@ -20,13 +20,13 @@ fn check(report: &mut Report, context: &str, o: &Map<String, Json>, read: &[&str
     }
 }
 
-fn objects<'a>(v: Option<&'a Json>) -> impl Iterator<Item = &'a Map<String, Json>> {
+fn objects(v: Option<&Json>) -> impl Iterator<Item = &Map<String, Json>> {
     v.and_then(Json::as_object)
         .into_iter()
         .flat_map(|o| o.values().filter_map(Json::as_object))
 }
 
-fn list<'a>(v: Option<&'a Json>) -> impl Iterator<Item = &'a Map<String, Json>> {
+fn list(v: Option<&Json>) -> impl Iterator<Item = &Map<String, Json>> {
     v.and_then(Json::as_array)
         .into_iter()
         .flat_map(|a| a.iter().filter_map(Json::as_object))

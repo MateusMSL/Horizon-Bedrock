@@ -544,10 +544,10 @@ impl Host for WithBones<'_> {
             }
             _ => return Value::Vec3([0.0; 3]),
         };
-        if let (Some(g), Some(pose)) = (self.geometry, &self.partial) {
-            if self.fresh.is_none() {
-                self.fresh = Some(bone_origins(g, pose));
-            }
+        if let (Some(g), Some(pose)) = (self.geometry, &self.partial)
+            && self.fresh.is_none()
+        {
+            self.fresh = Some(bone_origins(g, pose));
         }
         let (origins, pivots, rotations) = match &self.fresh {
             Some((o, p, r)) => (o, p, r),
@@ -1230,41 +1230,42 @@ impl Instance {
                 resolve_entity_rotations_under(g, &mut frame.pose, self.root_rotation);
             }
         }
-        if let (Some(models), Some(layer)) = (assets.geometries, frame.layers.first()) {
-            if let Some(g) = models.get(&layer.geometry.to_ascii_lowercase()) {
-                if self.main_geometry.as_deref() != Some(layer.geometry.as_str()) {
-                    self.main_geometry = Some(layer.geometry.clone());
-                }
-                let (origins, pivots, rotations) = bone_origins(g, &frame.pose);
-                // What `pre_animation` reads of the last frame is the mean of the last two: a
-                // pack that lifts a bone by where another one was (`root` by the legs' height)
-                // reads its own lift back with the sign turned, and alternates from frame to
-                // frame (the rider flickering on its mount) unless it is averaged out.
-                self.origins = origins
-                    .into_iter()
-                    .map(|(name, now)| {
-                        let mean = self
-                            .origins
-                            .get(&name)
-                            .map_or(now, |old| std::array::from_fn(|i| (now[i] + old[i]) * 0.5));
-                        (name, mean)
-                    })
-                    .collect();
-                self.moved =
-                    g.bones
-                        .iter()
-                        .filter_map(|b| {
-                            let name = b.name.to_ascii_lowercase();
-                            let now = bone_origin_moved(g, &frame.pose, &b.name)?;
-                            let mean = self.moved.get(&name).map_or(now, |old| {
-                                std::array::from_fn(|i| (now[i] + old[i]) * 0.5)
-                            });
-                            Some((name, mean))
-                        })
-                        .collect();
-                self.pivots = pivots;
-                self.rotations = rotations;
+        if let (Some(models), Some(layer)) = (assets.geometries, frame.layers.first())
+            && let Some(g) = models.get(&layer.geometry.to_ascii_lowercase())
+        {
+            if self.main_geometry.as_deref() != Some(layer.geometry.as_str()) {
+                self.main_geometry = Some(layer.geometry.clone());
             }
+            let (origins, pivots, rotations) = bone_origins(g, &frame.pose);
+            // What `pre_animation` reads of the last frame is the mean of the last two: a
+            // pack that lifts a bone by where another one was (`root` by the legs' height)
+            // reads its own lift back with the sign turned, and alternates from frame to
+            // frame (the rider flickering on its mount) unless it is averaged out.
+            self.origins = origins
+                .into_iter()
+                .map(|(name, now)| {
+                    let mean = self
+                        .origins
+                        .get(&name)
+                        .map_or(now, |old| std::array::from_fn(|i| (now[i] + old[i]) * 0.5));
+                    (name, mean)
+                })
+                .collect();
+            self.moved = g
+                .bones
+                .iter()
+                .filter_map(|b| {
+                    let name = b.name.to_ascii_lowercase();
+                    let now = bone_origin_moved(g, &frame.pose, &b.name)?;
+                    let mean = self
+                        .moved
+                        .get(&name)
+                        .map_or(now, |old| std::array::from_fn(|i| (now[i] + old[i]) * 0.5));
+                    Some((name, mean))
+                })
+                .collect();
+            self.pivots = pivots;
+            self.rotations = rotations;
         }
         frame
     }

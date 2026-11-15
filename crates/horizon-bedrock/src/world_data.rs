@@ -247,38 +247,39 @@ impl BlockDef {
             let Some(def) = def.as_object() else {
                 continue;
             };
-            let mut b = BlockDef::default();
-            b.textures = match def.get("textures") {
-                Some(Value::String(s)) => Some(BlockTextures::All(s.clone())),
-                Some(Value::Object(faces)) => Some(BlockTextures::Faces(
-                    faces
-                        .iter()
-                        .filter_map(|(k, t)| Some((k.clone(), t.as_str()?.to_owned())))
-                        .collect(),
-                )),
-                _ => None,
+            let b = BlockDef {
+                textures: match def.get("textures") {
+                    Some(Value::String(s)) => Some(BlockTextures::All(s.clone())),
+                    Some(Value::Object(faces)) => Some(BlockTextures::Faces(
+                        faces
+                            .iter()
+                            .filter_map(|(k, t)| Some((k.clone(), t.as_str()?.to_owned())))
+                            .collect(),
+                    )),
+                    _ => None,
+                },
+                carried_textures: match def.get("carried_textures") {
+                    Some(Value::String(s)) => Some(s.clone()),
+                    Some(Value::Object(faces)) => {
+                        faces.values().find_map(|t| t.as_str()).map(str::to_owned)
+                    }
+                    _ => None,
+                },
+                sound: def.get("sound").and_then(Value::as_str).map(str::to_owned),
+                isotropic: match def.get("isotropic") {
+                    Some(Value::Bool(on)) => *on,
+                    Some(Value::Object(faces)) => faces.values().any(|f| f.as_bool() == Some(true)),
+                    _ => false,
+                },
+                brightness_gamma: def
+                    .get("brightness_gamma")
+                    .and_then(Value::as_f64)
+                    .map(|n| n as f32),
+                ambient_occlusion_exponent: def
+                    .get("ambient_occlusion_exponent")
+                    .and_then(Value::as_f64)
+                    .map(|n| n as f32),
             };
-            b.carried_textures = match def.get("carried_textures") {
-                Some(Value::String(s)) => Some(s.clone()),
-                Some(Value::Object(faces)) => {
-                    faces.values().find_map(|t| t.as_str()).map(str::to_owned)
-                }
-                _ => None,
-            };
-            b.sound = def.get("sound").and_then(Value::as_str).map(str::to_owned);
-            b.isotropic = match def.get("isotropic") {
-                Some(Value::Bool(on)) => *on,
-                Some(Value::Object(faces)) => faces.values().any(|f| f.as_bool() == Some(true)),
-                _ => false,
-            };
-            b.brightness_gamma = def
-                .get("brightness_gamma")
-                .and_then(Value::as_f64)
-                .map(|n| n as f32);
-            b.ambient_occlusion_exponent = def
-                .get("ambient_occlusion_exponent")
-                .and_then(Value::as_f64)
-                .map(|n| n as f32);
             out.insert(id.clone(), b);
         }
         out

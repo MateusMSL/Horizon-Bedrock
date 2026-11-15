@@ -780,13 +780,11 @@ fn fit_to_atlas(png_bytes: &[u8], tall: bool) -> Option<Vec<u8>> {
                     count += 1;
                 }
             }
-            if alpha == 0 {
-                out.extend_from_slice(&[0, 0, 0, 0]);
-            } else {
-                for c in sum {
-                    out.push((c / alpha) as u8);
+            match sum.map(|c| c.checked_div(alpha)) {
+                [Some(r), Some(g), Some(b)] => {
+                    out.extend_from_slice(&[r as u8, g as u8, b as u8, (alpha / count) as u8]);
                 }
-                out.push((alpha / count) as u8);
+                _ => out.extend_from_slice(&[0, 0, 0, 0]),
             }
         }
     }
@@ -811,7 +809,7 @@ fn glow_png(png_bytes: &[u8]) -> Option<Vec<u8>> {
     }
     let pixels = &mut buf[..info.buffer_size()];
     let mut any = false;
-    for px in pixels.chunks_exact_mut(4) {
+    for px in pixels.as_chunks_mut::<4>().0 {
         if (1..255).contains(&px[3]) {
             px[3] = 255 - px[3];
             any = true;
@@ -843,7 +841,7 @@ fn solid_png(png_bytes: &[u8]) -> Option<Vec<u8>> {
     }
     let pixels = &mut buf[..info.buffer_size()];
     let mut any = false;
-    for px in pixels.chunks_exact_mut(4) {
+    for px in pixels.as_chunks_mut::<4>().0 {
         if (1..255).contains(&px[3]) {
             px[3] = 255;
             any = true;
@@ -879,7 +877,7 @@ fn lift_faint_alpha(png_bytes: &[u8]) -> Option<Vec<u8>> {
     let pixels = &mut buf[..info.buffer_size()];
     let (mut faint, mut solid, mut translucent) = (0usize, 0usize, false);
     let mut faint_white = true;
-    for px in pixels.chunks_exact(4) {
+    for px in pixels.as_chunks::<4>().0 {
         match px[3] {
             1..=FAINT_ALPHA => {
                 faint += 1;
@@ -900,7 +898,7 @@ fn lift_faint_alpha(png_bytes: &[u8]) -> Option<Vec<u8>> {
     if faint == 0 || translucent || (solid > 0 && faint > solid) {
         return None;
     }
-    for px in pixels.chunks_exact_mut(4) {
+    for px in pixels.as_chunks_mut::<4>().0 {
         if (1..=FAINT_ALPHA).contains(&px[3]) {
             px[3] = 255;
         }
@@ -939,7 +937,7 @@ pub fn decode_tga(b: &[u8]) -> Option<Image> {
     }
     let rle = matches!(kind, 9..=11);
     let base = kind & 7;
-    if !matches!(base, 1..=3) || bits % 8 != 0 || bits == 0 {
+    if !matches!(base, 1..=3) || !bits.is_multiple_of(8) || bits == 0 {
         return None;
     }
     let bpp = bits / 8;
@@ -2171,7 +2169,7 @@ fn convert_grass_side(pack: &Pack, out: &Path, report: &mut Report) -> Result<()
         return Ok(());
     };
     // Not a mask: every pixel opaque, the picture already as it is drawn.
-    if side.rgba.chunks_exact(4).all(|p| p[3] >= 128) {
+    if side.rgba.as_chunks::<4>().0.iter().all(|p| p[3] >= 128) {
         return Ok(());
     }
     let dirt = texture_png(pack, "textures/blocks/dirt", false, false)
@@ -2179,7 +2177,7 @@ fn convert_grass_side(pack: &Pack, out: &Path, report: &mut Report) -> Result<()
         .filter(|d| d.width == side.width && d.height == side.height);
     let mut base = side.rgba.clone();
     let mut overlay = vec![0u8; side.rgba.len()];
-    for (i, p) in side.rgba.chunks_exact(4).enumerate() {
+    for (i, p) in side.rgba.as_chunks::<4>().0.iter().enumerate() {
         let at = i * 4;
         if p[3] >= 128 {
             overlay[at..at + 4].copy_from_slice(&[p[0], p[1], p[2], 255]);
@@ -2587,7 +2585,7 @@ mod tests {
             .unwrap();
         let mut buf = vec![0; reader.output_buffer_size().unwrap()];
         reader.next_frame(&mut buf).unwrap();
-        let alpha: Vec<u8> = buf.chunks_exact(4).map(|p| p[3]).collect();
+        let alpha: Vec<u8> = buf.as_chunks::<4>().0.iter().map(|p| p[3]).collect();
         assert_eq!(alpha, [0, 255, 255, 255]);
         assert!(
             solid_png(
@@ -2629,10 +2627,7 @@ mod tests {
             .unwrap();
         let mut buf = vec![0; r.output_buffer_size().unwrap()];
         let i = r.next_frame(&mut buf).unwrap();
-        buf[..i.buffer_size()]
-            .chunks_exact(4)
-            .map(|c| [c[0], c[1], c[2], c[3]])
-            .collect()
+        buf[..i.buffer_size()].as_chunks::<4>().0.to_vec()
     }
 
     #[test]
@@ -2665,7 +2660,7 @@ mod tests {
         assert_eq!(decode(&lifted)[8..12], [0, 0, 0, 0]);
         // A few white faint texels among many solid ones are eyes even beside a translucent texel.
         let big = {
-            let mut px = vec![[0u8, 0, 0, 255]; 40];
+            let mut px = [[0u8, 0, 0, 255]; 40];
             px[0] = [255, 255, 255, 3];
             px[1] = [9, 9, 9, 160];
             encode_png(&Image {

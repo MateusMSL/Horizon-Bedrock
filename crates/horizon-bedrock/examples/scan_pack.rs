@@ -299,15 +299,15 @@ fn entities(pack: &Pack, lib: &horizon_bedrock::animation::Library) {
         if p.starts_with("render_controllers/") {
             RenderController::add_file(&v, &mut rcs);
         }
-        if p.starts_with("models/") {
-            if let Ok(list) = horizon_bedrock::geometry::parse_file(&v) {
-                geos.extend(list.into_iter().map(|g| g.id.to_ascii_lowercase()));
-            }
+        if p.starts_with("models/")
+            && let Ok(list) = horizon_bedrock::geometry::parse_file(&v)
+        {
+            geos.extend(list.into_iter().map(|g| g.id.to_ascii_lowercase()));
         }
-        if p.starts_with("entity/") || p.starts_with("attachables/") {
-            if let Some(d) = ClientEntity::parse(&v) {
-                defs.push(d);
-            }
+        if (p.starts_with("entity/") || p.starts_with("attachables/"))
+            && let Some(d) = ClientEntity::parse(&v)
+        {
+            defs.push(d);
         }
     }
     let assets = Assets {

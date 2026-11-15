@@ -189,7 +189,7 @@ fn the_pack_loads_each_kind_of_resource() {
         "render controller"
     );
     assert!(
-        b.library.animations.get("animation.synth.idle").is_some(),
+        b.library.animations.contains_key("animation.synth.idle"),
         "animation"
     );
 }

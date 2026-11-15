@@ -76,10 +76,10 @@ fn main() {
                 geos.insert(g.id.to_ascii_lowercase(), g);
             }
         }
-        if p.starts_with("attachables/") {
-            if let Some(d) = ClientEntity::parse(&v) {
-                defs.push(d)
-            }
+        if p.starts_with("attachables/")
+            && let Some(d) = ClientEntity::parse(&v)
+        {
+            defs.push(d)
         }
     }
     let assets = Assets {

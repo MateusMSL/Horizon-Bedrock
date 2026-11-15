@@ -79,17 +79,17 @@ fn main() {
         if p.starts_with("render_controllers/") {
             RenderController::add_file(&v, &mut rcs);
         }
-        if p.starts_with("models/") {
-            if let Ok(list) = geometry::parse_file(&v) {
-                for g in list {
-                    geos.insert(g.id.to_ascii_lowercase(), g);
-                }
+        if p.starts_with("models/")
+            && let Ok(list) = geometry::parse_file(&v)
+        {
+            for g in list {
+                geos.insert(g.id.to_ascii_lowercase(), g);
             }
         }
-        if p.starts_with("entity/") {
-            if let Some(d) = ClientEntity::parse(&v) {
-                defs.push(d);
-            }
+        if p.starts_with("entity/")
+            && let Some(d) = ClientEntity::parse(&v)
+        {
+            defs.push(d);
         }
     }
     if id == "all" {

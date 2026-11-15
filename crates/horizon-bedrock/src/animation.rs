@@ -1154,12 +1154,12 @@ impl Run<'_, '_> {
             return;
         }
         // The previous state fades out.
-        if let Some((prev, mut children)) = st.previous.take() {
-            if st.blend < 1.0 {
-                let prev_state = &ctrl.states[prev];
-                self.play_state(prev_state, &mut children, (1.0 - st.blend) * weight, scope);
-                st.previous = Some((prev, children));
-            }
+        if let Some((prev, mut children)) = st.previous.take()
+            && st.blend < 1.0
+        {
+            let prev_state = &ctrl.states[prev];
+            self.play_state(prev_state, &mut children, (1.0 - st.blend) * weight, scope);
+            st.previous = Some((prev, children));
         }
         let w = if st.previous.is_some() {
             st.blend * weight
