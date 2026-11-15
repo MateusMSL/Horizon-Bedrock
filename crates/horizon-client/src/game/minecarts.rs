@@ -3434,7 +3434,7 @@ mod tests {
     #[test]
     fn a_cart_seat_matches_the_player_offset() {
         let at = Vec3::new(1.0, 10.0, 2.0);
-        assert!((cart_seat(at, 0.0).y - 10.1875).abs() < 1e-12);
+        assert!((cart_seat(at, 0.0).y - (10.0 + PASSENGER_Y)).abs() < 1e-12);
         assert!((cart_seat(at, 0.6).y - (10.0 + SEAT)).abs() < 1e-12);
         assert_eq!(cart_seat(at, 0.0).x, 1.0);
         assert_eq!(cart_seat(at, 0.0).z, 2.0);
