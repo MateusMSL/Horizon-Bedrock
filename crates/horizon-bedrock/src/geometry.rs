@@ -573,7 +573,12 @@ const FACES: [([usize; 4], [f32; 3]); 6] = [
 
 /// The unfolded box layout around `[u, v]` for a box of `[w, h, d]` texels, as rectangles
 /// `[u1, v1, u2, v2]` in [`FACES`]' order.
-fn box_rects([u, v]: [f32; 2], [w, h, d]: [f32; 3]) -> [[f32; 4]; 6] {
+/// The six faces' rectangles of a box UV at `[u, v]`. The layout takes the box's size in whole
+/// pixels (each side rounded toward zero): Actions & Stuff's netherite helmet draws its crest,
+/// 2.12 × 7.32 × 10.52, as a 2 × 7 front 10 past `u`, and read with the fractions the front
+/// slid half a texel over and lost its bottom (the nose stopped two pixels short of Bedrock's).
+fn box_rects([u, v]: [f32; 2], size: [f32; 3]) -> [[f32; 4]; 6] {
+    let [w, h, d] = size.map(f32::trunc);
     let (u1, u2, u3, u4, u5) = (
         u + d,
         u + d + w,
@@ -1070,6 +1075,14 @@ mod tests {
         assert_eq!(uv([0.0, -1.0, 0.0])[1], [6.0, 0.0]);
         assert_eq!(uv([0.0, 1.0, 0.0])[0], [22.0, 6.0]);
         assert_eq!(uv([0.0, 1.0, 0.0])[2], [14.0, 0.0]);
+    }
+
+    #[test]
+    fn a_box_uv_lays_out_whole_pixels() {
+        let r = box_rects([36.0, 15.0], [2.12, 7.32, 10.52]);
+        // North: u + depth, v + depth, width × height, all whole.
+        assert_eq!(r[0], [46.0, 25.0, 48.0, 32.0]);
+        assert_eq!(r[1], [58.0, 25.0, 60.0, 32.0]);
     }
 
     #[test]

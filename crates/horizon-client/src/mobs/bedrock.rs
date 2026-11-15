@@ -285,10 +285,15 @@ impl World for Carrier<'_> {
 /// The size the game gives a mob's model before any `scale` script: the vanilla rabbit's script
 /// reads `1 / 0.6` (`1 / 0.4` for a baby) to cancel it, and a pack that scales the rabbit writes
 /// its own factor on top of the same.
+///
+/// The vanilla behaviour packs' `minecraft:scale`: the cat at 0.8 (0.4 a kitten, the half every
+/// baby gets on top), the wither skeleton at 1.2.
 fn builtin_scale(id: &str, baby: bool) -> f32 {
     match id {
         "minecraft:rabbit" if baby => 0.4,
         "minecraft:rabbit" => 0.6,
+        "minecraft:cat" => 0.8,
+        "minecraft:wither_skeleton" => 1.2,
         _ => 1.0,
     }
 }
@@ -477,6 +482,22 @@ fn set_pack_lies_down(id: u32, on: bool) {
 /// over): the swimming pose's turn is theirs, not the game's.
 pub fn pack_lies_down(id: u32) -> bool {
     lock(&PACK_LIES_DOWN).contains(&id)
+}
+
+static STANDS_HAVE_ARMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether armour stands take items in their hands whatever their `ShowArms`: Bedrock's stands
+/// always have arms, and a pack that dresses the stand builds on that (Actions & Stuff shows the
+/// item in a stand's hand in its "Item" mode). On while the loaded pack dresses the armour stand;
+/// a world played without it keeps the game's rule.
+pub fn armor_stands_have_arms() -> bool {
+    STANDS_HAVE_ARMS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// No pack dresses the armour stand any more ([`armor_stands_have_arms`]).
+pub fn clear_pack_rules() {
+    horizon_client_render::pvp::PACK_GLINT.store(0, std::sync::atomic::Ordering::Relaxed);
+    STANDS_HAVE_ARMS.store(false, std::sync::atomic::Ordering::Relaxed);
 }
 
 static PACK_GLIDES: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
@@ -786,7 +807,7 @@ fn common_query(name: &str, args: &[Value]) -> Value {
 
 /// The engine's build, logged once with `HORIZON_BEDROCK_DEBUG`: tells whether the game runs the
 /// files the last overlay carried.
-pub const ENGINE_BUILD: &str = "v234-stencil-replay-bias";
+pub const ENGINE_BUILD: &str = "v267-no-attachable-drive";
 
 /// `HORIZON_BEDROCK_DUMP=skeleton,creeper`: the kinds (by part of the id) whose state is logged
 /// once a second while within twelve blocks of the camera.
@@ -1120,12 +1141,19 @@ impl Host for MobHost<'_> {
     fn variables(&mut self) -> Vec<(&'static str, Value)> {
         let m = self.m;
         // The swing's progress, 0 at rest to 1 at its end, as the Java mob keeps it.
+        // At its end the swing is over (0), not carried on to 1 over one more tick: Actions &
+        // Stuff's combo reads a swing still running 0.3 s after one began as the next click,
+        // and a single click played the second hit after the first. A swing begun again before
+        // the end starts from 0.
         let a = self.alpha;
-        let mut swing = m.anim.attack_anim - m.anim.attack_anim_o;
-        if swing < 0.0 {
-            swing += 1.0;
-        }
-        let mut swing = (m.anim.attack_anim_o + swing * a).clamp(0.0, 1.0);
+        let (from, to) = (m.anim.attack_anim_o, m.anim.attack_anim);
+        let mut swing = if to >= from {
+            (from + (to - from) * a).clamp(0.0, 1.0)
+        } else if to <= 0.0 {
+            0.0
+        } else {
+            (to * a).clamp(0.0, 1.0)
+        };
         // A golem's swing is its own ten-tick clock.
         if m.kind.id == "minecraft:iron_golem" && m.extra.anim_ticks > 0 {
             swing = ((10.0 - m.extra.anim_ticks as f32 + a) / 10.0).clamp(0.0, 1.0);
@@ -1374,10 +1402,16 @@ impl Host for MobHost<'_> {
                             .skip(1)
                             .any(|v| matches!(v, Value::Str(t) if item_has_tag(i, t)))
                     })),
-                    _ => Value::bool(item.as_deref().is_some_and(|i| {
-                        let short = bedrock_item_name(i);
-                        rest().any(|n| n == short)
-                    })),
+                    // An empty slot's name is "": `q.is_item_name_any('slot.armor.legs', 0, '')`
+                    // is how a pack asks whether nothing is worn there (an armour stand shows its
+                    // legs only under leggings or boots).
+                    _ => Value::bool(match item.as_deref() {
+                        Some(i) => {
+                            let short = bedrock_item_name(i);
+                            rest().any(|n| n == short)
+                        }
+                        None => rest().any(|n| n.is_empty()),
+                    }),
                 }
             }
             // The walk cycle: Java's limb position and speed are the numbers a Bedrock walk
@@ -1512,14 +1546,15 @@ impl Host for MobHost<'_> {
                 Value::Num(armor_color(m, slot, channel))
             }
             "overlay_alpha" => Value::Num(if m.hurt_time > 0 { 0.3 } else { 0.0 }),
-            "owner_identifier" => Value::Str(if m.extra.tame { "minecraft:player" } else { "" }.into()),
-            // A pet's owner is a player.
-            "is_owner_identifier_any" => Value::bool(
-                m.extra.tame
-                    && args.iter().any(|a| {
-                        matches!(a, Value::Str(s) if s.trim().eq_ignore_ascii_case("minecraft:player"))
-                    }),
-            ),
+            // The root actor: an entity that nothing holds is its own (Bedrock's
+            // `query.is_owner_identifier_any` compares "the root actor identifier"). Actions &
+            // Stuff's armour stand asks it for `minecraft:armor_stand` before it turns into a
+            // "Prop" or "Item" stand, and every mob asks it for `minecraft:player`.
+            "owner_identifier" => Value::Str({
+                let java = m.kind.id.to_ascii_lowercase();
+                bedrock_id(&java).map_or(java.clone(), str::to_owned).into()
+            }),
+            "is_owner_identifier_any" => Value::bool(holder_is_any(m, args)),
             "invulnerable_ticks" => Value::Num(m.invulnerable as f32),
             // A villager's look: Bedrock keeps the profession in `variant`, the biome in
             // `mark_variant` and the trade tier in `trade_tier`; a skin is picked per mob.
@@ -1765,7 +1800,10 @@ fn attachables_for<'a>(
 }
 
 fn item_at(m: &Mob, slot: Option<&Value>) -> Option<Arc<str>> {
-    let slot = match slot? {
+    // No slot named: the main hand (`query.is_item_equipped` and
+    // `query.get_equipped_item_name` take an optional hand, the main one by default).
+    let main = Value::Num(0.0);
+    let slot = match slot.unwrap_or(&main) {
         Value::Str(s) => {
             let s = s.to_ascii_lowercase();
             slot_of(&s).or(match s.as_str() {
@@ -2002,11 +2040,51 @@ const HISTORY_NAMES: [[&str; 2]; super::HISTORY] = [
     ["historical_frame_15.pos_y", "historical_frame_15.rot_y"],
 ];
 
-/// A Java armor stand's pose over a pack's stand (`ArmorStandModel.setupAnim`): each part's
-/// rotation is the stand's own, in place of what the pack's pose animation gave it. Bedrock's
-/// default pose holds the same numbers as Java's (`hlnmov`: left arm -10, 0, -10), so the degrees
-/// carry over as they are. The body turns the waist, which carries the torso's sticks.
+/// A Java armor stand's pose over a pack's stand (`ArmorStandModel.setupAnim`): each part turns
+/// by how far the stand's own pose is from the game's default one, over what the pack's
+/// animations gave it. Bedrock's default pose holds the same numbers as Java's (`hlnmov`: left arm
+/// -10, 0, -10), so a stand in the default pose is the pack's alone: its own poses for its modes
+/// (Actions & Stuff's "Prop" and "Item" stands turn the arm that carries the item onto the ground;
+/// the Java pose put in their place sank a tent into the ground). The body turns the waist, which
+/// carries the torso's sticks.
+/// Mobs whose head Bedrock's renderer draws apart from the body's scale (the mooshroom's,
+/// which also carries the mushroom blocks): the head keeps only its own animated scale (and the
+/// entity's), not what the animations scale the bones above it by. Actions & Stuff shrinks the
+/// mooshroom to 0.01 (hiding those blocks) and scales `root` and `head` by 100 each; the snow
+/// golem's same trick scales `root` alone, its head (under `body`) following it.
+fn head_drawn_apart(id: &str) -> bool {
+    id == "minecraft:mooshroom"
+}
+
+/// `head_drawn_apart`: the head's scale divided by its ancestors' animated scales.
+fn head_apart(pose: &mut horizon_bedrock::animation::Pose, g: &horizon_bedrock::geometry::Geometry) {
+    let parent_of = |n: &str| {
+        g.bones
+            .iter()
+            .find(|b| b.name.eq_ignore_ascii_case(n))
+            .and_then(|b| b.parent.clone())
+    };
+    let mut above = [1.0f32; 3];
+    let mut at = parent_of("head");
+    while let Some(p) = at {
+        if let Some(b) = pose.get(&p) {
+            for i in 0..3 {
+                above[i] *= b.scale[i];
+            }
+        }
+        at = parent_of(&p);
+    }
+    if let Some(h) = pose.bones.get_mut("head") {
+        for i in 0..3 {
+            if above[i].abs() > 1e-6 {
+                h.scale[i] /= above[i];
+            }
+        }
+    }
+}
+
 pub(super) fn pose_stand(pose: &mut horizon_bedrock::animation::Pose, stand: &super::StandPose) {
+    const DEFAULT: [[f32; 3]; 6] = crate::entities::ArmorStand::DEFAULT_POSE;
     const BONES: [&[&str]; 6] = [
         &["head"],
         &["waist"],
@@ -2015,11 +2093,15 @@ pub(super) fn pose_stand(pose: &mut horizon_bedrock::animation::Pose, stand: &su
         &["leftleg"],
         &["rightleg"],
     ];
-    for (names, r) in BONES.iter().zip(stand.pose) {
+    for ((names, r), d) in BONES.iter().zip(stand.pose).zip(DEFAULT) {
+        if r == d {
+            continue;
+        }
         for name in *names {
             let b = pose.bones.entry((*name).to_owned()).or_default();
-            b.rotation = r;
-            b.rotation_entity = [0.0; 3];
+            for a in 0..3 {
+                b.rotation[a] += r[a] - d[a];
+            }
         }
     }
     let mut hide = |name: &str| {
@@ -2175,8 +2257,45 @@ pub struct BedrockMobs {
     attached: Mutex<HashMap<(u32, &'static str), AttState>>,
     /// Item (lower case) to the attachables that dress it.
     item_index: HashMap<String, Vec<String>>,
+    /// The resource root the pack's converted textures are in.
+    root: std::path::PathBuf,
+    /// A glint texture's colour (`glint_colour`), by atlas name.
+    glints: Mutex<HashMap<String, u32>>,
     /// A geometry's bone bindings, parsed once.
     bindings: Mutex<HashMap<String, Arc<Vec<(String, horizon_bedrock::molang::Program)>>>>,
+}
+
+fn read_glint_colour(path: &Path) -> Option<u32> {
+    let mut decoder = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).ok()?));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0; reader.output_buffer_size()?];
+    let info = reader.next_frame(&mut buf).ok()?;
+    let channels = info.color_type.samples();
+    if channels < 3 {
+        return None;
+    }
+    let mut sum = [0.0f64; 3];
+    let mut weight = 0.0f64;
+    for px in buf[..info.buffer_size()].chunks_exact(channels) {
+        let a = if channels == 4 { f64::from(px[3]) / 255.0 } else { 1.0 };
+        let rgb = [0, 1, 2].map(|i| f64::from(px[i]) / 255.0);
+        let w = rgb.iter().copied().fold(0.0, f64::max) * a;
+        for i in 0..3 {
+            sum[i] += rgb[i] * w;
+        }
+        weight += w;
+    }
+    if weight <= 0.0 {
+        return None;
+    }
+    let mean = sum.map(|c| c / weight);
+    let top = mean.iter().copied().fold(0.0, f64::max);
+    if top <= 0.0 {
+        return None;
+    }
+    let byte = |c: f64| ((c / top).clamp(0.0, 1.0) * 255.0).round() as u32;
+    Some(byte(mean[0]) | byte(mean[1]) << 8 | byte(mean[2]) << 16 | 0xff << 24)
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -2344,8 +2463,28 @@ impl BedrockMobs {
         BedrockMobs {
             bundle,
             item_index,
+            root: root.to_path_buf(),
             ..Default::default()
         }
+    }
+
+    /// The colour of glint texture `texture` (atlas name), packed as PvP & HUD's glint colour
+    /// (red in the low byte): its texels weighed by their brightness, the brightest channel
+    /// raised to full, so the game's shimmer keeps its pattern and takes the colour. 0 when the
+    /// file cannot be read.
+    pub fn glint_path(&self, texture: &str) -> std::path::PathBuf {
+        self.root
+            .join(format!("assets/minecraft/textures/{texture}.png"))
+    }
+
+    pub fn glint_colour(&self, texture: &str) -> u32 {
+        if let Some(c) = lock(&self.glints).get(texture) {
+            return *c;
+        }
+        let path = self.glint_path(texture);
+        let colour = read_glint_colour(&path).unwrap_or(0);
+        lock(&self.glints).insert(texture.to_owned(), colour);
+        colour
     }
 
     pub fn is_empty(&self) -> bool {
@@ -2355,6 +2494,10 @@ impl BedrockMobs {
     /// Hands the game's own particles that this pack draws itself (its
     /// `minecraft:rain_splash_particle`) to it: once for the pack in use, every frame cheap.
     pub fn take_game_particles(&self) {
+        STANDS_HAVE_ARMS.store(
+            self.entity_def("minecraft:armor_stand").is_some(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
         let key = std::ptr::from_ref(self) as usize;
         if let Some(ids) = horizon_client_render::bedrock_particles::install_for(key, |id| {
             self.bundle.effects.get(id).is_some_and(|fx| fx.one_per_request())
@@ -2401,6 +2544,15 @@ impl BedrockMobs {
             .get(&m.id)
             .and_then(|s| s.frame.as_ref())
             .map(|f| f.held)
+    }
+
+    /// The pack's `scale` script for `m`, as of its last frame (`None` before the first or when
+    /// no pack dresses it).
+    pub fn pack_scale(&self, m: &Mob) -> Option<f32> {
+        lock(&self.states)
+            .get(&m.id)
+            .and_then(|s| s.frame.as_ref())
+            .map(|f| f.scale)
     }
 
     pub fn has_entity(&self, entity: &str) -> bool {
@@ -2516,6 +2668,14 @@ impl BedrockMobs {
         let mut frame = st.instance.update(def, &assets, &mut host, dt);
         if let Some(stand) = &m.extra.stand_pose {
             pose_stand(&mut frame.pose, stand);
+        }
+        if head_drawn_apart(&m.kind.id)
+            && let Some(g) = frame
+                .layers
+                .first()
+                .and_then(|l| self.bundle.geometries.get(&l.geometry.to_ascii_lowercase()))
+        {
+            head_apart(&mut frame.pose, g);
         }
         st.time = time;
         if !gui && avatar && m.extra.fall_flying {
@@ -2681,11 +2841,16 @@ impl BedrockMobs {
         if held.hidden {
             attached.retain(|a| !matches!(a.slot, "main_hand" | "off_hand"));
         }
-        // An attachable's animations may name bones of its holder that its own model lacks (the
-        // arm a held item raises, the hand bone it moves): they drive the holder's bones, added
-        // to what the holder's own animations gave, as animations of one entity stack.
+        // An attachable's animations that name bones of its holder its own model lacks (the arm
+        // a held item raises) do not pose the holder: Bedrock poses it by the holder's own
+        // animations alone. Actions & Stuff plays the sword's swing (`ccqkmf`) on the player and
+        // on the sword; added together the arm turned twice as far (v191 added them). The debug
+        // file's `attachables_drive_holder: true` adds them again, to compare.
         let mut holder_pose = frame.pose;
-        for a in &attached {
+        let drives = super::bedrock_debug::settings()
+            .attachables_drive_holder
+            .unwrap_or(false);
+        for a in attached.iter().filter(|_| drives) {
             for (bone, drive) in &a.pose.bones {
                 let own = a.layers.iter().any(|d| d.built.names.iter().any(|n| n == bone));
                 let holder_has = layers.iter().any(|d| d.built.names.iter().any(|n| n == bone));
@@ -3449,8 +3614,10 @@ pub fn apply_pose(pose: &Pose, names: &[String], poses: &mut super::anim::Poses)
         let Some(b) = pose.get(name) else { continue };
         let p = poses.get(name);
         let signs = if super::render::in_first_person_view() {
-            let s = &super::bedrock_debug::settings().fp_rot_signs;
-            [0, 1, 2].map(|i| s.get(i).copied().unwrap_or(1.0))
+            let settings = super::bedrock_debug::settings();
+            let s = &settings.fp_rot_signs;
+            let own = settings.fp_signs_for(name);
+            [0, 1, 2].map(|i| s.get(i).copied().unwrap_or(1.0) * own[i])
         } else {
             [1.0; 3]
         };

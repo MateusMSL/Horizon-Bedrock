@@ -419,6 +419,10 @@ fn render_bedrock(
     // The holder's bones, for what the mob holds or wears.
     let mut holder: std::collections::HashMap<String, (glam::Mat4, glam::Mat4)> =
         std::collections::HashMap::new();
+    // A layer whose texture is in neither the pack nor the game: the pack cannot dress the mob,
+    // the game draws it. A body the pack draws as nothing on purpose (every part hidden, an
+    // armor stand showing only what it holds) stays the pack's.
+    let mut unresolved = false;
     for (layer_no, layer) in frame.layers.iter().enumerate() {
         // The debug file's `hide_layers` / `solo_layers`, by the number the dump lists.
         if super::bedrock_debug::settings().hides_layer(layer_no) {
@@ -438,13 +442,7 @@ fn render_bedrock(
             if holder.is_empty() && !frame.attached.is_empty() {
                 poses.reset(&layer.built.part);
                 super::bedrock::apply_pose(&frame.pose, &layer.built.names, &mut poses);
-                if m.extra.first_person {
-                    let arms = ["rightarm".to_owned(), "leftarm".to_owned()];
-                    for att in &frame.attached {
-                        super::bedrock::apply_pose(&att.pose, &arms, &mut poses);
-                    }
-                }
-                bone_matrices(&layer.built.part, &poses, &mut holder);
+                holder_matrices(&layer.built.part, &poses, &mut holder);
             }
             continue;
         }
@@ -463,6 +461,7 @@ fn render_bedrock(
                     )
                 });
             }
+            unresolved = true;
             continue;
         };
         // Bones the pack gives another material (a glowing eye, a scrolling mantle) draw in
@@ -476,18 +475,10 @@ fn render_bedrock(
         let mut drew_here = false;
         for (gi, group) in groups.iter().enumerate() {
             poses.reset(&layer.built.part);
+            // What the attachables' animations do to the holder's bones (an arm a held item
+            // raises) is in `frame.pose` already (`bedrock.rs`, both persons): adding it again
+            // here in first person turned the arm twice as far (the sword's swing overshot).
             super::bedrock::apply_pose(&frame.pose, &layer.built.names, &mut poses);
-            // First person: the attachable's own animations pose the holder's arm (Bedrock
-            // draws the attachable in the holder's skeleton), so the arm, its sleeve and the
-            // item bone under it move together, about the arm's pivot.
-            if m.extra.first_person {
-                // Both arms, whatever the slot: a main-hand item's animations pose the other
-                // arm too (flint and steel's left hand bringing the steel).
-                let arms = ["rightarm".to_owned(), "leftarm".to_owned()];
-                for att in &frame.attached {
-                    super::bedrock::apply_pose(&att.pose, &arms, &mut poses);
-                }
-            }
             for name in &layer.built.names {
                 let debug = super::bedrock_debug::settings();
                 // A hidden bone hides its own cubes only: its children follow their own rules.
@@ -512,6 +503,14 @@ fn render_bedrock(
                 {
                     poses.get(name)[3] = 0.0;
                 }
+                // `scale_bones`: a bone's size, by hand.
+                let grow = debug.scale_for(&m.kind.id, name);
+                if grow != [1.0; 3] {
+                    let p = poses.get(name);
+                    for i in 0..3 {
+                        p[6 + i] *= grow[i];
+                    }
+                }
                 // `rotate_bones` / `move_bones`: the orientation of a pose, by hand.
                 let (turn, shift) = (debug.rotate_for(name), debug.move_for(name));
                 if turn != [0.0; 3] || shift != [0.0; 3] {
@@ -527,7 +526,7 @@ fn render_bedrock(
             }
             if gi == 0 && (!frame.attached.is_empty() || avatar(m)) {
                 let mut here = std::collections::HashMap::new();
-                bone_matrices(&layer.built.part, &poses, &mut here);
+                holder_matrices(&layer.built.part, &poses, &mut here);
                 for (name, m) in here {
                     holder.entry(name).or_insert(m);
                 }
@@ -892,7 +891,21 @@ fn render_bedrock(
     // Nothing of the body drawn: the mob is the game's, unless the pack still hangs what it
     // holds from its (hidden) bones.
     if !drew && (holder.is_empty() || frame.attached.is_empty()) {
-        return false;
+        // Nothing drawn though the pack dresses the mob: Bedrock draws no body, and what the mob
+        // holds still hangs from the pack's hand bones (`bedrock_hand`).
+        let keep = !m.extra.first_person && !frame.layers.is_empty() && !unresolved;
+        if bedrock_debug() {
+            log_bedrock_once(format!("{}/nothing-drawn/{keep}", m.kind.id), || {
+                format!(
+                    "{}: the pack drew nothing ({} layers, unresolved texture {unresolved}, {} attached); {}",
+                    m.kind.id,
+                    frame.layers.len(),
+                    frame.attached.len(),
+                    if keep { "drawn as nothing" } else { "the game draws it" }
+                )
+            });
+        }
+        return keep;
     }
     // What the stencil masks that draw no colour (the shine bands) cover on the screen, by the
     // value they write: the layers drawn after them that test for it are cut to it.
@@ -997,6 +1010,17 @@ fn render_bedrock(
                     (true, "frame") => super::bedrock_debug::HeldAnchor::Frame,
                     (true, "origin") => super::bedrock_debug::HeldAnchor::Origin,
                     (true, "pivot") => super::bedrock_debug::HeldAnchor::Pivot,
+                    // An entity the game has no mob for, drawn through a stand-in (`pack_proxy`:
+                    // the armor stand): the model's 24-pixel point on the bone, a bound bone under
+                    // another as much as a top-level one. Actions & Stuff's "Item" stand lifts its
+                    // hand bone to 24 pixels for the item to stand on the ground, as its "Prop"
+                    // does. Mobs keep `held_anchor_of` (their swords and spears in the hand).
+                    _ if matches!(m.species(), Species::Mannequin)
+                        && !avatar(m)
+                        && super::bedrock_debug::settings().held_anchor.eq_ignore_ascii_case("auto") =>
+                    {
+                        super::bedrock_debug::HeldAnchor::Frame
+                    }
                     _ => super::bedrock_debug::settings().held_anchor_of(has_parent, height, floor),
                 };
                 let pivot = match anchor_kind {
@@ -1299,6 +1323,21 @@ fn render_bedrock(
                 }
                 // Only a multitexture material reads a controller's second texture.
                 if layer.layer.secondary && !flags.multitexture {
+                    // A glinting material's second texture is its glint (Actions & Stuff's
+                    // colour option picks it): the game's shimmer takes its colour.
+                    if flags.glint {
+                        let colour = bedrock.glint_colour(&layer.texture);
+                        horizon_client_render::pvp::PACK_GLINT
+                            .store(colour, std::sync::atomic::Ordering::Relaxed);
+                        log_bedrock_once(format!("glint-colour/{}", layer.texture), || {
+                            format!(
+                                "bedrock: {} glints with {} (colour {colour:#010x}, {})",
+                                super::bedrock::ENGINE_BUILD,
+                                layer.texture,
+                                bedrock.glint_path(&layer.texture).display()
+                            )
+                        });
+                    }
                     if bedrock_debug() {
                         log_bedrock_once(
                             format!("{}/{}/{}/second", m.kind.id, att.slot, layer.layer.geometry),
@@ -1409,6 +1448,7 @@ fn render_bedrock(
                 } else {
                     overlay
                 };
+
                 draw_attached(
                     &layer.built.part,
                     glam::Mat4::IDENTITY,
@@ -1643,7 +1683,9 @@ fn render_bedrock(
             }
         }
     }
-    drew
+    // The pack dresses the mob even when only what it holds drew (an armor stand whose body
+    // the pack hides, its item shown): the game must not draw it again.
+    drew || out.len() > first_vertex
 }
 thread_local! {
     /// While the first-person view model draws: the turn from the game's camera-relative space

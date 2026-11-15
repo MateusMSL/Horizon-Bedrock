@@ -130,3 +130,10 @@ física, inventário) continua sendo a do Java; o motor Bedrock só lê o estado
 | Partícula | `particle.rs`, `game/bedrock.rs` (`Blocks`: blocos do mundo para colisão), `bedrock_particles.rs` (partículas do jogo), `examples/sim_particle.rs` (simula um efeito sobre chão plano), `mobs/bedrock.rs` (`send_emit`, partículas de itens); checklist em `bedrock-particulas.md` (`tools/bedrock/particles_checklist.py`). |
 | Som | `sounds.rs`, `game/bedrock.rs`. |
 | Entidade que o jogo desenha sozinho | `game/pack_proxy.rs` e o gancho do arquivo da entidade. |
+
+## Build para o launcher
+
+| Arquivo | Papel |
+| --- | --- |
+| `xtask/src/bedrock_build.rs` | `cargo run -p xtask -- bedrock-build`: compila `horizon-official` em `release` e copia para `release/horizon-bedrock/horizon-client.exe` (docs/bedrock-release.md). Gancho: duas linhas em `xtask/src/main.rs`. |
+| `.idea/runConfigurations/Horizon___Bedrock_release.xml` | Configuração do IntelliJ que roda a tarefa. |

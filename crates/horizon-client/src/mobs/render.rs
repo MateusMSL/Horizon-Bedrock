@@ -1482,6 +1482,48 @@ pub fn bone_matrices(
     }
     walk(part, glam::Mat4::IDENTITY, glam::Mat4::IDENTITY, poses, out);
 }
+/// `bone_matrices` as Bedrock carries what is bound to the holder: a bone scaled to nothing
+/// pulls its children onto its pivot, and what is bound to one of them still shows there, at
+/// its full size and turned as its bones turn. Actions & Stuff's "Prop" armor stand scales its
+/// waist to 0 (moved 24 pixels up) to hide the stand, and the prop bound to the hand under it
+/// lands on the ground; the sulfur cube scales the held bone itself to hide what it holds.
+pub fn holder_matrices(
+    part: &Part,
+    poses: &Poses,
+    out: &mut std::collections::HashMap<String, (glam::Mat4, glam::Mat4)>,
+) {
+    fn flat(m: &glam::Mat4) -> bool {
+        m.determinant().abs() < 1e-12
+    }
+    fn walk(
+        part: &Part,
+        (posed_parent, upright_parent): (glam::Mat4, glam::Mat4),
+        rest_parent: glam::Mat4,
+        poses: &Poses,
+        out: &mut std::collections::HashMap<String, (glam::Mat4, glam::Mat4)>,
+    ) {
+        let pose = poses.pose(part);
+        let now = posed(posed_parent, pose);
+        let rest = posed(rest_parent, part.pose);
+        let own_flat = (6..9).any(|i| pose[i].abs() < 1e-6);
+        let mut unit = pose;
+        for v in &mut unit[6..9] {
+            if v.abs() < 1e-6 {
+                *v = 1.0;
+            }
+        }
+        // Turned as the bones above turn, where the true chain puts it.
+        let mut upright = posed(upright_parent, unit);
+        upright.w_axis = now.w_axis;
+        let shown = if own_flat || !flat(&now) { now } else { upright };
+        out.insert(part.name.clone(), (shown, rest));
+        let carried = if flat(&now) { upright } else { now };
+        for c in &part.children {
+            walk(c, (now, carried), rest, poses, out);
+        }
+    }
+    walk(part, (glam::Mat4::IDENTITY, glam::Mat4::IDENTITY), glam::Mat4::IDENTITY, poses, out);
+}
 /// Where what is held is modelled from: the holder's bone (`rightitem`, with its whole pose) at
 /// the item's own origin. A model baked to the game's frame puts a bone modelled at the origin
 /// on the feet line, `MODEL_FEET` below the frame's origin, which this takes back (the matrices

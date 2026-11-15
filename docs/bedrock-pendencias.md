@@ -22,13 +22,13 @@ Junta as listas pedidas na conversa (lista de tarefas da sessão, notas "Anotado
 - [ ] Pérola do ender piscando (5 partículas, 4 controladores; rever depois da v223).
 - [ ] Vidros com textura errada na mão.
 - [ ] Armadura vestida com pixels faltando (nariz do elmo).
-- [ ] Tesoura do A&S mostrando os braços.
+- [x] Tesoura do A&S mostrando os braços (v267: animações do attachable fora dos ossos do dono).
 - [ ] Vara: escala 0 em 1ª pessoa no pack de teste.
 - [ ] Ataque em 3ª pessoa tocando duas animações por clique.
 - [ ] Tridente com pose invertida.
 - [?] Relógio: mostrador (v220), hora (v221). Bússola apontando (v216).
 - [ ] Itens mal posicionados na mão em 1ª pessoa (cristal do End grande e deslocado; captura de 2026-11-13).
-- [ ] Tesoura em 1ª pessoa: braços gigantes cobrindo a tela (já anotado como "mostrando os braços").
+- [x] Tesoura em 1ª pessoa: braços gigantes cobrindo a tela (v267).
 - [ ] Balde d'água: fundo/paredes internas transparentes (vê-se a grama). Material `entity_alphatest_one_sided`; paredes internas são um cubo de altura negativa (`3m4c6l`, `[6,-6.5,6]`); falta renderizar o attachable e conferir a face/culling.
 - [ ] Trilho ativador, estande de armadura etc.: sem animação na primeira vez que são puxados (aquecimento de 6 s da v188 em attachable novo é suspeito; não alterado).
 - [?] Ovo arremessado com a textura do ovo comum: o projétil `Egg` não guardava qual ovo era. Agora guarda o item (`ProjectileKind::Egg(item)`), desenha `item/blue_egg`/`item/brown_egg` e o pintinho nasce da variante do ovo (código base do Horizon, não do motor Bedrock; o pack desenha o ovo 3D só se o projétil virar entidade do pack).
@@ -66,6 +66,7 @@ Junta as listas pedidas na conversa (lista de tarefas da sessão, notas "Anotado
 
 ## Motor
 
+- [ ] Otimizar o motor: FPS bem abaixo do Horizon base (anotado em 2026-11-14). Medir com e sem pack (`--benchmark`, `HORIZON_SPIKES`) e achar onde o motor Bedrock gasta: Molang/controladores por mob e por quadro, attachables, partículas, stencil.
 - [?] Desempenho com o stencil na GPU (v215; comparar com `cpu_stencil`).
 - [ ] `texture_meshes`: tamanho real e extrusão.
 - [ ] `uv_anim` por material/osso.
@@ -75,3 +76,4 @@ Junta as listas pedidas na conversa (lista de tarefas da sessão, notas "Anotado
 - [ ] Log de campos ignorados e queries sem resposta.
 - [ ] Ferramentas de debug sem recompilar (em andamento por partes no `bedrock-debug.json`).
 - [ ] Migrar o add-on para a base atual do Horizon com ganchos mínimos.
+- [ ] Lança na mão toca o som de estocada sozinha (sem atacar), A&S.

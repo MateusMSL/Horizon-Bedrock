@@ -539,12 +539,22 @@ pub struct Frame {
     /// The glint's colour ([`Tweaks::glint_texel`]), 0 for vanilla's.
     pub glint: u32,
 }
+/// The glint colour a Bedrock pack chose (the colour of the glint texture its enchanted
+/// pieces draw with: Actions & Stuff's glint colour option), packed as `glint_texel`; 0 for
+/// vanilla's. PvP & HUD's own colour, when set, wins.
+pub static PACK_GLINT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 impl Pvp {
     pub fn frame(&self) -> Frame {
+        let own = self.tweaks.glint_texel();
         Frame {
             outline: self.outline.stroke(),
             hurt_texel: self.hit.texel(),
-            glint: self.tweaks.glint_texel(),
+            glint: if own != 0 {
+                own
+            } else {
+                PACK_GLINT.load(std::sync::atomic::Ordering::Relaxed)
+            },
         }
     }
 }

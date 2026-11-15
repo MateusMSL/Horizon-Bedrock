@@ -1329,7 +1329,11 @@ impl Instance {
                 secondary: index > 0,
             });
         }
-        // The flat sprites the model's bones show, each in the texture it names.
+        // The flat sprites the model's bones show: shaped by the texture each names, drawn with
+        // the controller's own texture as Bedrock binds it (the mesh's UVs span the sprite).
+        // Actions & Stuff's 2D sword: the glint layer's mesh is the sword's shape sampling the
+        // scrolling glint texture, the outline's the sword's shape in the outline colour; drawn
+        // with the sword's own texture they were a second plain sword over the glinting one.
         if let (Some(models), Some(first)) = (models, out.get(start).cloned()) {
             for (key, path) in &def.textures {
                 let fitted = crate::geometry::fitted_mesh_id(geometry, key, path);
@@ -1339,9 +1343,9 @@ impl Instance {
                     crate::geometry::mesh_id(geometry, key)
                 };
                 if models.contains_key(&id) {
+                    let _ = path;
                     out.push(Layer {
                         geometry: id,
-                        texture: path.clone(),
                         secondary: false,
                         ..first.clone()
                     });

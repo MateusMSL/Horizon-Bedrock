@@ -62,6 +62,7 @@ fn state(f: &MaterialFlags, color: bool) -> pass::State {
     pass::State {
         color,
         additive: f.additive,
+        blended: f.blend || f.additive,
         // As the scene draws them: an additive or `DisableDepthWrite` piece hides nothing.
         depth_write: !f.no_depth_write
             && !f.additive
@@ -116,7 +117,17 @@ pub fn hand_over(f: &MaterialFlags, out: &mut Vec<Vertex>, start: usize) {
     };
     match route {
         Route::Scene => {}
-        Route::SceneAndPass => pass::push(target, state(f, false), &out[start..]),
+        Route::SceneAndPass => {
+            let mut s = state(f, false);
+            // The first-person hand: the scene already drew this piece, and its copy here does
+            // not land on the hand's stored depth exactly (the enchanted 2D sword's outline
+            // covered the whole blade: its body never wrote the reference it is kept off). The
+            // value is written over the piece whole; nothing is nearer than the hand.
+            if target == pass::Target::Hand {
+                s.depth_test = false;
+            }
+            pass::push(target, s, &out[start..])
+        }
         Route::Pass => {
             pass::push(target, state(f, !f.no_color), &out[start..]);
             out.truncate(start);

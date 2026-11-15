@@ -2383,9 +2383,11 @@ impl ArmorStand {
         [0, 5, 1, 2, 3, 4][slot]
     }
     /// `ArmorStand.isDisabled`: the slot is locked, or it is a hand and the
-    /// stand has no arms.
+    /// stand has no arms (unless a Bedrock pack's stands always have them,
+    /// `mobs::bedrock::armor_stands_have_arms`).
     pub fn is_disabled(&self, slot: usize) -> bool {
-        self.disabled_slots & (1 << Self::filter_flag(slot)) != 0 || (slot < 2 && !self.show_arms)
+        self.disabled_slots & (1 << Self::filter_flag(slot)) != 0
+            || (slot < 2 && !self.show_arms && !crate::mobs::bedrock::armor_stands_have_arms())
     }
     /// The `swapItem` locks: taking from a filled slot or putting into an
     /// empty one can each be disabled.

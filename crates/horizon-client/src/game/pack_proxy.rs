@@ -191,7 +191,7 @@ impl Game<'_> {
             m.age = now.max(0) as u32;
             m.invisible = false;
             setup(m);
-            match p.base {
+            let drew = match p.base {
                 Some(base) => horizon_client::mobs::render::render_pack_at(
                     m,
                     alpha as f32,
@@ -210,7 +210,13 @@ impl Game<'_> {
                     data,
                     out,
                 ),
+            };
+            // What the stand-in holds that no attachable of the pack replaces: the game's item,
+            // on the pack's hand bone (Bedrock draws a held item without an attachable itself).
+            if drew && (m.extra.main_hand.is_some() || m.extra.off_hand.is_some()) {
+                self.held_item_geometry(m, camera, alpha, p.packed, true, None, out);
             }
+            drew
         })
     }
 }

@@ -356,6 +356,18 @@ impl Game<'_> {
         let Some(state) = registry.default_state(block) else {
             return;
         };
+        // A pack's mooshroom: Bedrock draws these blocks at the entity's own size, the pack's
+        // `scale` script (Actions & Stuff's 0.01 hides them and its model scales itself back).
+        let pack_scale = if species == Species::Mooshroom {
+            self.res
+                .mob_data()
+                .bedrock
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .pack_scale(mob)
+        } else {
+            None
+        };
         let alpha = alpha as f32;
         let Some(head) = render::part_transform(mob, alpha, camera, self.res.mob_data(), "head")
         else {
@@ -384,6 +396,14 @@ impl Game<'_> {
                     * unit,
                 head * at(0.0, -0.7, -0.2) * spin(-78.0) * flip * unit,
             ]
+        };
+        // At the pack's size, about each block's middle.
+        let transforms: Vec<Mat4> = match pack_scale {
+            Some(s) if (s - 1.0).abs() > 1e-4 => transforms
+                .into_iter()
+                .map(|t| t * unit.inverse() * Mat4::from_scale(Vec3::splat(s)) * unit)
+                .collect(),
+            _ => transforms,
         };
         // The hurt tint reaches these blocks as it does the body.
         let overlay = horizon_client::overlay::living(0.0, mob.hurt_time > 0 || mob.death_time > 0);

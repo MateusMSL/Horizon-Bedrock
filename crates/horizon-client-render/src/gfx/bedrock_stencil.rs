@@ -62,6 +62,9 @@ pub struct State {
     pub color: bool,
     /// Adds its colour to what is behind (`blendSrc One`/`SourceAlpha`, `blendDst One`).
     pub additive: bool,
+    /// Its material blends (`Blending`) or adds: Bedrock draws such pieces after the opaque and
+    /// cut-out ones of every model in view, so they test what all of those wrote.
+    pub blended: bool,
     /// Writes depth (`DisableDepthWrite` off).
     pub depth_write: bool,
     /// Tests depth (`DisableDepthTest` off).
@@ -128,7 +131,9 @@ pub fn push(target: Target, state: State, vertices: &[Vertex]) {
         return;
     }
     let t = target as usize;
-    let mut lists = PENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut lists = PENDING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if lists.vertices[t].len() + vertices.len() > MAX_VERTICES {
         lists.vertices[t].clear();
         lists.batches[t].clear();
@@ -214,7 +219,10 @@ impl Stencil {
         bias: wgpu::DepthBiasState,
         hdr_write_light: f64,
     ) -> Self {
-        let format = if device.features().contains(wgpu::Features::DEPTH32FLOAT_STENCIL8) {
+        let format = if device
+            .features()
+            .contains(wgpu::Features::DEPTH32FLOAT_STENCIL8)
+        {
             wgpu::TextureFormat::Depth32FloatStencil8
         } else {
             wgpu::TextureFormat::Depth24PlusStencil8
@@ -271,7 +279,9 @@ impl Stencil {
     /// Takes the pieces handed over since the last frame and uploads them.
     pub fn begin_frame(&mut self, queue: &wgpu::Queue) {
         {
-            let mut pending = PENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut pending = PENDING
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             std::mem::swap(&mut self.frame, &mut *pending);
             for t in 0..2 {
                 pending.vertices[t].clear();
@@ -280,6 +290,7 @@ impl Stencil {
         }
         for t in 0..2 {
             Self::prune(&mut self.frame, t);
+            Self::order(&mut self.frame, t);
         }
         let total = self.frame.vertices[0].len() + self.frame.vertices[1].len();
         if total == 0 {
@@ -313,22 +324,21 @@ impl Stencil {
 
     /// Keeps what can change a pixel: nothing when no piece of the target tests the stencil
     /// (its pass, the world's depth kept for it and the hand drawn apart all cost a frame for
-    /// nothing), and of the pieces that only write it, those whose value a test looks for.
+    /// nothing), and of the pieces that only write it, those that write bits a test reads.
+    /// A write matters to a test whether it makes the test pass or fail: an armour's body writes
+    /// 2 so that its outline, drawn where `stencil & 18 == 0`, stays off it.
     fn prune(frame: &mut Lists, t: usize) {
-        let tests: Vec<(u8, u8)> = frame.batches[t]
+        let masks: Vec<u8> = frame.batches[t]
             .iter()
             .filter(|b| b.state.compare != Compare::Always)
-            .map(|b| (b.state.reference & b.state.read_mask, b.state.read_mask))
+            .map(|b| b.state.read_mask)
             .collect();
         let read = |b: &Batch| {
             b.state.compare != Compare::Always
                 || b.state.color
-                || (b.state.replace
-                    && tests
-                        .iter()
-                        .any(|(r, mask)| b.state.reference & mask == *r))
+                || (b.state.replace && masks.iter().any(|mask| b.state.write_mask & mask != 0))
         };
-        if tests.is_empty() {
+        if masks.is_empty() {
             frame.batches[t].clear();
         } else if !frame.batches[t].iter().all(read) {
             frame.batches[t].retain(read);
@@ -345,6 +355,14 @@ impl Stencil {
             vertices.extend_from_slice(&frame.vertices[t][from..from + b.vertices as usize]);
         }
         frame.vertices[t] = vertices;
+    }
+
+    /// Bedrock's order: the opaque and cut-out pieces first, the blended ones after, each in
+    /// the order the models drew them. An armour piece's outline (blended, drawn where the
+    /// stencil is clear) then stays off every piece's body, not only its own: the leggings'
+    /// outline showed over the boots drawn after it.
+    fn order(frame: &mut Lists, t: usize) {
+        frame.batches[t].sort_by_key(|b| b.state.blended);
     }
 
     pub fn has_world(&self) -> bool {
@@ -415,7 +433,10 @@ impl Stencil {
         // The scene's depth is read to start from it; the two must cover the same pixels.
         let skipped = if size != [depth_texture.width(), depth_texture.height()] {
             Some("the scene's depth is another size")
-        } else if !depth_texture.usage().contains(wgpu::TextureUsages::TEXTURE_BINDING) {
+        } else if !depth_texture
+            .usage()
+            .contains(wgpu::TextureUsages::TEXTURE_BINDING)
+        {
             Some("the scene's depth cannot be read")
         } else if depth_texture.format() != wgpu::TextureFormat::Depth32Float {
             Some("the scene's depth is not Depth32Float")
@@ -492,11 +513,7 @@ impl Stencil {
         for batch in &self.frame.batches[t] {
             pass.set_pipeline(&self.pipelines[&(format, batch.state)]);
             pass.set_stencil_reference(u32::from(batch.state.reference));
-            pass.draw_indexed(
-                0..batch.vertices / 4 * 6,
-                base + batch.first as i32,
-                0..1,
-            );
+            pass.draw_indexed(0..batch.vertices / 4 * 6, base + batch.first as i32, 0..1);
         }
     }
 
@@ -575,37 +592,39 @@ impl Stencil {
         if self.copies.contains_key(&format) {
             return;
         }
-        let pipeline = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Bedrock stencil depth copy"),
-            layout: Some(&self.copy_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &self.copy_shader,
-                entry_point: Some("vs_copy"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            primitive: Default::default(),
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: self.format,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Always),
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
-            multisample: Default::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &self.copy_shader,
-                entry_point: Some("fs_copy"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::empty(),
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let pipeline = self
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Bedrock stencil depth copy"),
+                layout: Some(&self.copy_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &self.copy_shader,
+                    entry_point: Some("vs_copy"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: Default::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: self.format,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Always),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &self.copy_shader,
+                    entry_point: Some("fs_copy"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::empty(),
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
         self.copies.insert(format, pipeline);
     }
 
@@ -642,105 +661,69 @@ impl Stencil {
             wgpu::BlendState::ALPHA_BLENDING
         };
         let constants = [("HDR_WRITE_LIGHT", self.hdr_write_light)];
-        let pipeline = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Bedrock stencil piece"),
-            layout: Some(&self.entity_layout),
-            vertex: wgpu::VertexState {
-                module: &self.entity_shader,
-                entry_point: Some("vs_entity"),
-                compilation_options: Default::default(),
-                buffers: &buffers,
-            },
-            primitive: Default::default(),
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: self.format,
-                depth_write_enabled: Some(state.depth_write),
-                depth_compare: Some(if state.depth_test {
-                    wgpu::CompareFunction::GreaterEqual
-                } else {
-                    wgpu::CompareFunction::Always
+        let pipeline = self
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Bedrock stencil piece"),
+                layout: Some(&self.entity_layout),
+                vertex: wgpu::VertexState {
+                    module: &self.entity_shader,
+                    entry_point: Some("vs_entity"),
+                    compilation_options: Default::default(),
+                    buffers: &buffers,
+                },
+                primitive: Default::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: self.format,
+                    depth_write_enabled: Some(state.depth_write),
+                    depth_compare: Some(if state.depth_test {
+                        wgpu::CompareFunction::GreaterEqual
+                    } else {
+                        wgpu::CompareFunction::Always
+                    }),
+                    stencil: wgpu::StencilState {
+                        front: face,
+                        back: face,
+                        read_mask: u32::from(state.read_mask),
+                        write_mask: if state.replace {
+                            u32::from(state.write_mask)
+                        } else {
+                            0
+                        },
+                    },
+                    bias: self.bias,
                 }),
-                stencil: wgpu::StencilState {
-                    front: face,
-                    back: face,
-                    read_mask: u32::from(state.read_mask),
-                    write_mask: if state.replace {
-                        u32::from(state.write_mask)
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &self.entity_shader,
+                    entry_point: Some(if state.cutout {
+                        "fs_entity"
                     } else {
-                        0
+                        "fs_entity_uncut"
+                    }),
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &constants,
+                        ..Default::default()
                     },
-                },
-                bias: replay_bias(self.bias, state),
-            }),
-            multisample: Default::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &self.entity_shader,
-                entry_point: Some(if state.cutout { "fs_entity" } else { "fs_entity_uncut" }),
-                compilation_options: wgpu::PipelineCompilationOptions {
-                    constants: &constants,
-                    ..Default::default()
-                },
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(blend),
-                    write_mask: if state.color {
-                        wgpu::ColorWrites::ALL
-                    } else {
-                        wgpu::ColorWrites::empty()
-                    },
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(blend),
+                        write_mask: if state.color {
+                            wgpu::ColorWrites::ALL
+                        } else {
+                            wgpu::ColorWrites::empty()
+                        },
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
         self.pipelines.insert((format, state), pipeline);
-    }
-}
-
-/// The depth bias of a piece drawn with `state`. A piece the scene already drew, drawn again
-/// here only for the stencil it writes (no colour), meets its own depth in the scene's copy: the
-/// two depths are the same surface computed twice, and where they come out a few ulps apart the
-/// write fails, leaving the piece unmarked at some angles of the camera (an armour then covered
-/// by the outline that should show only past its edge). Pulled a little nearer, with the slope,
-/// it always reaches its own surface.
-fn replay_bias(bias: wgpu::DepthBiasState, state: State) -> wgpu::DepthBiasState {
-    if state.color || !state.replace || !state.depth_test {
-        return bias;
-    }
-    wgpu::DepthBiasState {
-        constant: bias.constant.saturating_mul(4).max(512),
-        slope_scale: bias.slope_scale.max(1.0),
-        clamp: bias.clamp,
     }
 }
 
 #[cfg(test)]
 mod tests {
-
-    #[test]
-    fn a_stencil_only_replay_is_pulled_nearer_than_its_own_surface() {
-        let base = wgpu::DepthBiasState { constant: 128, slope_scale: 0.0, clamp: 0.0 };
-        let mut state = State {
-            color: false,
-            additive: false,
-            depth_write: true,
-            depth_test: true,
-            cutout: true,
-            compare: Compare::Always,
-            replace: true,
-            reference: 2,
-            read_mask: 255,
-            write_mask: 255,
-        };
-        let b = replay_bias(base, state);
-        assert!(b.constant > base.constant && b.slope_scale > 0.0);
-        // What draws colour, or only tests, keeps the scene's bias.
-        state.color = true;
-        assert_eq!(replay_bias(base, state), base);
-        state.color = false;
-        state.replace = false;
-        assert_eq!(replay_bias(base, state), base);
-    }
     use super::*;
 
     fn quad(layer: u32) -> [Vertex; 4] {
@@ -756,11 +739,97 @@ mod tests {
     }
 
     #[test]
+    fn a_write_that_keeps_an_outline_off_the_body_is_kept() {
+        let piece = |compare, reference, read_mask, replace, color| Batch {
+            state: State {
+                color,
+                additive: false,
+                blended: false,
+                depth_write: true,
+                depth_test: true,
+                cutout: true,
+                compare,
+                replace,
+                reference,
+                read_mask,
+                write_mask: 255,
+            },
+            first: 0,
+            vertices: 4,
+        };
+        let mut frame = Lists {
+            vertices: [vec![quad(0)[0]; 12], Vec::new()],
+            batches: [
+                vec![
+                    // The armour's body, no colour: writes 2.
+                    piece(Compare::Always, 2, 255, true, false),
+                    // Its outline: drawn where `stencil & 18 == 0`, off the body.
+                    piece(Compare::Equal, 0, 18, false, true),
+                    // A write no test reads.
+                    Batch {
+                        state: State {
+                            write_mask: 0x20,
+                            ..piece(Compare::Always, 32, 255, true, false).state
+                        },
+                        ..piece(Compare::Always, 32, 255, true, false)
+                    },
+                ],
+                Vec::new(),
+            ],
+        };
+        for (i, b) in frame.batches[0].iter_mut().enumerate() {
+            b.first = i as u32 * 4;
+        }
+        Stencil::prune(&mut frame, 0);
+        let kept: Vec<u8> = frame.batches[0].iter().map(|b| b.state.reference).collect();
+        assert_eq!(kept, [2, 0]);
+        assert_eq!(frame.vertices[0].len(), 8);
+    }
+
+    #[test]
+    fn blended_pieces_draw_after_every_opaque_one() {
+        let piece = |reference, blended| Batch {
+            state: State {
+                color: true,
+                additive: false,
+                blended,
+                depth_write: true,
+                depth_test: true,
+                cutout: true,
+                compare: Compare::Always,
+                replace: true,
+                reference,
+                read_mask: 255,
+                write_mask: 255,
+            },
+            first: 0,
+            vertices: 4,
+        };
+        // Leggings (body, outline), then boots (body, outline).
+        let mut frame = Lists {
+            vertices: [Vec::new(), Vec::new()],
+            batches: [
+                vec![
+                    piece(1, false),
+                    piece(2, true),
+                    piece(3, false),
+                    piece(4, true),
+                ],
+                Vec::new(),
+            ],
+        };
+        Stencil::order(&mut frame, 0);
+        let order: Vec<u8> = frame.batches[0].iter().map(|b| b.state.reference).collect();
+        assert_eq!(order, [1, 3, 2, 4]);
+    }
+
+    #[test]
     fn pieces_of_one_state_join_and_lose_their_routing_bits() {
         ACTIVE.store(true, Ordering::Relaxed);
         let state = State {
             color: false,
             additive: false,
+            blended: false,
             depth_write: true,
             depth_test: true,
             cutout: true,
@@ -772,7 +841,16 @@ mod tests {
         };
         push(Target::Hand, state, &quad(5 | 1 << 24));
         push(Target::Hand, state, &quad(5));
-        push(Target::Hand, State { color: true, compare: Compare::Equal, replace: false, ..state }, &quad(5));
+        push(
+            Target::Hand,
+            State {
+                color: true,
+                compare: Compare::Equal,
+                replace: false,
+                ..state
+            },
+            &quad(5),
+        );
         let lists = PENDING.lock().unwrap();
         let hand = Target::Hand as usize;
         assert_eq!(lists.batches[hand].len(), 2);

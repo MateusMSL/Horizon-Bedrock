@@ -162,6 +162,9 @@ pub struct Settings {
     /// Bones (part of the name, any case) turned by these degrees (x, y, z, as the pack's
     /// `rotation`), added to the animation's: to find the orientation a pose needs.
     pub rotate_bones: std::collections::BTreeMap<String, [f32; 3]>,
+    /// `{"mooshroom:head": [x, y, z]}`: the bone of that name (exact) of the mobs whose id holds
+    /// the part before `:` (every mob without one) scaled on top of the animation.
+    pub scale_bones: std::collections::BTreeMap<String, [f32; 3]>,
     /// Bones (part of the name, any case) moved by these pixels (x, y, z, as the pack's
     /// `position`), added to the animation's.
     pub move_bones: std::collections::BTreeMap<String, [f32; 3]>,
@@ -193,6 +196,13 @@ pub struct Settings {
     /// Signs multiplied into the animated turns (x, y, z) while the first-person view model
     /// draws: to test which turn convention matches Bedrock's for the large first-person poses.
     pub fp_rot_signs: Vec<f32>,
+    /// `{"body": [1, -1, 1]}`: in the first-person view, the turn of the bones whose name holds
+    /// the key (any case) times these signs (x, y, z, as the pack's `rotation`), on top of
+    /// `fp_rot_signs`: to find which bone's turn the view model reads the other way.
+    pub fp_bone_signs: std::collections::BTreeMap<String, [f32; 3]>,
+    /// `false` keeps the attachables' animations off the holder's bones (`hold_drive`), to
+    /// compare with Bedrock: the holder's own animations alone pose its arm.
+    pub attachables_drive_holder: Option<bool>,
     /// `true` leaves the first-person hand on the game's own item models (the pack's attachable
     /// draws it by default).
     pub first_person_off: bool,
@@ -460,6 +470,34 @@ impl Settings {
         Self::sum3(&self.rotate_bones, bone)
     }
 
+    /// The `fp_bone_signs` of `bone` (all 1 when no entry names it).
+    pub fn fp_signs_for(&self, bone: &str) -> [f32; 3] {
+        let mut out = [1.0; 3];
+        let bone = bone.to_ascii_lowercase();
+        for (k, v) in &self.fp_bone_signs {
+            if bone.contains(&k.to_ascii_lowercase()) {
+                for i in 0..3 {
+                    out[i] *= v[i];
+                }
+            }
+        }
+        out
+    }
+
+    /// The `scale_bones` factor of `bone` of mob `id` (1 when no entry names it).
+    pub fn scale_for(&self, id: &str, bone: &str) -> [f32; 3] {
+        let mut out = [1.0; 3];
+        for (k, v) in &self.scale_bones {
+            let (mob, name) = k.split_once(':').unwrap_or(("", k.as_str()));
+            if name.eq_ignore_ascii_case(bone) && id.to_ascii_lowercase().contains(&mob.to_ascii_lowercase()) {
+                for i in 0..3 {
+                    out[i] *= v[i];
+                }
+            }
+        }
+        out
+    }
+
     /// The pixels `bone` is moved: every `move_bones` entry its name contains, added.
     pub fn move_for(&self, bone: &str) -> [f32; 3] {
         Self::sum3(&self.move_bones, bone)
@@ -589,13 +627,16 @@ impl Settings {
 }
 
 const TEMPLATE: &str = r#"{
-  "_help": "Salvar recarrega no jogo (1 s). hide: sufixos de textura que nao desenham. hide_bones: ossos (parte do nome) que nao desenham (ex.: hat, jacket, sleeve, pants); hide_geometry: modelos (parte do id) que nao desenham. push_bones: {\"osso\": pixels} move o osso (parte do nome) para frente (negativo: para tras), um valor por osso. rotate_bones: {\"osso\": [x,y,z]} gira o osso (graus) alem da animacao; move_bones: {\"osso\": [x,y,z]} move o osso (pixels), eixos do pack; o log lista os ossos de cada modelo (bedrock-debug: bones). dump: ids (parte) logados 1x/s; dump_vars: variaveis v.* logadas junto; dump_bones: ossos (parte do nome) cuja pose entra no dump. held_rotate_bones / held_move_bones: como rotate_bones/move_bones, para ossos do que o mob segura/veste; first_person_rotate_bones / first_person_move_bones: o mesmo so na mao em primeira pessoa (ex.: {\"7d2e6\": [0,90,0]} gira a chama da tocha); first_person_glow_fixed: true para de virar os brilhos do item em primeira pessoa para a camera. held_anchor: 'auto' (modelo desenhado perto da mao do jogador, cubos a partir de 12 px: frame; senao origem do modelo na mao), 'origin', 'pivot' ou 'frame'. materials: flags forcadas por nome do material ('*' = todos); true liga, false desliga. bone_materials: as mesmas flags, por osso (parte do nome, '*' = todos), ex.: {\"2dh923\": {\"blend\": true, \"double_sided\": false}}. solo_bones: so esses ossos desenham. layer_tint: {\"cmj\": [1,1,1,0.5]} multiplica cor e alfa da camada cuja textura termina assim. bone_tint: o mesmo, so para o osso (parte do nome), ex.: {\"2dh923\": [1,1,1,0.5]}. solid: {\"cmj\": true} usa a copia opaca (false: a textura com alfa). dump_every: ticks entre linhas do dump (20; 1 segue um tremor quadro a quadro). dump_draw: com dump no mob, loga cada camada desenhada (material, flags por grupo de ossos, tint) a cada 5 s. queries: query.x fixa em um numero para todo mob. worn: move o que o mob veste por slot (head, chest, legs, feet, body, cape, elytra): offset em pixels (x direita, y baixo, z costas), rotate em graus (x,y,z) em torno do pivo do osso, scale. Ex.: {\"cape\": {\"offset\": [0,1,0.5]}}; o que o mob segura (main_hand, off_hand) aceita o mesmo. hide_layers / solo_layers: camadas do modelo do pack por numero (o L0, L1... de layers: no dump); layer_alpha: {\"2\": 0.3} multiplica o alfa da camada. hide_attached: [\"main_hand\", \"main_hand:1\"] camadas do que o mob segura/veste (slot ou slot:numero); attached_alpha: {\"main_hand:1\": 0.3}; bind_bones: {\"item\": \"bodyq\"} (ou {\"main_hand:item\": \"bodyq\"}) prende o osso do anexo em outro osso do mob, no lugar da ligacao do pack.",
+  "_help": "Salvar recarrega no jogo (1 s). hide: sufixos de textura que nao desenham. hide_bones: ossos (parte do nome) que nao desenham (ex.: hat, jacket, sleeve, pants); hide_geometry: modelos (parte do id) que nao desenham. push_bones: {\"osso\": pixels} move o osso (parte do nome) para frente (negativo: para tras), um valor por osso. rotate_bones: {\"osso\": [x,y,z]} gira o osso (graus) alem da animacao; attachables_drive_holder: false deixa as animacoes do attachable fora dos ossos do dono (braco); fp_bone_signs: {\"body\": [1,-1,1]} inverte o giro do osso (parte do nome) so em primeira pessoa; scale_bones: {\"mooshroom:head\": [x,y,z]} multiplica a escala do osso (nome exato) dos mobs cujo id contem o que vem antes de ':'; move_bones: {\"osso\": [x,y,z]} move o osso (pixels), eixos do pack; o log lista os ossos de cada modelo (bedrock-debug: bones). dump: ids (parte) logados 1x/s; dump_vars: variaveis v.* logadas junto; dump_bones: ossos (parte do nome) cuja pose entra no dump. held_rotate_bones / held_move_bones: como rotate_bones/move_bones, para ossos do que o mob segura/veste; first_person_rotate_bones / first_person_move_bones: o mesmo so na mao em primeira pessoa (ex.: {\"7d2e6\": [0,90,0]} gira a chama da tocha); first_person_glow_fixed: true para de virar os brilhos do item em primeira pessoa para a camera. held_anchor: 'auto' (modelo desenhado perto da mao do jogador, cubos a partir de 12 px: frame; senao origem do modelo na mao), 'origin', 'pivot' ou 'frame'. materials: flags forcadas por nome do material ('*' = todos); true liga, false desliga. bone_materials: as mesmas flags, por osso (parte do nome, '*' = todos), ex.: {\"2dh923\": {\"blend\": true, \"double_sided\": false}}. solo_bones: so esses ossos desenham. layer_tint: {\"cmj\": [1,1,1,0.5]} multiplica cor e alfa da camada cuja textura termina assim. bone_tint: o mesmo, so para o osso (parte do nome), ex.: {\"2dh923\": [1,1,1,0.5]}. solid: {\"cmj\": true} usa a copia opaca (false: a textura com alfa). dump_every: ticks entre linhas do dump (20; 1 segue um tremor quadro a quadro). dump_draw: com dump no mob, loga cada camada desenhada (material, flags por grupo de ossos, tint) a cada 5 s. queries: query.x fixa em um numero para todo mob. worn: move o que o mob veste por slot (head, chest, legs, feet, body, cape, elytra): offset em pixels (x direita, y baixo, z costas), rotate em graus (x,y,z) em torno do pivo do osso, scale. Ex.: {\"cape\": {\"offset\": [0,1,0.5]}}; o que o mob segura (main_hand, off_hand) aceita o mesmo. hide_layers / solo_layers: camadas do modelo do pack por numero (o L0, L1... de layers: no dump); layer_alpha: {\"2\": 0.3} multiplica o alfa da camada. hide_attached: [\"main_hand\", \"main_hand:1\"] camadas do que o mob segura/veste (slot ou slot:numero); attached_alpha: {\"main_hand:1\": 0.3}; bind_bones: {\"item\": \"bodyq\"} (ou {\"main_hand:item\": \"bodyq\"}) prende o osso do anexo em outro osso do mob, no lugar da ligacao do pack.",
   "debug": true,
   "hide": [],
   "hide_bones": [],
   "hide_geometry": [],
   "push_bones": {},
   "rotate_bones": {},
+  "scale_bones": {},
+  "fp_bone_signs": {},
+  "attachables_drive_holder": null,
   "move_bones": {},
   "dump": [],
   "dump_vars": [],

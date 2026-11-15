@@ -91,6 +91,7 @@ impl Game<'_> {
         if bedrock.is_empty() {
             // No pack: the game draws all its own particles again.
             horizon_client_render::bedrock_particles::clear();
+            horizon_client::mobs::bedrock::clear_pack_rules();
             return;
         }
         bedrock.take_game_particles();
