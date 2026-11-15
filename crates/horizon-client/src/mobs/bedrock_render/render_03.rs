@@ -344,6 +344,11 @@ fn feet_from_camera(m: &Mob, base: glam::Mat4) -> [f32; 3] {
     (feet + glam::Vec3::new(0.0, eyes, 0.0)).to_array()
 }
 
+/// A glide's pitch is the game's: the pack's own `root` turn by the look pitch is dropped.
+fn drops_glide_turn(m: &Mob) -> bool {
+    m.extra.fall_flying && !m.extra.auto_spin_attack && super::bedrock::pack_glides(m.id)
+}
+
 fn render_bedrock(
     m: &Mob,
     alpha: f32,
@@ -442,6 +447,12 @@ fn render_bedrock(
             if holder.is_empty() && !frame.attached.is_empty() {
                 poses.reset(&layer.built.part);
                 super::bedrock::apply_pose(&frame.pose, &layer.built.names, &mut poses);
+                // The skeleton the worn pieces follow is the one the body draws with: the glide's
+                // `root` turn dropped as below (kept here, it swung the helmet off the head to the
+                // hips on an elytra, the body drawn without it).
+                if drops_glide_turn(m) && layer.built.names.iter().any(|n| n == "root") {
+                    poses.get("root")[3] = 0.0;
+                }
                 holder_matrices(&layer.built.part, &poses, &mut holder);
             }
             continue;
@@ -496,11 +507,7 @@ fn render_bedrock(
                 // A glide's pitch is the game's (`-90 - pitch`, upright looking straight up): the
                 // pack's own `root` turn by the look pitch would count it twice, lying the body
                 // back down (or upside down) on a climb.
-                if m.extra.fall_flying
-                    && !m.extra.auto_spin_attack
-                    && name == "root"
-                    && super::bedrock::pack_glides(m.id)
-                {
+                if name == "root" && drops_glide_turn(m) {
                     poses.get(name)[3] = 0.0;
                 }
                 // `scale_bones`: a bone's size, by hand.
@@ -527,6 +534,44 @@ fn render_bedrock(
             if gi == 0 && (!frame.attached.is_empty() || avatar(m)) {
                 let mut here = std::collections::HashMap::new();
                 holder_matrices(&layer.built.part, &poses, &mut here);
+                // `bedrock-holder`: where each layer's skeleton puts the bones worn pieces follow
+                // (debug: a glide's helmet left the head the skin drew).
+                if super::bedrock_debug::settings().dumps(&m.kind.id)
+                    && once_a_second(format!("{}/holder/{layer_no}", m.id))
+                {
+                    let at = |b: &str| {
+                        here.get(b).map_or(String::from("-"), |(now, _): &(glam::Mat4, glam::Mat4)| {
+                            let p = now.w_axis.truncate() * 16.0;
+                            format!("[{:.1},{:.1},{:.1}]", p.x, p.y, p.z)
+                        })
+                    };
+                    let mut local = |b: &str| {
+                        if layer.built.names.iter().any(|n| n == b) {
+                            format!("{:.1?}", *poses.get(b))
+                        } else {
+                            String::new()
+                        }
+                    };
+                    let (lr, lw, lb, lh, ll) =
+                        (local("root"), local("waist"), local("body"), local("head"), local("leftleg"));
+                    log::info!(
+                        "bedrock-holder {}#{} L{layer_no} {} gliding={}: root {} {} waist {} {} body {} {} head {} {} leftleg {} {}",
+                        m.kind.id,
+                        m.id,
+                        layer.layer.geometry,
+                        m.extra.fall_flying,
+                        at("root"),
+                        lr,
+                        at("waist"),
+                        lw,
+                        at("body"),
+                        lb,
+                        at("head"),
+                        lh,
+                        at("leftleg"),
+                        ll,
+                    );
+                }
                 for (name, m) in here {
                     holder.entry(name).or_insert(m);
                 }
@@ -1366,7 +1411,19 @@ fn render_bedrock(
                 // an eye, is all glow.
                 // A piece whose glowing bones the pack gives a material of their own (a redstone
                 // torch's lit head, a torch's flame) lights them whole.
+                // One that adds and reads its alpha as the glow (`entity_emissive` with `One`,
+                // `One`: Actions & Stuff's enchantment outline) adds its texels lit by the world
+                // as far as they are opaque and glowing as far as they are not (the `_glow`
+                // sprite, drawn again after it): its outline is dark red at night in Bedrock, at
+                // full light here before.
+                // Not one added by its alpha (`SourceAlpha`, `One`: the pulsing halo), whose alpha
+                // is coverage: its inverted `_glow` would fill the whole quad.
+                let lit_glow = flags.emissive
+                    && flags.emissive_alpha
+                    && flags.additive
+                    && !flags.additive_alpha;
                 let glows = flags.emissive
+                    && !lit_glow
                     && (!flags.emissive_alpha
                         || flags.additive
                         || groups.len() > 1
@@ -1553,6 +1610,26 @@ fn render_bedrock(
                     !behind && layer.layer.color[3] < 1.0,
                 );
                 super::bedrock_stencil::hand_over(&stencil_flags, out, start);
+                // `lit_glow`: what of it glows (the `_glow` sprite, alpha 255 - a), at full light,
+                // over the lit draw, on the very same vertices.
+                if lit_glow
+                    && out.len() > start
+                    && let Some(glow_uv) = atlas(&format!("{}_glow", layer.texture))
+                {
+                    let from = out.len();
+                    let (w, h) = ((uv[2] - uv[0]).max(f32::EPSILON), (uv[3] - uv[1]).max(f32::EPSILON));
+                    let copied: Vec<Vertex> = out[start..from].to_vec();
+                    out.extend(copied.into_iter().map(|mut v| {
+                        let (fu, fv) = ((v.uv[0] - uv[0]) / w, (v.uv[1] - uv[1]) / h);
+                        v.uv = [
+                            glow_uv[0] + fu * (glow_uv[2] - glow_uv[0]),
+                            glow_uv[1] + fv * (glow_uv[3] - glow_uv[1]),
+                        ];
+                        v.light = FULL_BRIGHT;
+                        v
+                    }));
+                    flatten_lighting(&mut out[from..]);
+                }
                 // Leather's faint texels (alpha 1) are the stitching and highlights the dye does not
                 // reach: drawn again over the dyed piece in the texture's own colours.
                 if flags.armor_dye

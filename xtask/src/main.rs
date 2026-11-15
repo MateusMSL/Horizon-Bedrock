@@ -18,13 +18,14 @@
 //! and `horizon.icns`. `docs/media/brand/README.md` lists what goes where.
 
 mod bedrock_build;
+mod launcher_build;
 mod mod_api;
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-const USAGE: &str = "usage: cargo run -p xtask -- package BINARY OUTDIR | package-server ENGINE OUTDIR | tokens | icons | bedrock-build";
+const USAGE: &str = "usage: cargo run -p xtask -- package BINARY OUTDIR | package-server ENGINE OUTDIR | tokens | icons | bedrock-build | launcher-build";
 
 /// What the release folder takes from the repository at HEAD, as `git archive` writes it.
 const ARCHIVED: [&str; 5] = [
@@ -55,6 +56,7 @@ fn main() -> ExitCode {
         [task] if task == "tokens" => tokens(),
         [task] if task == "icons" => icons(),
         [task] if task == "bedrock-build" => bedrock_build::run(),
+        [task] if task == "launcher-build" => launcher_build::run(),
         _ => Err(USAGE.to_string()),
     };
     match result {

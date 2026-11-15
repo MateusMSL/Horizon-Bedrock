@@ -1089,6 +1089,9 @@ pub struct StandPose {
     pub pose: [[f32; 3]; 6],
     pub arms: bool,
     pub base_plate: bool,
+    /// Bedrock's `query.hurt_direction` of a stand: 0 until hit, then 1 and -1 by turns, a hit
+    /// each (a pack's punched props play on the change).
+    pub hurt_direction: f32,
 }
 
 /// Species-specific persistent state (variants, colours, taming, ageing...).

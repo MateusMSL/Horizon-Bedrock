@@ -2209,6 +2209,36 @@ impl ArmorStand {
     pub const POSE_KEYS: [&'static str; 6] =
         ["Head", "Body", "LeftArm", "RightArm", "LeftLeg", "RightLeg"];
     /// `ArmorStand.DEFAULT_*_POSE`.
+    /// Bedrock's 13 armour stand poses (`variable.armor_stand.pose_index`, vanilla's
+    /// `animation.armor_stand.*_pose` in `controller.animation.armor_stand.pose` order: default,
+    /// none, solemn, athena, brandish, honor, entertain, salute, riposte, zombie, cancan a and b,
+    /// hero), in this struct's `pose` order and degrees: the vanilla values are the game's own
+    /// (its default is `DEFAULT_POSE`), so a posed stand keeps its pose in the world and shows
+    /// it to a Java player too.
+    pub const BEDROCK_POSES: [[[f32; 3]; 6]; 13] = [
+        [[0.0; 3], [0.0; 3], [-10.0, 0.0, -10.0], [-15.0, 0.0, 10.0], [-1.0, 0.0, -1.0], [1.0, 0.0, 1.0]],
+        [[0.0; 3]; 6],
+        [[15.0, 0.0, 0.0], [0.0, 0.0, 2.0], [-30.0, 15.0, 15.0], [-60.0, -20.0, -10.0], [-1.0, 0.0, -1.0], [1.0, 0.0, 1.0]],
+        [[-5.0, 0.0, 0.0], [0.0, 0.0, 2.0], [10.0, 0.0, -5.0], [-60.0, 20.0, -10.0], [-3.0, -3.0, -3.0], [3.0, 3.0, 3.0]],
+        [[-15.0, 0.0, 0.0], [0.0, 0.0, -2.0], [20.0, 0.0, -10.0], [-110.0, 50.0, 0.0], [5.0, -3.0, -3.0], [-5.0, 3.0, 3.0]],
+        [[-15.0, 0.0, 0.0], [0.0; 3], [-110.0, 35.0, 0.0], [-110.0, -35.0, 0.0], [5.0, -3.0, -3.0], [-5.0, 3.0, 3.0]],
+        [[-15.0, 0.0, 0.0], [0.0; 3], [-110.0, -35.0, 0.0], [-110.0, 35.0, 0.0], [5.0, -3.0, -3.0], [-5.0, 3.0, 3.0]],
+        [[0.0; 3], [0.0; 3], [10.0, 0.0, -5.0], [-70.0, -40.0, 0.0], [-1.0, 0.0, -1.0], [1.0, 0.0, 1.0]],
+        [[16.0, 20.0, 0.0], [0.0; 3], [4.0, 8.0, 237.0], [246.0, 0.0, 89.0], [-14.0, -18.0, -16.0], [8.0, 20.0, 4.0]],
+        [[-10.0, 0.0, -5.0], [0.0; 3], [-105.0, 0.0, 0.0], [-100.0, 0.0, 0.0], [7.0, 0.0, 0.0], [-46.0, 0.0, 0.0]],
+        [[-5.0, 18.0, 0.0], [0.0, 22.0, 0.0], [8.0, 0.0, -114.0], [0.0, 84.0, 111.0], [-111.0, 55.0, 0.0], [0.0, 23.0, -13.0]],
+        [[-10.0, -20.0, 0.0], [0.0, -18.0, 0.0], [0.0, 0.0, -112.0], [8.0, 90.0, 111.0], [0.0, 0.0, 13.0], [-119.0, -42.0, 0.0]],
+        [[-4.0, 67.0, 0.0], [0.0, 8.0, 0.0], [16.0, 32.0, -8.0], [-99.0, 63.0, 0.0], [0.0, -75.0, -8.0], [4.0, 63.0, 8.0]],
+    ];
+    /// Which of `BEDROCK_POSES` `pose` is, if any.
+    pub fn bedrock_pose_index(pose: &[[f32; 3]; 6]) -> Option<usize> {
+        Self::BEDROCK_POSES.iter().position(|p| {
+            p.iter()
+                .flatten()
+                .zip(pose.iter().flatten())
+                .all(|(a, b)| (a - b).abs() < 0.01)
+        })
+    }
     pub const DEFAULT_POSE: [[f32; 3]; 6] = [
         [0.0, 0.0, 0.0],
         [0.0, 0.0, 0.0],

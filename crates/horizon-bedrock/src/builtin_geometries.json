@@ -834,18 +834,27 @@
       },
       "bones": [
         {
-          "name": "leftwing",
+          "name": "body",
           "pivot": [
-            5,
-            24,
-            0
+            0.0,
+            24.0,
+            0.0
+          ]
+        },
+        {
+          "name": "left_wing",
+          "pivot": [
+            0.0,
+            24.0,
+            0.0
           ],
+          "parent": "body",
           "cubes": [
             {
               "origin": [
-                -5,
-                4,
-                0
+                -10.0,
+                0.0,
+                0.0
               ],
               "size": [
                 10,
@@ -855,24 +864,25 @@
               "uv": [
                 22,
                 0
-              ],
-              "inflate": 1.0
+              ]
             }
           ]
         },
         {
-          "name": "rightwing",
+          "name": "right_wing",
           "pivot": [
-            -5,
-            24,
-            0
+            0.0,
+            24.0,
+            0.0
           ],
+          "parent": "body",
+          "mirror": true,
           "cubes": [
             {
               "origin": [
-                -5,
-                4,
-                0
+                0.0,
+                0.0,
+                0.0
               ],
               "size": [
                 10,
@@ -882,9 +892,7 @@
               "uv": [
                 22,
                 0
-              ],
-              "inflate": 1.0,
-              "mirror": true
+              ]
             }
           ]
         }

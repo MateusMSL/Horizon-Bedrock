@@ -623,6 +623,23 @@ impl Game<'_> {
             self.swing_arm();
             return true;
         }
+        // Bedrock's crouch and use on a stand: its next pose (`armor_stand.pose_index`), with
+        // whatever is in the hand, when a pack draws the stand.
+        if self.keys.held(horizon_client::actions::Action::Sneak)
+            && self.pack_draws("minecraft:armor_stand")
+        {
+            let stand = &mut self.armor_stands[i];
+            let poses = horizon_client::entities::ArmorStand::BEDROCK_POSES;
+            let next = horizon_client::entities::ArmorStand::bedrock_pose_index(&stand.pose)
+                .map_or(1, |k| (k + 1) % poses.len());
+            stand.pose = poses[next];
+            let p = stand.position;
+            self.world
+                .modified
+                .insert(((p.x.floor() as i32) >> 4, (p.z.floor() as i32) >> 4));
+            self.swing_arm();
+            return true;
+        }
         let a = &self.armor_stands[i];
         let slot = match &held {
             Some(h) => {
@@ -1520,13 +1537,16 @@ impl Game<'_> {
         out: &mut Vec<Vertex>,
     ) -> bool {
         let at = super::entity_culling::at(a.render_position(alpha));
+        // Bedrock's stand has no wobble of the game's: its pack animates the hit, on
+        // `query.hurt_direction`, which turns over at each hit.
+        let _ = wobble;
+        let hurt_direction = stand_hurt_direction(a);
         let proxy = super::pack_proxy::Proxy {
             entity: "minecraft:armor_stand",
             id: a.id,
             at,
-            // `setupRotations`' wobble after a hit turns the whole stand.
-            yaw: a.render_yaw(alpha as f32) - wobble,
-            head_yaw: a.render_yaw(alpha as f32) - wobble,
+            yaw: a.render_yaw(alpha as f32),
+            head_yaw: a.render_yaw(alpha as f32),
             pitch: 0.0,
             base: None,
             packed,
@@ -1553,6 +1573,7 @@ impl Game<'_> {
                     // draws it.
                     arms: true,
                     base_plate: !a.no_base_plate,
+                    hurt_direction,
                 };
                 if m.extra.stand_pose.as_deref() != Some(&stand) {
                     m.extra.stand_pose = Some(Box::new(stand));
@@ -1809,6 +1830,25 @@ impl Game<'_> {
 /// `equippable` slot is `equip` (`SmithingScreen.updateArmorStandPreview`):
 /// worn in a head, chest, legs or feet slot, else (no `equippable`, or any
 /// other slot: main hand, off hand, body, saddle) held in the left hand.
+/// `query.hurt_direction` of stand `a` for a pack: 0 until it is hit, then 1 and -1 by turns,
+/// each hit (`last_hit` moving) turning it over.
+fn stand_hurt_direction(a: &ArmorStand) -> f32 {
+    static HITS: std::sync::Mutex<Option<HashMap<u32, (i64, u32)>>> = std::sync::Mutex::new(None);
+    let mut hits = HITS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let map = hits.get_or_insert_with(HashMap::new);
+    if map.len() > 4096 {
+        map.clear();
+    }
+    let entry = map.entry(a.id).or_insert((a.last_hit, 0));
+    if entry.0 != a.last_hit {
+        *entry = (a.last_hit, entry.1 + 1);
+    }
+    match entry.1 {
+        0 => 0.0,
+        n if n % 2 == 1 => 1.0,
+        _ => -1.0,
+    }
+}
 fn preview_slot(equip: Option<&str>) -> usize {
     match equip {
         Some("feet") => 2,

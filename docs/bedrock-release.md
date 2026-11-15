@@ -26,3 +26,21 @@ A versão importada é uma cópia de um Nightly instalado com o programa trocado
 ## Add-ons
 
 O jogo lê `addons/` da pasta da versão importada. Packs de terceiros (Actions & Stuff) não vão no zip; o `LEIA-ME.md` explica onde colocar.
+
+# Launcher do fork (`horizon-launcher.exe`)
+
+## Gerar
+
+```
+cargo run -p xtask -- launcher-build
+```
+
+No IntelliJ: configuração **Horizon - Launcher release**.
+
+A tarefa (`xtask/src/launcher_build.rs`) compila `launcher/` com o perfil `release` (`--locked`), igual a `.github/workflows/launcher.yml`, e copia para `release/horizon-launcher/horizon-launcher.exe`.
+
+## Embutido na compilação
+
+- `HORIZON_LAUNCHER_NO_SELF_UPDATE` (sempre): o launcher do fork não se troca pelo release do upstream (`self_update_allowed` em `launcher/src/backend.rs` lê também em tempo de compilação).
+- `HORIZON_MSA_CLIENT_ID`: client ID do app Azure **do fork** (docs/forking.md proíbe o do Horizon). Sem ele: "sign-in não configurado". Na configuração do IntelliJ, preencher a variável; também vale em tempo de execução.
+- `HORIZON_CURSEFORGE_API_KEY`, `HORIZON_LAUNCHER_VERSION`, `HORIZON_LAUNCHER_TAG`: repassados quando definidos (opcionais).

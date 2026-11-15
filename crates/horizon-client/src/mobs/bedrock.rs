@@ -807,7 +807,7 @@ fn common_query(name: &str, args: &[Value]) -> Value {
 
 /// The engine's build, logged once with `HORIZON_BEDROCK_DEBUG`: tells whether the game runs the
 /// files the last overlay carried.
-pub const ENGINE_BUILD: &str = "v267-no-attachable-drive";
+pub const ENGINE_BUILD: &str = "v275-stand-hits";
 
 /// `HORIZON_BEDROCK_DUMP=skeleton,creeper`: the kinds (by part of the id) whose state is logged
 /// once a second while within twelve blocks of the camera.
@@ -1226,6 +1226,11 @@ impl Host for MobHost<'_> {
             ("glow_alpha", Value::Num(0.0)),
             ("trim_path", Value::Num(0.0)),
         ];
+        // A stand's Bedrock pose (`StandPose`: one of `BEDROCK_POSES`, else the default).
+        if let Some(stand) = m.extra.stand_pose.as_deref() {
+            let index = crate::entities::ArmorStand::bedrock_pose_index(&stand.pose).unwrap_or(0);
+            vars.push(("armor_stand.pose_index", Value::Num(index as f32)));
+        }
         // A dragon's flight, ticks back.
         if let Some(history) = &m.extra.history {
             for (names, [y, yaw]) in HISTORY_NAMES.iter().zip(history.iter()) {
@@ -1605,6 +1610,9 @@ impl Host for MobHost<'_> {
             "is_stunned" => {
                 Value::bool(m.species() == super::Species::Ravager && m.extra.counter > 0)
             }
+            "hurt_direction" if m.extra.stand_pose.is_some() => Value::Num(
+                m.extra.stand_pose.as_deref().map_or(0.0, |s| s.hurt_direction),
+            ),
             "hurt_direction" | "head_roll_angle" | "sleep_rotation" | "roll_counter"
             | "sneeze_counter" | "unhappy_counter" | "shake_angle" | "shake_time" => {
                 Value::Num(0.0)
@@ -2093,8 +2101,11 @@ pub(super) fn pose_stand(pose: &mut horizon_bedrock::animation::Pose, stand: &su
         &["leftleg"],
         &["rightleg"],
     ];
+    // One of Bedrock's poses is the pack's to draw (`armor_stand.pose_index`): only a pose of
+    // the game's own (a command's) turns the bones on top.
+    let preset = crate::entities::ArmorStand::bedrock_pose_index(&stand.pose).is_some();
     for ((names, r), d) in BONES.iter().zip(stand.pose).zip(DEFAULT) {
-        if r == d {
+        if preset || r == d {
             continue;
         }
         for name in *names {
@@ -2265,6 +2276,10 @@ pub struct BedrockMobs {
     bindings: Mutex<HashMap<String, Arc<Vec<(String, horizon_bedrock::molang::Program)>>>>,
 }
 
+/// Bedrock's glint colour, which the `GLINT` shader multiplies the glint texture by (the
+/// vanilla purple, 0.5 / 0.25 / 0.8).
+const GLINT_TINT: [f64; 3] = [0.5, 0.25, 0.8];
+
 fn read_glint_colour(path: &Path) -> Option<u32> {
     let mut decoder = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).ok()?));
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
@@ -2279,7 +2294,10 @@ fn read_glint_colour(path: &Path) -> Option<u32> {
     let mut weight = 0.0f64;
     for px in buf[..info.buffer_size()].chunks_exact(channels) {
         let a = if channels == 4 { f64::from(px[3]) / 255.0 } else { 1.0 };
-        let rgb = [0, 1, 2].map(|i| f64::from(px[i]) / 255.0);
+        // The `GLINT` shader multiplies its texture by the glint colour: Actions & Stuff's
+        // glint textures are stored divided by it (its magenta one reads olive green, its
+        // white one green until multiplied).
+        let rgb = [0, 1, 2].map(|i| f64::from(px[i]) / 255.0 * GLINT_TINT[i]);
         let w = rgb.iter().copied().fold(0.0, f64::max) * a;
         for i in 0..3 {
             sum[i] += rgb[i] * w;
@@ -3192,26 +3210,10 @@ impl BedrockMobs {
                     }
                 }
             }
-            // The vanilla elytra opens in the game's own code (`ElytraAnimationState`: flight,
-            // crouching, rest), not in an animation: the vanilla `leftwing`/`rightwing` follow
-            // those angles, whatever the pack's animations leave them at (a pack that animates
-            // only its own wing bones leaves them closed in flight; the vanilla crouch pose
-            // barely opens them).
-            let mut pose = frame.pose;
-            if *slot == "torso" {
-                let angles = m.extra.elytra.angles(alpha).map(f32::to_degrees);
-                for (bone, side) in [("leftwing", 1.0_f32), ("rightwing", -1.0)] {
-                    let has_bone = layers.iter().any(|d| {
-                        self.bundle.geometries.get(&d.layer.geometry).is_some_and(|g| {
-                            g.bones.iter().any(|b| b.name.eq_ignore_ascii_case(bone))
-                        })
-                    });
-                    if has_bone {
-                        pose.bones.entry(bone.to_owned()).or_default().rotation =
-                            [angles[0], side * angles[1], side * angles[2]];
-                    }
-                }
-            }
+            // The elytra's wings are the pack's (and vanilla's `animation.elytra.*`, built in):
+            // Bedrock opens them by animation, on `left_wing`/`right_wing` of `geometry.elytra`,
+            // the same bones the pack's own glint and outline models carry.
+            let pose = frame.pose;
             if super::bedrock_debug::settings().dumps(&m.kind.id) {
                 let secs = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)

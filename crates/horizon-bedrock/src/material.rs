@@ -18,6 +18,9 @@ pub struct MaterialFlags {
     /// The texture's alpha is how much a texel glows (`entity_emissive*`, `EMISSIVE`), not how
     /// see-through it is: the surface itself is opaque.
     pub emissive_alpha: bool,
+    /// Additive weighted by the texture's alpha (`SourceAlpha`, `One`): the alpha is coverage
+    /// (a fading halo), not how lit a texel is.
+    pub additive_alpha: bool,
     pub double_sided: bool,
     /// Scrolls the texture as the render controller's `uv_anim` says.
     pub uv_anim: bool,
@@ -329,6 +332,7 @@ impl Materials {
         {
             f.additive = true;
             f.blend = true;
+            f.additive_alpha = src == Some("SourceAlpha");
         }
         f
     }
@@ -362,6 +366,7 @@ fn vanilla(name: &str) -> MaterialFlags {
         additive: has("additive"),
         emissive: has("emissive") || has("eyes") || has("spider_eyes"),
         emissive_alpha: has("emissive"),
+        additive_alpha: false,
         energy_swirl: has("charged_creeper") || has("wither_armor") || has("energy_swirl"),
         uv_anim: has("charged_creeper")
             || has("creeper_armor")

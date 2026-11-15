@@ -77,3 +77,26 @@ Junta as listas pedidas na conversa (lista de tarefas da sessão, notas "Anotado
 - [ ] Ferramentas de debug sem recompilar (em andamento por partes no `bedrock-debug.json`).
 - [ ] Migrar o add-on para a base atual do Horizon com ganchos mínimos.
 - [ ] Lança na mão toca o som de estocada sozinha (sem atacar), A&S.
+
+## Do checklist A&S (`bedrock-as-checklist.md`, anotado no Notion 2026-11-15)
+
+- [x] Voando (elytra): armadura desconecta do corpo (v271, validado).
+- [x] Brilho pulsante da armadura sempre verde (v272) e glint da elytra fora da asa (v273), validados.
+- [ ] Sem animação de subir escada.
+- [ ] Vara de pesca: sem animação de lançar/recolher; bug visual ao lançar.
+- [ ] Mapa em 1ª pessoa: sem modelo e sem animação (3ª pessoa ok).
+- [ ] Animações de morte: nenhuma, jogador e mobs (seção 1.3 inteira), poof e efeitos de morte (1.4).
+- [ ] Velocidade do ataque com Haste / Mining Fatigue.
+- [ ] Holstered Weapons: nada aparece nas costas/cinto.
+- [ ] Creeper carregado e wither: efeitos a melhorar.
+- [ ] Lobos uivam fora da lua cheia.
+- [ ] Armadura segurada sem encantamento.
+- [ ] Bússola de recuperação gira infinitamente, não aponta a morte.
+- [ ] Maçã dourada encantada: textura bugada em 1ª pessoa.
+- [?] Suporte de armadura: poses não mudam (Sneak + Usar). v274, aguardando validação.
+- [ ] Camas 3D do pack não aplicadas.
+- [ ] Arreio de Happy Ghast na mão mostra a textura do ghast em vez do item.
+- [ ] Vitória-régia: flores e variação de textura ausentes.
+- [ ] Semente jogada sem animação/partícula de plantio.
+- [ ] Almofada: sempre a mesma animação de sentar (3 aleatórias).
+- [?] Props interativos que animam ao socar (v275, `hurt_direction` alternando por golpe), aguardando validação.
