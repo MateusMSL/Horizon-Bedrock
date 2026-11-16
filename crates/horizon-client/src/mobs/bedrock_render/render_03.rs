@@ -366,9 +366,12 @@ fn render_bedrock(
         return false;
     }
     let base = pack_model_base(m, alpha, base);
-    let Some(frame) = bedrock.frame(m, alpha, feet_from_camera(m, base)) else {
+    let Some(frame) = horizon_client_render::spans::time("bd_frame", || {
+        bedrock.frame(m, alpha, feet_from_camera(m, base))
+    }) else {
         return false;
     };
+    let _mesh_span = horizon_client_render::spans::guard("bd_mesh");
     // A pack whose own animation lays the body down on death replaces the game's tilt: the
     // flip `base_transform` turned about the entity's feet is turned back, in the space it was
     // made in (the frame that follows it in the chain, which holds the model's 1.501 drop).

@@ -706,7 +706,34 @@ fn stamp(path: &Path) -> Option<(SystemTime, u64)> {
 }
 
 /// The settings now in force; the file is looked at once a second.
+///
+/// Each thread keeps the last answer and asks again every [`RECHECK`] calls: the Bedrock
+/// engine asks for each query and bone of each mob on every frame, and the shared state's lock
+/// and clock read were a sixth of an Actions & Stuff mob's animation time.
 pub fn settings() -> Arc<Settings> {
+    thread_local! {
+        static LOCAL: std::cell::RefCell<(Option<Arc<Settings>>, u32)> =
+            const { std::cell::RefCell::new((None, 0)) };
+    }
+    LOCAL.with(|local| {
+        let mut local = local.borrow_mut();
+        let (kept, calls) = &mut *local;
+        *calls = calls.wrapping_add(1);
+        match kept {
+            Some(s) if !calls.is_multiple_of(RECHECK) => s.clone(),
+            _ => {
+                let s = shared_settings();
+                *kept = Some(s.clone());
+                s
+            }
+        }
+    })
+}
+
+/// How many calls a thread answers from its own copy before it looks at the shared one.
+const RECHECK: u32 = 1024;
+
+fn shared_settings() -> Arc<Settings> {
     let mut guard = STATE.lock().unwrap_or_else(PoisonError::into_inner);
     let first = guard.is_none();
     let st = guard.get_or_insert_with(|| State {

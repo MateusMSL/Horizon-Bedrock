@@ -151,6 +151,10 @@ struct Def {
 #[derive(Debug, Default)]
 pub struct Materials {
     defs: HashMap<String, Def>,
+    /// [`Materials::flags`] by the name asked: a material's flags only change with the files
+    /// added, and the meshing asks for each bone of each mob on every frame (a sixth of an
+    /// Actions & Stuff mob's drawing went to walking the parents again).
+    flags: std::sync::RwLock<HashMap<String, MaterialFlags>>,
 }
 
 fn strings(v: Option<&Value>) -> Vec<String> {
@@ -215,10 +219,31 @@ impl Materials {
             };
             self.defs.insert(name.to_ascii_lowercase(), def);
         }
+        self.flags
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
     }
 
     /// Flags of the material `name` (a pack material or a vanilla one).
     pub fn flags(&self, name: &str) -> MaterialFlags {
+        if let Some(f) = self
+            .flags
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(name)
+        {
+            return *f;
+        }
+        let f = self.resolve(name);
+        self.flags
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(name.to_owned(), f);
+        f
+    }
+
+    fn resolve(&self, name: &str) -> MaterialFlags {
         let mut chain = Vec::new();
         let mut seen = HashSet::new();
         let mut cur = name.to_ascii_lowercase();
@@ -400,6 +425,16 @@ fn vanilla(name: &str) -> MaterialFlags {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_later_file_changes_the_flags_already_asked_for() {
+        let mut m = Materials::default();
+        m.add_file(&serde_json::json!({"materials": {"glass:entity": {}}}));
+        assert!(!m.flags("glass").blend);
+        // Another pack (or file) redefines it: the answer given before is not kept.
+        m.add_file(&serde_json::json!({"materials": {"glass:entity": {"+states": ["Blending"]}}}));
+        assert!(m.flags("glass").blend);
+    }
+
     #[test]
     fn a_change_color_material_reads_alpha_as_a_mask() {
         let mut m = Materials::default();

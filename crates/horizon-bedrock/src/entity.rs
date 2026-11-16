@@ -997,6 +997,9 @@ pub struct Instance {
     /// For an attachable: how the holder's bone it hangs from is turned from the holder
     /// (`resolve_entity_rotations_under`).
     pub root_rotation: Option<Mat3>,
+    /// By geometry, the models of its flat sprites this entity's textures draw (`layers`):
+    /// the same every frame, they were two strings made and looked up per texture per frame.
+    mesh_layers: HashMap<String, Vec<String>>,
 }
 
 fn run(host: &mut dyn Host, vars: &mut Vars, rng: &mut Rng, p: &Program) -> Value {
@@ -1028,6 +1031,7 @@ impl Instance {
             place: None,
             camera: None,
             root_rotation: None,
+            mesh_layers: HashMap::new(),
         }
     }
 
@@ -1231,11 +1235,18 @@ impl Instance {
             }
         }
         if let (Some(models), Some(layer)) = (assets.geometries, frame.layers.first())
+            && models.contains_key(&layer.geometry.to_ascii_lowercase())
+            && self.main_geometry.as_deref() != Some(layer.geometry.as_str())
+        {
+            self.main_geometry = Some(layer.geometry.clone());
+        }
+        // Where each bone is, for the queries that ask (`WithBones`): only once a pack has asked
+        // (`uses_bones`). Every bone walked up its parents twice on every frame of every mob,
+        // a tenth of an Actions & Stuff mob's animation time, for packs that never ask.
+        if self.uses_bones
+            && let (Some(models), Some(layer)) = (assets.geometries, frame.layers.first())
             && let Some(g) = models.get(&layer.geometry.to_ascii_lowercase())
         {
-            if self.main_geometry.as_deref() != Some(layer.geometry.as_str()) {
-                self.main_geometry = Some(layer.geometry.clone());
-            }
             let (origins, pivots, rotations) = bone_origins(g, &frame.pose);
             // What `pre_animation` reads of the last frame is the mean of the last two: a
             // pack that lifts a bone by where another one was (`root` by the legs' height)
@@ -1379,21 +1390,26 @@ impl Instance {
         // scrolling glint texture, the outline's the sword's shape in the outline colour; drawn
         // with the sword's own texture they were a second plain sword over the glinting one.
         if let (Some(models), Some(first)) = (models, out.get(start).cloned()) {
-            for (key, path) in &def.textures {
-                let fitted = crate::geometry::fitted_mesh_id(geometry, key, path);
-                let id = if models.contains_key(&fitted) {
-                    fitted
-                } else {
-                    crate::geometry::mesh_id(geometry, key)
-                };
-                if models.contains_key(&id) {
-                    let _ = path;
-                    out.push(Layer {
-                        geometry: id,
-                        secondary: false,
-                        ..first.clone()
-                    });
-                }
+            let ids = self.mesh_layers.entry(geometry.clone()).or_insert_with(|| {
+                def.textures
+                    .iter()
+                    .filter_map(|(key, path)| {
+                        let fitted = crate::geometry::fitted_mesh_id(geometry, key, path);
+                        let id = if models.contains_key(&fitted) {
+                            fitted
+                        } else {
+                            crate::geometry::mesh_id(geometry, key)
+                        };
+                        models.contains_key(&id).then_some(id)
+                    })
+                    .collect()
+            });
+            for id in ids.iter() {
+                out.push(Layer {
+                    geometry: id.clone(),
+                    secondary: false,
+                    ..first.clone()
+                });
             }
         }
     }
@@ -1477,6 +1493,62 @@ mod tests {
                 "speed" => Value::Num(self.speed),
                 _ => Value::Null,
             }
+        }
+    }
+
+    /// A pack that asks where a bone is is told, from the frame after it first asked on: the
+    /// bones' places are kept only for packs that ask.
+    #[test]
+    fn a_pack_asking_for_a_bone_pivot_is_told_it() {
+        let def = ClientEntity::parse(
+            &jsonc::parse(
+                r#"{"minecraft:client_entity":{"description":{"identifier":"t:bones",
+                  "materials":{"default":"entity"},"textures":{"default":"textures/t"},
+                  "geometry":{"default":"geometry.t"},
+                  "scripts":{"pre_animation":["v.p = q.get_default_bone_pivot('arm');"],
+                    "scale":"v.p.y > 0 ? 2 : 1"},
+                  "render_controllers":["controller.render.t"]}}}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let mut rcs = HashMap::new();
+        RenderController::add_file(
+            &jsonc::parse(
+                r#"{"render_controllers":{"controller.render.t":{"geometry":"Geometry.default",
+                  "textures":["Texture.default"],"materials":[{"*":"Material.default"}]}}}"#,
+            )
+            .unwrap(),
+            &mut rcs,
+        );
+        let models: HashMap<String, crate::geometry::Geometry> = crate::geometry::parse_file(
+            &jsonc::parse(
+                r#"{"minecraft:geometry":[{"description":{"identifier":"geometry.t"},
+                  "bones":[{"name":"arm","pivot":[1,5,3]}]}]}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap()
+        .into_iter()
+        .map(|g| (g.id.to_ascii_lowercase(), g))
+        .collect();
+        let lib = Library::default();
+        let assets = Assets {
+            animations: &lib,
+            render_controllers: &rcs,
+            geometries: Some(&models),
+        };
+        let mut inst = Instance::new(1);
+        // The first frame asks before any model is drawn: nothing to tell yet.
+        assert_eq!(
+            inst.update(&def, &assets, &mut Burning(false), 0.05).scale,
+            1.0
+        );
+        for _ in 0..3 {
+            assert_eq!(
+                inst.update(&def, &assets, &mut Burning(false), 0.05).scale,
+                2.0
+            );
         }
     }
 
