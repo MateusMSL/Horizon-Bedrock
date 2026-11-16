@@ -11,6 +11,8 @@ pub mod bake;
 pub mod cache;
 mod kept;
 mod mesh;
+#[cfg(debug_assertions)]
+mod mesh_checks;
 pub mod packed;
 mod samples;
 use horizon_world::registry::BlockStateId;
@@ -3071,26 +3073,6 @@ impl Lod {
     fn sync_sample(&mut self, key: TileKey) {
         let samples = self.ready.get(&key).filter(|_| self.active.contains(&key));
         self.mesh_samples.set(key, samples);
-    }
-    /// `mesh_samples` holds every active tile's ready samples and nothing else (debug builds).
-    #[cfg(debug_assertions)]
-    fn check_mesh_samples(&self) {
-        let kept = self.mesh_samples.iter().count();
-        let mut want = 0;
-        for key in &self.active {
-            if let Some(columns) = self.ready.get(key) {
-                want += 1;
-                let got = self.mesh_samples.get(key);
-                assert!(
-                    got.is_some_and(|got| Arc::ptr_eq(got, columns)),
-                    "mesh samples of {key:?} out of date"
-                );
-            }
-        }
-        assert_eq!(
-            kept, want,
-            "mesh samples keep tiles no longer active or ready"
-        );
     }
     fn finer_of(&self, key: TileKey) -> Vec<TileKey> {
         if !self.plan.split.contains(&key) {
