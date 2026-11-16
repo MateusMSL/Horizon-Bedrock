@@ -418,3 +418,37 @@ fn a_parenthesis_holds_a_statement_list_worth_its_last_one() {
     assert!(close(run("-( v.a = 2; v.a + 1; ) + 10"), 7.0));
     assert!(close(run("(1)"), 1.0));
 }
+
+/// A vector and a transform assigned to a variable are read by their members, in variables and
+/// temporaries alike, again after the first assignment.
+#[test]
+fn assigned_vectors_and_transforms_are_read_by_member() {
+    struct Places;
+    impl Host for Places {
+        fn query(&mut self, name: &str, _args: &[Value]) -> Value {
+            match name {
+                "bone_origin" => Value::Vec3([1.0, 2.0, 3.0]),
+                "bone_orientation_trs" => {
+                    Value::Trs([[4.0, 5.0, 6.0], [7.0, 8.0, 9.0], [10.0, 11.0, 12.0]])
+                }
+                _ => Value::Null,
+            }
+        }
+    }
+    let program = parse(
+        "v.o = q.bone_origin('arm'); t.m = q.bone_orientation_trs('arm'); \
+         return v.o.x * 100 + v.o.z * 10 + t.m.t.y + t.m.r.z * 1000 + t.m.s.x * 10000;",
+    )
+    .unwrap();
+    let mut vars = Vars::default();
+    let mut rng = Rng::new(1);
+    for _ in 0..2 {
+        let got = program.eval(&mut EvalCtx {
+            host: &mut Places,
+            vars: &mut vars,
+            rng: &mut rng,
+            this: Value::Null,
+        });
+        assert_eq!(got.num(), 100.0 + 30.0 + 5.0 + 9000.0 + 100000.0);
+    }
+}

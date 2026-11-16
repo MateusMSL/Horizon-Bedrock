@@ -81,6 +81,30 @@ impl From<&str> for Value {
     }
 }
 
+/// The members a value assigned to `sym` is read by: a vector's `sym.x`, `sym.y`, `sym.z`, and
+/// a transform's `sym.t.x` to `sym.s.z` (row by row). Kept per thread: each assignment made the
+/// names and took the shared table's lock for each.
+fn member_syms(sym: Sym) -> ([Sym; 3], [Sym; 9]) {
+    type Members = HashMap<Sym, ([Sym; 3], [Sym; 9]), BuildHasherDefault<IdHasher>>;
+    thread_local! {
+        static MEMBERS: std::cell::RefCell<Members> = std::cell::RefCell::new(HashMap::default());
+    }
+    MEMBERS.with(|members| {
+        *members.borrow_mut().entry(sym).or_insert_with(|| {
+            let base = super::ast::sym_name(sym);
+            let axes = ["x", "y", "z"];
+            let vector = axes.map(|axis| super::ast::intern(&format!("{base}.{axis}")));
+            let mut trs = [0; 9];
+            for (i, part) in ["t", "r", "s"].into_iter().enumerate() {
+                for (j, axis) in axes.into_iter().enumerate() {
+                    trs[i * 3 + j] = super::ast::intern(&format!("{base}.{part}.{axis}"));
+                }
+            }
+            (vector, trs)
+        })
+    })
+}
+
 /// What the game answers. Every method has a default that answers "unknown", so a host
 /// implements only what it has; unknown answers are [`Value::Null`], which reads as 0.
 pub trait Host {
@@ -317,29 +341,18 @@ impl Machine<'_, '_> {
                     Scope::Variable => self.ctx.vars.insert(*sym, v.clone()),
                     Scope::Temp => self.temps.insert(*sym, v.clone()),
                 };
-                let mut members: Vec<(String, f32)> = Vec::new();
-                match &v {
-                    Value::Vec3(xyz) => {
-                        for (axis, n) in ["x", "y", "z"].into_iter().zip(xyz) {
-                            members.push((axis.to_owned(), *n));
-                        }
-                    }
-                    Value::Trs(trs) => {
-                        for (part, xyz) in ["t", "r", "s"].into_iter().zip(trs) {
-                            for (axis, n) in ["x", "y", "z"].into_iter().zip(xyz) {
-                                members.push((format!("{part}.{axis}"), *n));
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-                if !members.is_empty() {
-                    let base = super::ast::sym_name(*sym);
-                    for (name, n) in members {
-                        let member = super::ast::intern(&format!("{base}.{name}"));
+                let (numbers, transform): (&[f32], bool) = match &v {
+                    Value::Vec3(xyz) => (xyz, false),
+                    Value::Trs(trs) => (trs.as_flattened(), true),
+                    _ => (&[], false),
+                };
+                if !numbers.is_empty() {
+                    let (vector, trs) = member_syms(*sym);
+                    let members: &[Sym] = if transform { &trs } else { &vector };
+                    for (member, n) in members.iter().zip(numbers) {
                         match scope {
-                            Scope::Variable => self.ctx.vars.insert(member, Value::Num(n)),
-                            Scope::Temp => self.temps.insert(member, Value::Num(n)),
+                            Scope::Variable => self.ctx.vars.insert(*member, Value::Num(*n)),
+                            Scope::Temp => self.temps.insert(*member, Value::Num(*n)),
                         };
                     }
                 }

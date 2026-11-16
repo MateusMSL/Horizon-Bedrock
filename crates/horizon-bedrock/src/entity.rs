@@ -1002,6 +1002,22 @@ pub struct Instance {
     mesh_layers: HashMap<String, Vec<String>>,
 }
 
+/// The symbol of a variable the game sets (`Host::variables`), kept per thread by the name's
+/// address: interning takes the shared table's lock, once per variable of every mob on every
+/// frame.
+fn game_variable(name: &'static str) -> crate::molang::Sym {
+    thread_local! {
+        static SYMS: std::cell::RefCell<HashMap<(usize, usize), crate::molang::Sym>> =
+            std::cell::RefCell::new(HashMap::new());
+    }
+    SYMS.with(|syms| {
+        *syms
+            .borrow_mut()
+            .entry((name.as_ptr() as usize, name.len()))
+            .or_insert_with(|| crate::molang::intern(name))
+    })
+}
+
 fn run(host: &mut dyn Host, vars: &mut Vars, rng: &mut Rng, p: &Program) -> Value {
     Env { host, vars, rng }.run(p, Scope::default(), Value::Null)
 }
@@ -1071,7 +1087,7 @@ impl Instance {
             }
         }
         for (name, value) in host.variables() {
-            self.vars.insert(crate::molang::intern(name), value);
+            self.vars.insert(game_variable(name), value);
         }
         let mut events: Vec<Event> = Vec::new();
         {

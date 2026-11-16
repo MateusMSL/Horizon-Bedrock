@@ -945,6 +945,16 @@ pub struct CtrlState {
 
 pub type Children = HashMap<String, Node>;
 
+/// `name` in lower case, made only when it has an upper-case letter: the entity's names are
+/// looked up in the library on every frame.
+fn lower(name: &str) -> std::borrow::Cow<'_, str> {
+    if name.bytes().any(|b| b.is_ascii_uppercase()) {
+        std::borrow::Cow::Owned(name.to_ascii_lowercase())
+    } else {
+        std::borrow::Cow::Borrowed(name)
+    }
+}
+
 /// The running nodes as text, for a log: `name@seconds` for an animation (`!` once it has
 /// finished), `name[state]` for a controller followed by what its state plays.
 pub fn describe(
@@ -1012,7 +1022,7 @@ impl Run<'_, '_> {
         let Some(full) = first.get(name).or_else(|| second.get(name)) else {
             return;
         };
-        let full = full.to_ascii_lowercase();
+        let full = lower(full);
         if NESTING.get() >= MAX_NESTING {
             log::warn!("Horizon: Bedrock animation `{name}` ({full}) plays itself: cut");
             return;
@@ -1023,29 +1033,33 @@ impl Run<'_, '_> {
     }
 
     fn play_node(&mut self, nodes: &mut Children, name: &str, full: &str, weight: f32) {
-        let full = full.to_owned();
-        if let Some(anim) = self.lib.animations.get(&full) {
-            let node = nodes
-                .entry(name.to_owned())
-                .or_insert_with(|| Node::Anim(AnimState::default()));
-            if let Node::Anim(st) = node {
+        // A node is looked up before it is made: `entry` takes an owned key, a string made for
+        // every node of every mob on every frame.
+        if let Some(anim) = self.lib.animations.get(full) {
+            if !nodes.contains_key(name) {
+                nodes.insert(name.to_owned(), Node::Anim(AnimState::default()));
+            }
+            if let Some(Node::Anim(st)) = nodes.get_mut(name) {
                 anim.advance(st, self.env, self.dt, self.events);
                 anim.sample(st, weight, self.env, self.pose);
             }
-        } else if let Some(ctrl) = self.lib.controllers.get(&full) {
-            let node = nodes.entry(name.to_owned()).or_insert_with(|| {
+        } else if let Some(ctrl) = self.lib.controllers.get(full) {
+            if !nodes.contains_key(name) {
                 let state = ctrl.state_index(&ctrl.initial_state).unwrap_or(0);
-                Node::Ctrl(Box::new(CtrlState {
-                    full: full.to_owned(),
-                    state,
-                    time: 0.0,
-                    previous: None,
-                    blend: 1.0,
-                    children: HashMap::new(),
-                    entered: false,
-                }))
-            });
-            if let Node::Ctrl(st) = node {
+                nodes.insert(
+                    name.to_owned(),
+                    Node::Ctrl(Box::new(CtrlState {
+                        full: full.to_owned(),
+                        state,
+                        time: 0.0,
+                        previous: None,
+                        blend: 1.0,
+                        children: HashMap::new(),
+                        entered: false,
+                    })),
+                );
+            }
+            if let Some(Node::Ctrl(st)) = nodes.get_mut(name) {
                 self.controller(ctrl, st, weight);
             }
         }
@@ -1056,8 +1070,8 @@ impl Run<'_, '_> {
         let mut all = !state.animations.is_empty();
         for a in &state.animations {
             let known = self.names.get(&a.name).is_some_and(|n| {
-                let n = n.to_ascii_lowercase();
-                self.lib.animations.contains_key(&n) || self.lib.controllers.contains_key(&n)
+                let n = lower(n);
+                self.lib.animations.contains_key(&*n) || self.lib.controllers.contains_key(&*n)
             });
             let done = match children.get(&a.name) {
                 Some(Node::Anim(s)) => s.finished,
@@ -1242,13 +1256,11 @@ impl Run<'_, '_> {
     }
 
     fn play_state(&mut self, state: &State, children: &mut Children, weight: f32, scope: Scope) {
-        let mut touched = Vec::with_capacity(state.animations.len());
         for a in &state.animations {
             let w = match &a.weight {
                 Some(p) => self.env.run(p, scope, Value::Null).num(),
                 None => 1.0,
             };
-            touched.push(a.name.as_str());
             if w != 0.0 {
                 self.play(children, &a.name, w * weight);
             } else if matches!(children.get(&a.name), Some(Node::Ctrl(_)))
@@ -1258,7 +1270,7 @@ impl Run<'_, '_> {
             }
         }
         // Animations the state stopped playing start over when they come back.
-        children.retain(|name, _| touched.contains(&name.as_str()));
+        children.retain(|name, _| state.animations.iter().any(|a| a.name == *name));
     }
 }
 
