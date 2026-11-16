@@ -92,6 +92,7 @@ Junta as listas pedidas na conversa (lista de tarefas da sessão, notas "Anotado
 - [ ] Holstered Weapons: nada aparece nas costas/cinto.
 - [ ] Creeper carregado e wither: efeitos a melhorar.
 - [ ] Lobos uivam fora da lua cheia.
+- [ ] Lobo com a skin (variante) errada: a textura não segue a variante do lobo (capturas de 2026-11-16: um lobo com textura escura e marrom misturada a peças cinza-metálicas, como se fosse a armadura ou outra variante; outro escuro de coleira vermelha). Ver a escolha de textura do render controller do lobo no A&S (`q.variant`/`q.mark_variant` e o array de texturas) e o que o Horizon responde para a variante (pálido, bosque, cinzento, preto, castanho, ruivo, malhado, listrado, nevado).
 - [ ] Armadura segurada sem encantamento.
 - [ ] Bússola de recuperação gira infinitamente, não aponta a morte.
 - [ ] Maçã dourada encantada: textura bugada em 1ª pessoa.
