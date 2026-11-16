@@ -1800,19 +1800,29 @@ pub fn set_first_person_arm_heights(heights: [f32; 2]) {
 pub fn first_person_arm_heights() -> [f32; 2] {
     FP_ARM_HEIGHTS.with(std::cell::Cell::get)
 }
-/// Ids of the local player's two first-person copies (one per hand), apart from every mob's.
-const FIRST_PERSON_IDS: [u32; 2] = [u32::MAX - 2, u32::MAX - 3];
+/// Id of the local player's first-person view model, apart from every mob's.
+const FIRST_PERSON_ID: u32 = u32::MAX - 2;
 
-/// The first-person view model of a pack's attachable: what the local player `player` holds in a
-/// hand (`item`), drawn as the pack dresses it for `context.is_first_person`, on the game's hand
-/// pose `hand` (camera-relative world space, items upright and facing away from the camera).
-/// `false` when no attachable of the pack dresses the item, which leaves it to the game's own
-/// item model.
+/// Whether a pack's attachable dresses `item` in a hand (Java or Bedrock id): the first-person
+/// view model then holds it.
+pub fn first_person_dresses(data: &MobData, item: &str) -> bool {
+    data.bedrock
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .dresses_held(item)
+}
+
+/// The first-person view model as the pack dresses it: the local player `player` holding what it
+/// holds in both hands (`main`, `off`), drawn as the pack draws it for `context.is_first_person`.
+/// Bedrock draws one view model with both hands' items, so the pack's arm variables (an empty
+/// main hand shows the bare right arm, an item held in both hands hides the other arm) read
+/// both hands at once. `hand` is the game's main hand pose (camera-relative world space), for
+/// the debug log only. `false` when nothing was drawn, which leaves the hands to the game.
 #[allow(clippy::too_many_arguments)]
 pub fn first_person_item(
     player: &Mob,
-    item: &str,
-    off_hand: bool,
+    main: Option<&str>,
+    off: Option<&str>,
     alpha: f32,
     hand: glam::Mat4,
     look: [f32; 3],
@@ -1826,7 +1836,7 @@ pub fn first_person_item(
         return false;
     }
     let mut copy = player.clone();
-    copy.id = FIRST_PERSON_IDS[usize::from(off_hand)];
+    copy.id = FIRST_PERSON_ID;
     copy.extra.first_person = true;
     copy.extra.main_hand = None;
     copy.extra.off_hand = None;
@@ -1835,12 +1845,9 @@ pub fn first_person_item(
     copy.extra.legs = None;
     copy.extra.feet = None;
     copy.extra.body = None;
-    let stack: std::sync::Arc<str> = item.into();
-    if off_hand {
-        copy.extra.off_hand = Some(stack);
-    } else {
-        copy.extra.main_hand = Some(stack);
-    }
+    copy.extra.main_hand = main.map(Into::into);
+    copy.extra.off_hand = off.map(Into::into);
+    let item = format!("{}+{}", main.unwrap_or(""), off.unwrap_or(""));
     // Bedrock draws the first-person view model as the player itself, standing where it
     // stands with the camera at its eye (camera-relative space: the feet `eye_height` below
     // the origin), its pack's first-person animations putting the arm before the camera.
@@ -1935,14 +1942,13 @@ pub fn first_person_item(
             vlo = vlo.min(p);
             vhi = vhi.max(p);
         }
-        log_bedrock_once(format!("first-person/{item}/{off_hand}/{size}"), || {
+        log_bedrock_once(format!("first-person/{item}/{size}"), || {
             if drawn == 0 {
                 format!("first person {item}: no attachable of the pack draws it")
             } else {
                 format!(
-                    "first person {item} ({}): {drawn} vertices, from the hand: x {:.2}..{:.2} y {:.2}..{:.2} z {:.2}..{:.2}; \
+                    "first person {item} (main+off): {drawn} vertices, from the hand: x {:.2}..{:.2} y {:.2}..{:.2} z {:.2}..{:.2}; \
                      in the camera's space (yaw {yaw:.0} pitch {pitch:.0}): x {:.2}..{:.2} y {:.2}..{:.2} z {:.2}..{:.2}",
-                    if off_hand { "off hand" } else { "main hand" },
                     lo.x, hi.x, lo.y, hi.y, lo.z, hi.z,
                     vlo.x, vhi.x, vlo.y, vhi.y, vlo.z, vhi.z
                 )

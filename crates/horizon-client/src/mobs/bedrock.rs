@@ -832,7 +832,7 @@ fn common_query(name: &str, args: &[Value]) -> Value {
 
 /// The engine's build, logged once with `HORIZON_BEDROCK_DEBUG`: tells whether the game runs the
 /// files the last overlay carried.
-pub const ENGINE_BUILD: &str = "v275-stand-hits";
+pub const ENGINE_BUILD: &str = "v278-use-hand";
 
 /// `HORIZON_BEDROCK_DUMP=skeleton,creeper`: the kinds (by part of the id) whose state is logged
 /// once a second while within twelve blocks of the camera.
@@ -2295,6 +2295,15 @@ impl Host for AttachHost<'_> {
                     .find_map(|(s, i)| (s == slot).then_some(i));
                 Value::Num(item.map_or(0.0, |i| item_frame(m, &i)))
             }
+            // Bedrock eats and uses items from the main hand only, so a pack's use animation on a
+            // held item asks only whether the holder uses one. Java uses either hand: the item in
+            // the other hand is not the one in use.
+            "is_using_item" | "is_eating"
+                if matches!(self.slot, "main_hand" | "off_hand")
+                    && (self.slot == "off_hand") != self.inner.m.extra.using_off_hand =>
+            {
+                Value::bool(false)
+            }
             "item_slot_to_bone_name" => {
                 let slot = match args.first() {
                     Some(Value::Str(s)) => s.to_string(),
@@ -2600,6 +2609,13 @@ impl BedrockMobs {
         self.bundle.is_empty()
     }
 
+    /// Whether an attachable of the pack dresses `item` held in a hand (worn pieces are dressed
+    /// on their slot, not in the hand).
+    pub fn dresses_held(&self, item: &str) -> bool {
+        let item_lc = item.to_ascii_lowercase();
+        !is_wearable(&item_lc) && attachables_for(&self.item_index, &item_lc).is_some()
+    }
+
     /// Hands the game's own particles that this pack draws itself (its
     /// `minecraft:rain_splash_particle`) to it: once for the pack in use, every frame cheap.
     pub fn take_game_particles(&self) {
@@ -2739,7 +2755,21 @@ impl BedrockMobs {
             water: WaterEntry::default(),
         });
         let since = st.seen.elapsed().as_secs_f32();
-        warm |= !gui && m.extra.first_person && since > 0.3;
+        if !gui && m.extra.first_person && since > 0.3 {
+            // Back in first person (the camera went round): the view model starts over, as one
+            // newly put in view, and settles (`warm`). Its old state, frozen where the camera
+            // left it, kept a pack's arm hidden until the item was put back in the hand.
+            *st = MobState {
+                instance: Instance::new(u64::from(m.id) + 1),
+                time,
+                frame: None,
+                seen: Instant::now(),
+                dumped: f32::NEG_INFINITY,
+                live: None,
+                water: WaterEntry::default(),
+            };
+            warm = true;
+        }
         st.seen = Instant::now();
         if !gui
             && st.time == time
@@ -3204,8 +3234,9 @@ impl BedrockMobs {
                 seen: Instant::now(),
                 bound_to: None,
             });
-            warm |= m.extra.first_person && st.seen.elapsed().as_secs_f32() > 0.3;
-            if st.id != *id {
+            let left = m.extra.first_person && st.seen.elapsed().as_secs_f32() > 0.3;
+            if st.id != *id || left {
+                // Another attachable, or the view model is back in view: it starts over.
                 warm |= m.extra.first_person;
                 *st = AttState {
                     id: id.clone(),

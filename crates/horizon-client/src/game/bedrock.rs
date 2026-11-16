@@ -43,12 +43,18 @@ impl Ground for Blocks<'_, '_> {
 const CHAIN_LIMIT: usize = 4;
 
 impl Game<'_> {
-    /// The pack's attachable for the item in the first-person hand, drawn into `out` as the pack
-    /// dresses the view model. False when no attachable of the pack draws it.
+    /// Whether the pack's attachables dress `item` in the first-person view model.
+    pub(super) fn first_person_pack_dresses(&self, item: &str) -> bool {
+        self.player_model.is_some()
+            && horizon_client::mobs::render::first_person_dresses(self.res.mob_data(), item)
+    }
+
+    /// The first-person view model holding both hands' items (`main`, `off`), drawn into `out`
+    /// as the pack dresses it. False when nothing was drawn.
     pub(super) fn first_person_pack_item(
         &self,
-        item: &str,
-        off_hand: bool,
+        main: Option<&str>,
+        off: Option<&str>,
         alpha: f32,
         rest: glam::Mat4,
         packed: u32,
@@ -64,8 +70,8 @@ impl Game<'_> {
         );
         horizon_client::mobs::render::first_person_item(
             player,
-            item,
-            off_hand,
+            main,
+            off,
             alpha,
             rest,
             [
