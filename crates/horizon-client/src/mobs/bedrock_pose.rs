@@ -1,0 +1,115 @@
+//! How often a Bedrock pack's mob is posed (`BedrockMobs::frame`). Away from the camera the pose
+//! is worked out less often and the last one drawn in between: the mob still moves every frame,
+//! its limbs at 30, 20 or 10 steps a second. A crowd of an add-on's mobs (hundreds of Molang
+//! nodes each a frame) cost several milliseconds a frame at any distance. The player's own model
+//! and the first-person view are posed every frame. Each mob steps at a phase of its own (by its
+//! id), so a crowd's poses spread over the frames instead of all falling on one: that frame was
+//! as slow as before, the others fast, and the game stuttered.
+
+use super::Mob;
+use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
+
+/// The pack's models drawn so far this frame (`drew_model`), and in the last one (`CROWD`).
+static DRAWN: AtomicU32 = AtomicU32::new(0);
+static CROWD: AtomicU32 = AtomicU32::new(0);
+/// Up to this many models in view, the distances of `pose_step` are as written.
+const CROWD_AS_WRITTEN: f32 = 24.0;
+
+/// A frame's mobs are about to be drawn: the count of the last one's models becomes the crowd
+/// `pose_step` reads.
+pub fn begin_frame() {
+    CROWD.store(DRAWN.swap(0, Relaxed), Relaxed);
+}
+
+/// One of the pack's models was drawn this frame.
+pub fn drew_model() {
+    DRAWN.fetch_add(1, Relaxed);
+}
+
+/// Whether `m`, posed at `then` (ticks) and drawn now at `now`, `from_camera` (blocks) away,
+/// keeps that pose.
+pub(super) fn keeps(m: &Mob, then: f32, now: f32, from_camera: [f32; 3]) -> bool {
+    !m.extra.first_person
+        && !m.extra.local_player
+        && now >= then
+        && same_pose_step(then, now, pose_step(from_camera, CROWD.load(Relaxed)), m.id)
+}
+
+/// How long (ticks) a mob `from_camera` (blocks) keeps its pose before it is worked out again,
+/// with `crowd` of the pack's models in view: every frame within 16 blocks, then 30, 20 and 10
+/// times a second from 16, 32 and 64. A larger crowd than [`CROWD_AS_WRITTEN`] draws those
+/// distances in by the square root of how much larger: a copper golem farm's 90 golems in view
+/// (8 ms of a frame, most of them within 16 blocks) step from 8 blocks.
+fn pose_step(from_camera: [f32; 3], crowd: u32) -> f32 {
+    let d2: f32 = from_camera.iter().map(|v| v * v).sum();
+    let d2 = d2 * (crowd as f32 / CROWD_AS_WRITTEN).max(1.0);
+    if d2 < 16.0 * 16.0 {
+        0.0
+    } else if d2 < 32.0 * 32.0 {
+        20.0 / 30.0
+    } else if d2 < 64.0 * 64.0 {
+        1.0
+    } else {
+        2.0
+    }
+}
+
+/// Whether `then` and `now` (ticks) fall in the same step of `step` ticks for the mob `id`, its
+/// steps shifted by a fraction of one by its id; a step of 0 never holds.
+fn same_pose_step(then: f32, now: f32, step: f32, id: u32) -> bool {
+    if step <= 0.0 {
+        return false;
+    }
+    // Sixteen phases, by the id's low bits mixed so neighbouring ids spread.
+    let phase = (id.wrapping_mul(0x9E37_79B9) >> 28) as f32 / 16.0 * step;
+    ((then + phase) / step).floor() == ((now + phase) / step).floor()
+}
+
+#[cfg(test)]
+mod tests {
+    /// A far crowd's poses are worked out once a step each, spread over the frames rather than
+    /// all in one.
+    #[test]
+    fn a_far_crowd_poses_once_a_step_each_spread_over_the_frames() {
+        let step = super::pose_step([0.0, 0.0, 40.0], 0);
+        assert!(step > 0.0, "40 blocks away is not posed every frame");
+        assert_eq!(super::pose_step([0.0, 0.0, 4.0], 0), 0.0, "near is");
+        // 64 mobs at 600 frames a second (20 ticks a second) for one second.
+        let dt = 20.0 / 600.0;
+        let mut last = vec![0.0f32; 64];
+        let mut posed = vec![0u32; 64];
+        let mut busiest = 0;
+        for frame in 1..=600 {
+            let now = frame as f32 * dt;
+            let mut this_frame = 0;
+            for (id, then) in last.iter_mut().enumerate() {
+                if !super::same_pose_step(*then, now, step, id as u32) {
+                    *then = now;
+                    posed[id] += 1;
+                    this_frame += 1;
+                }
+            }
+            busiest = busiest.max(this_frame);
+        }
+        // 20 steps a second at 40 blocks: each mob about 20 times, never every frame.
+        assert!(posed.iter().all(|&n| (19..=21).contains(&n)), "{posed:?}");
+        assert!(busiest <= 16, "{busiest} of 64 mobs posed in one frame");
+        assert!(
+            !super::same_pose_step(1.0, 1.0, 0.0, 7),
+            "a step of 0 always poses"
+        );
+    }
+
+    /// A small crowd keeps the distances as written; a large one steps nearer mobs too, and
+    /// the nearest still every frame.
+    #[test]
+    fn a_large_crowd_steps_nearer_mobs() {
+        let at = |d: f32, crowd| super::pose_step([d, 0.0, 0.0], crowd);
+        assert_eq!(at(12.0, 10), 0.0);
+        assert_eq!(at(12.0, 24), 0.0);
+        assert!(at(12.0, 96) > 0.0, "a farm's golem 12 blocks off");
+        assert!(at(12.0, 96) < at(40.0, 96), "nearer still steps more often");
+        assert_eq!(at(4.0, 96), 0.0, "next to the camera every frame");
+        assert_eq!(at(40.0, 24), at(40.0, 0), "no crowd below the threshold");
+    }
+}

@@ -866,6 +866,53 @@ pub fn query(name: &str) -> Option<f32> {
     s.queries.get(name).copied()
 }
 
+/// `trace_rider`: the bones of a mount and of its rider, every frame.
+pub fn trace_pose(
+    m: &super::Mob,
+    alpha: f32,
+    time: f32,
+    dt: f32,
+    frame: &horizon_bedrock::entity::Frame,
+) {
+    use std::fmt::Write;
+    let settings = settings();
+    if !settings.trace_rider {
+        return;
+    }
+    let wanted: Vec<String> = if settings.dump_bones.is_empty() {
+        ["root", "waist", "body", "head"].map(String::from).to_vec()
+    } else {
+        settings
+            .dump_bones
+            .iter()
+            .map(|n| n.to_ascii_lowercase())
+            .collect()
+    };
+    let mut bones: Vec<_> = frame
+        .pose
+        .bones
+        .iter()
+        .filter(|(name, _)| {
+            let name = name.to_ascii_lowercase();
+            wanted.iter().any(|w| name.contains(w.as_str()))
+        })
+        .collect();
+    bones.sort_by(|a, b| a.0.cmp(b.0));
+    let mut b = String::new();
+    for (name, p) in bones.iter().take(16) {
+        let _ = write!(
+            b,
+            " {name}(rot={:?} pos={:?})",
+            p.rotation.map(|v| (v * 100.0).round() / 100.0),
+            p.position.map(|v| (v * 100.0).round() / 100.0),
+        );
+    }
+    trace(&format!(
+        "rider-trace-pose {}#{} age={} a={alpha:.3} time={time:.3} dt={dt:.4}{b}",
+        m.kind.id, m.id, m.age
+    ));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
