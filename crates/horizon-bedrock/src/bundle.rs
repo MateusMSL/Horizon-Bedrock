@@ -299,7 +299,10 @@ impl Bundle {
     /// (A&S's tools) all took the silhouette of the last one read: a sword cut to a pickaxe's
     /// shape lost its guard.
     fn fit_sprites(&mut self, root: &Path) {
-        let mut fitted: Vec<Geometry> = Vec::new();
+        let mut fitted: HashMap<String, Geometry> = HashMap::new();
+        // Many items share a texture file (and a geometry and key): each file is read once and
+        // each model made once (A&S asked for 422 models, 269 of them different).
+        let mut sprites: HashMap<String, Option<geometry::Sprite>> = HashMap::new();
         for def in self.entities.values().chain(self.attachables.values()) {
             for (key, path) in &def.textures {
                 for geometry in def.geometry.values() {
@@ -312,21 +315,25 @@ impl Bundle {
                     {
                         continue;
                     }
-                    let png = root.join(format!(
-                        "assets/minecraft/textures/{}.png",
-                        crate::convert::atlas_name(path)
-                    ));
-                    if let Some(sprite) = read_sprite(&png) {
-                        let mut g = base.mesh_variant(key, Some(&sprite));
-                        g.id = geometry::fitted_mesh_id(geometry, key, path);
-                        fitted.push(g);
+                    let id = geometry::fitted_mesh_id(geometry, key, path);
+                    if fitted.contains_key(&id) {
+                        continue;
+                    }
+                    let sprite = sprites.entry(path.to_ascii_lowercase()).or_insert_with(|| {
+                        read_sprite(&root.join(format!(
+                            "assets/minecraft/textures/{}.png",
+                            crate::convert::atlas_name(path)
+                        )))
+                    });
+                    if let Some(sprite) = sprite {
+                        let mut g = base.mesh_variant(key, Some(sprite));
+                        g.id = id.clone();
+                        fitted.insert(id, g);
                     }
                 }
             }
         }
-        for g in fitted {
-            self.geometries.insert(g.id.clone(), g);
-        }
+        self.geometries.extend(fitted);
     }
 
     pub fn is_empty(&self) -> bool {

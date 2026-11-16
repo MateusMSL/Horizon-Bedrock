@@ -104,6 +104,11 @@ pub struct Sprite {
 const SPRITE_SIZE: f32 = 16.0;
 /// How thick a sprite is drawn: thin enough to read as flat, enough to show from both sides.
 const SPRITE_DEPTH: f32 = 0.05;
+/// The most boxes a `use_pixel_depth` sprite's silhouette has along a side. A larger texture's
+/// texels go by square cells of several (a cell shows where any of its texels does), each box
+/// still drawing its whole cell of the texture: Actions & Stuff's 1024-pixel sprites were a
+/// million boxes each, 72 million in all (some 15 GB) before the game reached its title screen.
+pub const MAX_SOLID_CELLS: u32 = 32;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Geometry {
@@ -241,30 +246,37 @@ impl Geometry {
                             ],
                         ),
                         Some(s) => {
-                            // One box per opaque texel: a box spanning a run would stretch the
+                            // One box per opaque cell: a box spanning a run would stretch the
                             // run across its faces in whichever direction the face reads the
                             // texture (the down face reads it mirrored), scrambling the colours.
-                            for row in 0..h {
-                                let mut col = 0;
-                                while col < w {
-                                    if !s.opaque[(row * w + col) as usize] {
-                                        col += 1;
+                            // A cell is one texel up to MAX_SOLID_CELLS texels a side, else a
+                            // square of `step` texels; its up and down faces draw all of them,
+                            // its sides the texels along its edge.
+                            let step = w.max(h).div_ceil(MAX_SOLID_CELLS).max(1);
+                            let shows = |col: u32, row: u32| {
+                                (row..(row + step).min(h)).any(|r| {
+                                    (col..(col + step).min(w))
+                                        .any(|c| s.opaque[(r * w + c) as usize])
+                                })
+                            };
+                            for row in (0..h).step_by(step as usize) {
+                                for col in (0..w).step_by(step as usize) {
+                                    if !shows(col, row) {
                                         continue;
                                     }
-                                    let start = col;
-                                    col += 1;
-                                    let len = (col - start) as f32;
-                                    let (u, v) = (start as f32, row as f32);
+                                    let cw = (step.min(w - col)) as f32;
+                                    let ch = (step.min(h - row)) as f32;
+                                    let (u, v) = (col as f32, row as f32);
                                     push(
                                         at(u * sx, -depth, v * sz),
-                                        [len * sx, depth, sz],
+                                        [cw * sx, depth, ch * sz],
                                         [
-                                            face(u, v, len, 1.0),
-                                            face(u, v, len, 1.0),
-                                            face(u, v, 1.0, 1.0),
-                                            face(u + len - 1.0, v, 1.0, 1.0),
-                                            face(u, v, len, 1.0),
-                                            face(u, v, len, 1.0),
+                                            face(u, v, cw, 1.0),
+                                            face(u, v + ch - 1.0, cw, 1.0),
+                                            face(u, v, 1.0, ch),
+                                            face(u + cw - 1.0, v, 1.0, ch),
+                                            face(u, v, cw, ch),
+                                            face(u, v, cw, ch),
                                         ],
                                     );
                                 }
@@ -948,6 +960,47 @@ mod tests {
         assert_eq!(flat.bones[0].cubes.len(), 1);
         assert_eq!(flat.bones[0].cubes[0].size[0], 16.0);
         assert_eq!(flat.bones[0].cubes[0].size[2], 8.0);
+    }
+
+    #[test]
+    fn a_large_sprite_s_silhouette_goes_by_cells_of_several_texels() {
+        let src = r#"{"minecraft:geometry":[{"description":{"identifier":"geometry.item"},
+          "bones":[{"name":"hand","pivot":[0,0,0],
+            "texture_meshes":[{"texture":"a","position":[0,0,0]}]}]}]}"#;
+        let g = parse_file(&jsonc::parse(src).unwrap()).unwrap().remove(0);
+        // 1024 square, all opaque but one texel in the corner cell, and one cell left empty.
+        let side = 1024u32;
+        let mut opaque = vec![true; (side * side) as usize];
+        let step = side / MAX_SOLID_CELLS;
+        for r in 0..step {
+            for c in 0..step {
+                opaque[(r * side + c) as usize] = r == 5 && c == 7;
+                opaque[(r * side + step + c) as usize] = false;
+            }
+        }
+        let solid = g.mesh_variant(
+            "a",
+            Some(&Sprite {
+                size: [side, side],
+                opaque,
+            }),
+        );
+        let cubes = &solid.bones[0].cubes;
+        let cells = (MAX_SOLID_CELLS * MAX_SOLID_CELLS) as usize;
+        // The empty cell has no box; the corner one shows for its single texel.
+        assert_eq!(cubes.len(), cells - 1);
+        // Still a block wide: each cell spans `step` texels of 1/64 of a pixel.
+        let texel = 16.0 / side as f32;
+        assert_eq!(
+            cubes[0].size,
+            [step as f32 * texel, 1.0, step as f32 * texel]
+        );
+        // Its up face draws the whole cell of the texture.
+        let Uv::Faces(faces) = &cubes[0].uv else {
+            panic!("per-face uv")
+        };
+        let up = faces[4].as_ref().unwrap();
+        assert_eq!((up.uv, up.size), ([0.0, 0.0], [step as f32, step as f32]));
     }
 
     #[test]
