@@ -6,6 +6,7 @@
 pub mod boot_paint;
 pub mod heap_census;
 pub mod jobs;
+pub mod memory_watch;
 pub mod process_memory;
 
 use std::sync::{

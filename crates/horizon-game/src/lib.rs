@@ -21,7 +21,15 @@
 
 /// The game's allocator (mimalloc, with its thread tags), for the executable's
 /// `#[global_allocator]`.
+#[cfg(not(feature = "alloc-census"))]
 pub use horizon_threads::{ALLOCATOR, Allocator};
+/// The game's allocator in a build that counts the heap by step and thread
+/// (feature `alloc-census`, for measuring only).
+#[cfg(feature = "alloc-census")]
+pub type Allocator = horizon_threads::CensusAllocator;
+/// See [`Allocator`].
+#[cfg(feature = "alloc-census")]
+pub const ALLOCATOR: Allocator = horizon_threads::CensusAllocator;
 
 /// The mod API level this game serves. The executable keeps it in the program, where the
 /// launcher reads it without running it (`horizon_mods::api_level::MARK`): a `static` its

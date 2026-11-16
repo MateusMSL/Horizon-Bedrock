@@ -11,5 +11,10 @@ horizon-client = { path = "../horizon-client" }
 horizon-threads = { path = "../horizon-threads" }
 horizon-mods = { path = "../horizon-mods", default-features = false, features = ["index"] }
 
+[features]
+# Counts the live heap by step and thread (`horizon-ctl memory`, the memory watch's warnings);
+# for measuring only.
+alloc-census = ["horizon-threads/alloc-census"]
+
 [lints]
 workspace = true

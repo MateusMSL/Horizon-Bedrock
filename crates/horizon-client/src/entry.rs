@@ -72,6 +72,8 @@ pub fn main_with(mods: crate::mod_api::Mods) {
         // The log's first line names the build, so a bug report that carries the log says which one it was.
         log::info!("Horizon {}", crash::version());
         crash::install(home.clone(), side);
+        // The memory over time, so a game the system killed for it leaves how in its log.
+        horizon_threads::memory_watch::start();
     }
     let renderers = crate::mod_api::mods()
         .iter()

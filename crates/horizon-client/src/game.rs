@@ -12236,6 +12236,7 @@ fn load_world_rest(
     };
     let load_mobs = || -> Result<_> {
         let _step = startup::step("rest.mobs");
+        let types_phase = horizon_threads::memory_watch::phase("rest.mobs/types");
         let mob_types: HashMap<_, _> = if draws {
             match entity_models {
                 Some(document) => {
@@ -12250,15 +12251,21 @@ fn load_world_rest(
         .into_iter()
         .map(|(k, v)| (k, Arc::new(v)))
         .collect();
-        let mut mob_data = horizon_client::mobs::MobData::load(root, facts);
+        drop(types_phase);
+        let mut mob_data = {
+            let _memory = horizon_threads::memory_watch::phase("rest.mobs/data");
+            horizon_client::mobs::MobData::load(root, facts)
+        };
         mob_data.cem = std::sync::RwLock::new(Arc::new(if draws {
+            let _memory = horizon_threads::memory_watch::phase("rest.mobs/cem");
             horizon_client::mobs::cem::CemModels::load(root, &mob_types)
         } else {
             horizon_client::mobs::cem::CemModels::default()
         }));
-        mob_data.bedrock = std::sync::RwLock::new(Arc::new(
-            horizon_client::mobs::bedrock::BedrockMobs::load(root),
-        ));
+        mob_data.bedrock = std::sync::RwLock::new(Arc::new({
+            let _memory = horizon_threads::memory_watch::phase("rest.mobs/bedrock");
+            horizon_client::mobs::bedrock::BedrockMobs::load(root)
+        }));
         horizon_client::mobs::trial_spawner::load_registry(root);
         Ok((mob_types, mob_data))
     };

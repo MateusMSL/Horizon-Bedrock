@@ -366,6 +366,7 @@ impl Game<'_> {
     /// The render-thread half: the renderer on the new pack's textures, then
     /// the swap (`ReloadInstance`'s application listeners).
     pub(super) fn apply_staged_pack(&mut self, staged: StagedPack) -> horizon_client::Result<()> {
+        let _memory = horizon_threads::memory_watch::phase("pack-reload/apply");
         let StagedPack {
             root,
             gui,
@@ -553,9 +554,14 @@ pub(super) fn stage_pack(
     japanese: bool,
     progress: &super::Progress,
 ) -> horizon_client::Result<StagedPack> {
-    let base = super::mods::content_root(vanilla_root, mods_enabled, mods_disabled, dev_mods);
-    let root = startup_root(vanilla_root, &base, selected, server)?;
+    let _memory = horizon_threads::memory_watch::phase("pack-reload");
+    let root = {
+        let _memory = horizon_threads::memory_watch::phase("pack-reload/root");
+        let base = super::mods::content_root(vanilla_root, mods_enabled, mods_disabled, dev_mods);
+        startup_root(vanilla_root, &base, selected, server)?
+    };
     progress.set(1);
+    let assets_phase = horizon_threads::memory_watch::phase("pack-reload/assets-atlas");
     // The world's models and sprites and the GUI atlas read the same root and nothing of
     // each other: about a second each, side by side.
     let mod_image = crate::game::mods::built_with_native_mods();
@@ -583,6 +589,7 @@ pub(super) fn stage_pack(
                 .unwrap_or_else(|p| std::panic::resume_unwind(p)),
         )
     });
+    drop(assets_phase);
     let render = Arc::new(render?);
     let mut atlas = atlas.unwrap_or_else(|p| std::panic::resume_unwind(p))?;
     atlas.font.uniform = force_unicode;
@@ -601,6 +608,7 @@ pub(super) fn stage_pack(
             context.biomes.clone()
         }
     };
+    let tables_phase = horizon_threads::memory_watch::phase("pack-reload/tables");
     let pack = PackResources::load(
         &root,
         assets.clone(),
@@ -609,12 +617,22 @@ pub(super) fn stage_pack(
         biomes,
         context.light.clone(),
     )?;
-    let textures = prepare_renderer_textures(&pack);
-    let cem = Arc::new(horizon_client::mobs::cem::CemModels::load(
-        &root,
-        res.mob_types(),
-    ));
-    let bedrock = Arc::new(horizon_client::mobs::bedrock::BedrockMobs::load(&root));
+    drop(tables_phase);
+    let textures = {
+        let _memory = horizon_threads::memory_watch::phase("pack-reload/textures");
+        prepare_renderer_textures(&pack)
+    };
+    let cem = {
+        let _memory = horizon_threads::memory_watch::phase("pack-reload/cem");
+        Arc::new(horizon_client::mobs::cem::CemModels::load(
+            &root,
+            res.mob_types(),
+        ))
+    };
+    let bedrock = {
+        let _memory = horizon_threads::memory_watch::phase("pack-reload/bedrock-mobs");
+        Arc::new(horizon_client::mobs::bedrock::BedrockMobs::load(&root))
+    };
     let block_entity_shapes = res.block_entity_render().shapes_for(&root);
     progress.set(3);
     Ok(StagedPack {

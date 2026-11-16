@@ -741,7 +741,10 @@ fn bedrock_pack(dir: &Path, path: &Path, name: String, format: (i64, i64)) -> Op
         .unwrap_or(Path::new("."))
         .join(".horizon-cache/bedrock");
     let subpack = bedrock::chosen_subpack(dir, &name);
-    let converted = bedrock::convert(path, &cache, format, subpack.as_deref())?;
+    let converted = {
+        let _memory = horizon_threads::memory_watch::phase("bedrock-convert");
+        bedrock::convert(path, &cache, format, subpack.as_deref())?
+    };
     pack_for(
         format!("file/{name}"),
         Text::literal(name),

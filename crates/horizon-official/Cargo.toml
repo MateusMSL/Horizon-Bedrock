@@ -19,6 +19,10 @@ horizon-official-servers = { path = "../horizon-official-servers" }
 horizon-discord = { path = "../horizon-discord" }
 log = "0.4"
 
+[features]
+# The heap counted by step and thread, for measuring only (horizon-game's feature).
+alloc-census = ["horizon-game/alloc-census"]
+
 [build-dependencies]
 # The build script runs on the host, but embeds resources based on the target OS.
 winresource = "0.1"
