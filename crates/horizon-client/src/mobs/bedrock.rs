@@ -157,6 +157,32 @@ fn model_to_world(offset: [f64; 3], yaw: f32) -> [f64; 3] {
     ]
 }
 
+/// How long (ticks) a mob `from_camera` (blocks) keeps its pose before it is worked out again:
+/// every frame within 16 blocks, then 30, 20 and 10 times a second from 16, 32 and 64.
+fn pose_step(from_camera: [f32; 3]) -> f32 {
+    let d2: f32 = from_camera.iter().map(|v| v * v).sum();
+    if d2 < 16.0 * 16.0 {
+        0.0
+    } else if d2 < 32.0 * 32.0 {
+        20.0 / 30.0
+    } else if d2 < 64.0 * 64.0 {
+        1.0
+    } else {
+        2.0
+    }
+}
+
+/// Whether `then` and `now` (ticks) fall in the same step of `step` ticks for the mob `id`, its
+/// steps shifted by a fraction of one by its id; a step of 0 never holds.
+fn same_pose_step(then: f32, now: f32, step: f32, id: u32) -> bool {
+    if step <= 0.0 {
+        return false;
+    }
+    // Sixteen phases, by the id's low bits mixed so neighbouring ids spread.
+    let phase = (id.wrapping_mul(0x9E37_79B9) >> 28) as f32 / 16.0 * step;
+    ((then + phase) / step).floor() == ((now + phase) / step).floor()
+}
+
 /// An offset on the first-person view model (`render::first_person_item`) carried to where it
 /// shows in the world, as an offset from the player's feet in the body's axes (what [`Follow`]
 /// keeps). The view model stands with its feet `eye` below the camera, turned half round from
@@ -2777,6 +2803,22 @@ impl BedrockMobs {
         {
             return Some(f.clone());
         }
+        // Away from the camera the pose is worked out less often and the last one drawn in
+        // between (`pose_step`): the mob still moves every frame, its limbs at 30, 20 or 10
+        // steps a second. A crowd of an add-on's mobs (hundreds of Molang nodes each a frame)
+        // cost several milliseconds a frame at any distance. The player's own model is not.
+        // Each mob steps at its own phase (by its id), so a crowd's poses spread over the
+        // frames instead of all falling on one: that frame was as slow as before, the
+        // others fast, and the game stuttered.
+        if !gui
+            && !m.extra.first_person
+            && !m.extra.local_player
+            && let Some(f) = &st.frame
+            && time >= st.time
+            && same_pose_step(st.time, time, pose_step(from_camera), m.id)
+        {
+            return Some(f.clone());
+        }
         let dt = if gui {
             since.clamp(0.0, 0.1)
         } else {
@@ -3958,6 +4000,36 @@ pub fn sprite_quads(
 
 #[cfg(test)]
 mod tests {
+    /// A far crowd's poses are worked out once a step each, spread over the frames rather than
+    /// all in one.
+    #[test]
+    fn a_far_crowd_poses_once_a_step_each_spread_over_the_frames() {
+        let step = super::pose_step([0.0, 0.0, 40.0]);
+        assert!(step > 0.0, "40 blocks away is not posed every frame");
+        assert_eq!(super::pose_step([0.0, 0.0, 4.0]), 0.0, "near is");
+        // 64 mobs at 600 frames a second (20 ticks a second) for one second.
+        let dt = 20.0 / 600.0;
+        let mut last = vec![0.0f32; 64];
+        let mut posed = vec![0u32; 64];
+        let mut busiest = 0;
+        for frame in 1..=600 {
+            let now = frame as f32 * dt;
+            let mut this_frame = 0;
+            for (id, then) in last.iter_mut().enumerate() {
+                if !super::same_pose_step(*then, now, step, id as u32) {
+                    *then = now;
+                    posed[id] += 1;
+                    this_frame += 1;
+                }
+            }
+            busiest = busiest.max(this_frame);
+        }
+        // 20 steps a second at 40 blocks: each mob about 20 times, never every frame.
+        assert!(posed.iter().all(|&n| (19..=21).contains(&n)), "{posed:?}");
+        assert!(busiest <= 16, "{busiest} of 64 mobs posed in one frame");
+        assert!(!super::same_pose_step(1.0, 1.0, 0.0, 7), "a step of 0 always poses");
+    }
+
     #[test]
     fn a_mob_goes_into_water_as_fast_as_it_fell() {
         let mut w = super::WaterEntry::default();
