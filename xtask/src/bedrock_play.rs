@@ -48,7 +48,11 @@ pub fn run(profile: &str) -> Result<(), String> {
 
     let launcher = launcher_exe()?;
     let mut import = Command::new(&launcher);
-    import.arg("--json").arg("import-build").arg(&program).arg("--trust-unsigned");
+    import
+        .arg("--json")
+        .arg("import-build")
+        .arg(&program)
+        .arg("--trust-unsigned");
     if let Some(base) = set("HORIZON_BEDROCK_BASE") {
         import.args(["--version", &base]);
     }

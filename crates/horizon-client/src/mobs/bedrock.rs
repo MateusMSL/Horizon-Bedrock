@@ -2840,7 +2840,10 @@ impl BedrockMobs {
             && same_pose_step(
                 st.time,
                 time,
-                pose_step(from_camera, CROWD.load(std::sync::atomic::Ordering::Relaxed)),
+                pose_step(
+                    from_camera,
+                    CROWD.load(std::sync::atomic::Ordering::Relaxed),
+                ),
                 m.id,
             )
         {
@@ -4054,7 +4057,10 @@ mod tests {
         // 20 steps a second at 40 blocks: each mob about 20 times, never every frame.
         assert!(posed.iter().all(|&n| (19..=21).contains(&n)), "{posed:?}");
         assert!(busiest <= 16, "{busiest} of 64 mobs posed in one frame");
-        assert!(!super::same_pose_step(1.0, 1.0, 0.0, 7), "a step of 0 always poses");
+        assert!(
+            !super::same_pose_step(1.0, 1.0, 0.0, 7),
+            "a step of 0 always poses"
+        );
     }
 
     /// A small crowd keeps the distances as written; a large one steps nearer mobs too, and

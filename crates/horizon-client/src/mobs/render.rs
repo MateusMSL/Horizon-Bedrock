@@ -2981,16 +2981,26 @@ mod tests {
         };
         let still = glam::Mat4::IDENTITY;
         let same = super::moved_vertex(&v, &still, &glam::Mat3::from_mat4(still));
-        assert_eq!((same.pos, same.normal, same.uv, same.color), (v.pos, v.normal, v.uv, v.color));
+        assert_eq!(
+            (same.pos, same.normal, same.uv, same.color),
+            (v.pos, v.normal, v.uv, v.color)
+        );
         // A quarter turn about y, then 10 blocks east.
         let delta = glam::Mat4::from_translation(glam::Vec3::new(10.0, 0.0, 0.0))
             * glam::Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2);
         let moved = super::moved_vertex(&v, &delta, &glam::Mat3::from_mat4(delta));
         let [x, y, z] = moved.pos;
-        assert!((x - 13.0).abs() < 1e-4 && (y - 2.0).abs() < 1e-4 && (z + 1.0).abs() < 1e-4, "{:?}", moved.pos);
+        assert!(
+            (x - 13.0).abs() < 1e-4 && (y - 2.0).abs() < 1e-4 && (z + 1.0).abs() < 1e-4,
+            "{:?}",
+            moved.pos
+        );
         // +x turned a quarter about y points to -z; the two-sided mark stays.
         assert_eq!(moved.normal, [0, 0, -127, -127]);
-        assert_eq!((moved.uv, moved.color, moved.light, moved.layer), (v.uv, v.color, v.light, v.layer));
+        assert_eq!(
+            (moved.uv, moved.color, moved.light, moved.layer),
+            (v.uv, v.color, v.light, v.layer)
+        );
     }
 
     use super::*;

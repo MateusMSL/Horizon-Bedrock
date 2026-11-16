@@ -19,8 +19,10 @@ pub fn run(profile: &str) -> Result<(), String> {
     }
     let appdata = PathBuf::from(std::env::var_os("APPDATA").ok_or("APPDATA is not set")?);
     let resources = prepared_files(&appdata.join("horizon-launcher"))?;
-    let game_dir = set("HORIZON_BEDROCK_GAME_DIR")
-        .map_or_else(|| appdata.join("horizon/instances/bedrock-v1"), PathBuf::from);
+    let game_dir = set("HORIZON_BEDROCK_GAME_DIR").map_or_else(
+        || appdata.join("horizon/instances/bedrock-v1"),
+        PathBuf::from,
+    );
     let home = set("HORIZON_BEDROCK_HOME").map_or_else(|| appdata.join("horizon"), PathBuf::from);
     std::fs::create_dir_all(&game_dir).map_err(|e| format!("{}: {e}", game_dir.display()))?;
     println!("resources: {}", resources.display());
@@ -74,6 +76,8 @@ fn prepared_files(launcher: &Path) -> Result<PathBuf, String> {
         .iter()
         .find(|v| v.file_name().and_then(|n| n.to_str()) == selected.as_deref())
         .or_else(|| found.last())
-        .ok_or("no prepared game files in any launcher version: play a Nightly once in the launcher")?;
+        .ok_or(
+            "no prepared game files in any launcher version: play a Nightly once in the launcher",
+        )?;
     Ok(pick.join(PREPARED))
 }
