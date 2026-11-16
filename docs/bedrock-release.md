@@ -62,3 +62,23 @@ Gera em `release/`:
 | `horizon-launcher/horizon-launcher.exe` | O launcher do fork. Não se atualiza para o do upstream. |
 
 Conta: o caminho de teste é o jogo importado no launcher oficial, que confere a conta e entrega a sessão. O `horizon-launcher.exe` do fork só faz login com o client ID do app Azure do próprio fork (`HORIZON_MSA_CLIENT_ID` na configuração); sem ele avisa que o login não está configurado. Usar a sessão do launcher oficial ou o client ID do Horizon é proibido (docs/forking.md).
+
+# Jogar com a conta do launcher oficial (`bedrock-play`)
+
+```
+cargo run -p xtask -- bedrock-play dev|fast|release
+```
+
+No IntelliJ: **Horizon - Bedrock play (dev)**, **(fast)** e **(release)**. Trocar de perfil é só escolher outra configuração.
+
+| Perfil | Compila | Roda | Uso |
+|---|---|---|---|
+| `dev` | mais rápido | mais lento | iterar no código |
+| `fast` (padrão) | rápido | otimizado | testar jogando |
+| `release` | lento | como o distribuído | conferir antes de release |
+
+A tarefa compila o `horizon-official` com o perfil, importa no launcher oficial (`horizon-launcher import-build`), remove a importação anterior dela (a lista de versões fica com uma) e abre com `horizon-launcher play --version <importada>`: o jogo abre com a conta logada no launcher oficial, sem login próprio.
+
+Variáveis opcionais: `HORIZON_LAUNCHER_EXE` (launcher fora de `%LOCALAPPDATA%\Programs\Horizon Launcher`), `HORIZON_BEDROCK_INSTANCE` (instância), `HORIZON_BEDROCK_BASE` (release ou Nightly cujos arquivos de jogo a build usa).
+
+As configurações **Horizon - Bedrock dev** (perfil `dev`) e **debug** (perfil `fast`) abrem o `horizon-client` direto, sem launcher e sem conta, para depurar: `cargo run -p xtask -- bedrock-run dev|fast|release`. Os arquivos preparados são procurados a cada abertura (a versão selecionada no launcher primeiro, depois qualquer outra), porque o launcher os move entre versões a cada importação. Pastas: `HORIZON_BEDROCK_GAME_DIR` (padrão `%APPDATA%\horizon\instances\bedrock-v1`) e `HORIZON_BEDROCK_HOME` (padrão `%APPDATA%\horizon`).
