@@ -1952,6 +1952,9 @@ impl Lod {
     /// Re-evaluates `key` and its ancestors after its readiness or coverage
     /// changed. Work is O(tree depth), not O(plan), per finished sample.
     fn refresh_path(&mut self, key: TileKey) {
+        // The callers changed `key`'s `ready` samples (new detail, a stand-in): an active tile
+        // that stays active must mesh from those too, not the ones it had.
+        self.sync_sample(key);
         let mut node = key;
         loop {
             if !self.plan.nodes.contains(&node) {
@@ -4061,6 +4064,37 @@ mod tests {
                 "width {width} at {x},{z}"
             );
         }
+    }
+    /// New detail for a tile that is drawn and stays drawn: the mesh jobs read the new samples,
+    /// not the ones it had (a debug build stopped on `check_mesh_samples` after a while in a
+    /// world; other builds meshed the old terrain).
+    #[test]
+    fn detail_for_an_active_tile_reaches_the_mesh_samples() {
+        let mut lod = Lod::scheduler_for_test();
+        let key = TileKey {
+            x: 0,
+            z: 0,
+            level: 0,
+        };
+        lod.plan = Plan::default();
+        lod.plan.roots = vec![key];
+        lod.plan.nodes.insert(key);
+        lod.finish_sample(key, vec![Column::default(); CELLS * CELLS]);
+        assert!(lod.active.contains(&key), "a sampled root is drawn");
+        let ground = Column::from_surface(Some(Surface {
+            height: 70,
+            state: BlockStateId(1),
+            water: None,
+            biome: 0,
+        }));
+        lod.apply_fine((0, 0), &std::array::from_fn(|_| ground.clone()));
+        assert!(lod.active.contains(&key), "still drawn");
+        let samples = lod
+            .mesh_samples
+            .get(&key)
+            .expect("an active tile's samples");
+        assert_eq!(samples[0], ground);
+        lod.check_mesh_samples();
     }
     /// Applying a chunk's detail records the cell widths it read, so the far
     /// terrain thread reduces them before it sends the next chunk.
