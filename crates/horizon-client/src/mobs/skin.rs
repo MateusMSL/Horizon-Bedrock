@@ -324,6 +324,25 @@ fn has_cull(part: &Part) -> bool {
     part.polygons.iter().any(|p| p.cull_back) || part.children.iter().any(has_cull)
 }
 
+/// The part's normal matrix as the shader reads it (an axis normal is one of its columns): the
+/// columns normalized when the scale is not uniform, as `Polygon::vertex_normal` normalizes the
+/// product. A part flattened on one axis (a Bedrock pack scales a bone to 0 that way) has an
+/// infinite column, and the CPU's product with any axis meets `0 × ∞`: a NaN it normalizes to
+/// no normal at all, which every column here takes too.
+fn normal_matrix(normals: ModelNormals) -> glam::Mat3 {
+    if normals.trusted {
+        normals.matrix
+    } else if !normals.matrix.is_finite() {
+        glam::Mat3::ZERO
+    } else {
+        glam::Mat3::from_cols(
+            normals.matrix.x_axis.normalize_or_zero(),
+            normals.matrix.y_axis.normalize_or_zero(),
+            normals.matrix.z_axis.normalize_or_zero(),
+        )
+    }
+}
+
 /// 0..2 for +x, +y, +z, 3..5 for -x, -y, -z; `None` for any other normal.
 fn axis(n: [f32; 3]) -> Option<u32> {
     let mut found = None;
@@ -525,15 +544,7 @@ impl Walk<'_> {
             return;
         }
         let normals = normals.part(p);
-        let n = if normals.trusted {
-            normals.matrix
-        } else {
-            glam::Mat3::from_cols(
-                normals.matrix.x_axis.normalize_or_zero(),
-                normals.matrix.y_axis.normalize_or_zero(),
-                normals.matrix.z_axis.normalize_or_zero(),
-            )
-        };
+        let n = normal_matrix(normals);
         self.parts[index as usize] = SkinPart {
             matrix: m.to_cols_array(),
             normal: n.to_cols_array(),
@@ -614,15 +625,7 @@ impl CachedWalk<'_> {
         let rotation = self.rotations.get(p);
         let m = super::render::posed_rotated(base, p, rotation.matrix);
         let normals = normals.part_rotated(p, rotation.normal);
-        let n = if normals.trusted {
-            normals.matrix
-        } else {
-            glam::Mat3::from_cols(
-                normals.matrix.x_axis.normalize_or_zero(),
-                normals.matrix.y_axis.normalize_or_zero(),
-                normals.matrix.z_axis.normalize_or_zero(),
-            )
-        };
+        let n = normal_matrix(normals);
         self.parts[index as usize] = SkinPart {
             matrix: m.to_cols_array(),
             normal: n.to_cols_array(),
@@ -989,6 +992,126 @@ mod tests {
             assert!(added.contains(&id), "{id} not posed with its tagged layers");
         }
         assert!(taken[0].is_subset(&taken[1]));
+    }
+
+    /// A Bedrock pack's mobs (docs/bedrock-gpu-pose.md, step 1): what the GPU poses of them (its
+    /// jobs expanded as `entity_skin.wgsl` does) together with what stays on the CPU is, to the
+    /// bit, what the CPU path draws of them. The two paths order the vertices apart (the posed
+    /// ones come first in the entity buffer), so they are compared as sets. Needs the prepared
+    /// resources (`HORIZON_TEST_RESOURCES`, else `.local/horizon-client/26.3`) and a converted
+    /// Bedrock pack (`HORIZON_TEST_BEDROCK_PACK`, a folder of `.horizon-cache/bedrock/`).
+    #[test]
+    fn a_bedrock_packs_mobs_posed_on_the_gpu_draw_what_the_cpu_draws() {
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = std::env::var_os("HORIZON_TEST_RESOURCES")
+            .map_or_else(|| repo.join(".local/horizon-client/26.3"), Into::into);
+        let Some(pack) =
+            std::env::var_os("HORIZON_TEST_BEDROCK_PACK").map(std::path::PathBuf::from)
+        else {
+            eprintln!("no HORIZON_TEST_BEDROCK_PACK: skipped");
+            return;
+        };
+        if !root.join("entity-models.json").exists() {
+            eprintln!("no prepared resources: skipped");
+            return;
+        }
+        let types = MobTypes::load(&root).unwrap();
+        let bedrock = Arc::new(crate::mobs::bedrock::BedrockMobs::load(&pack));
+        let data = MobData {
+            states: Vec::new(),
+            placements: Default::default(),
+            heightmaps: Default::default(),
+            animations: MobData::load_animations(&root),
+            biome_tags: Default::default(),
+            entity_tags: Default::default(),
+            villager_hats: Default::default(),
+            cem: Default::default(),
+            bedrock: std::sync::RwLock::new(bedrock.clone()),
+            random_textures: Default::default(),
+            emissive: Default::default(),
+            blinks: Default::default(),
+            pois: Default::default(),
+            species_placements: Default::default(),
+        };
+        let atlas = |name: &str| {
+            let h = name
+                .bytes()
+                .fold(7u32, |h, b| h.wrapping_mul(31).wrapping_add(u32::from(b)));
+            let u = (h % 61) as f32 / 64.0;
+            let v = (h / 61 % 61) as f32 / 64.0;
+            Some([u, v, u + 1.0 / 64.0, v + 1.0 / 32.0])
+        };
+        let camera = glam::DVec3::new(0.3, 62.0, -4.0);
+        let mut models = SkinModels::default();
+        let mut frame = SkinFrame::default();
+        let mut store: Vec<crate::gfx::entity_skin::SkinVertex> = Vec::new();
+        let mut ids: Vec<_> = types
+            .types
+            .keys()
+            .filter(|id| bedrock.has_entity(id) && !id.contains("player"))
+            .cloned()
+            .collect();
+        ids.sort();
+        let mut posed = std::collections::BTreeSet::new();
+        for (n, id) in ids.iter().enumerate() {
+            let kind = Arc::new(types.types[id].clone());
+            for (age, yaw) in [(0u32, 0.0f32), (37, 123.0), (412, -71.5)] {
+                let at = horizon_core::geometry::Vec3::new(1.5 + n as f64 % 5.0, 64.0, 3.25);
+                let mut m = Mob::new(n as u32 + 1, kind.clone(), at, yaw);
+                m.previous = horizon_core::geometry::Vec3::new(at.x - 0.1, at.y, at.z + 0.05);
+                m.age = age;
+                m.limb_speed = 0.6;
+                m.limb_position = age as f32 * 0.37;
+                // The GPU path first: a mob it poses keeps no vertices for the CPU path to reuse.
+                models.begin(&mut frame, store.len() as u32);
+                let mut gpu = Vec::new();
+                let mut skin = Skin::new(&mut models, &mut frame);
+                render::render_skinned(&m, 0.4, camera, &atlas, 0x50a0, &data, &mut gpu, &mut skin);
+                if frame.reset {
+                    store.clear();
+                }
+                assert_eq!(store.len() as u32, frame.base);
+                store.extend_from_slice(&frame.new_model);
+                frame.handed();
+                let mut cpu = Vec::new();
+                render::render_with(&m, 0.4, camera, &atlas, 0x50a0, &data, &[], &mut cpu);
+                if !frame.jobs.is_empty() {
+                    posed.insert(id.clone());
+                }
+                let mut both: Vec<&[u8]> = expand(&store, &frame)
+                    .iter()
+                    .chain(&gpu)
+                    .map(|v| bytemuck::bytes_of(v).to_vec().leak() as &[u8])
+                    .collect();
+                let mut want: Vec<&[u8]> = cpu.iter().map(bytemuck::bytes_of).collect();
+                both.sort_unstable();
+                want.sort_unstable();
+                assert_eq!(both.len(), want.len(), "{id} age {age}: vertex count");
+                if both != want {
+                    let only_gpu: Vec<_> = both
+                        .iter()
+                        .filter(|b| !want.contains(b))
+                        .take(3)
+                        .map(|b| *bytemuck::from_bytes::<crate::mesher::Vertex>(b))
+                        .collect();
+                    let only_cpu: Vec<_> = want
+                        .iter()
+                        .filter(|b| !both.contains(b))
+                        .take(3)
+                        .map(|b| *bytemuck::from_bytes::<crate::mesher::Vertex>(b))
+                        .collect();
+                    panic!(
+                        "{id} age {age}: the paths draw other vertices\nGPU {only_gpu:#?}\nCPU {only_cpu:#?}"
+                    );
+                }
+            }
+        }
+        eprintln!(
+            "posed on the GPU: {} of {} pack mobs: {posed:?}",
+            posed.len(),
+            ids.len()
+        );
+        assert!(!posed.is_empty(), "no pack mob took the GPU path");
     }
 
     /// `BatModel` and `BabyTurtleModel` draw with `entityCutoutCull`: their

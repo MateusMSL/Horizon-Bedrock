@@ -2209,7 +2209,9 @@ fn render_visible(
     let overlay = u32::from(red_overlay(m));
     let s = anim::state(m, alpha);
     // A Bedrock pack that dresses this mob draws it instead, with the mob's own state.
-    if body_visible && render_bedrock(m, alpha, base, atlas, light, data, out) {
+    let mut skin = skin;
+    if body_visible && render_bedrock(m, alpha, base, atlas, light, data, out, skin.as_deref_mut())
+    {
         return;
     }
     let (model_key, texture) = body(m);
@@ -2300,7 +2302,6 @@ fn render_visible(
     // order: only plain draws of models it can pose (no custom models,
     // translucent body or energy swirl, which the CPU path changes after
     // drawing), and with improved transparency off the tagged layers too.
-    let mut skin = skin;
     let posable = match skin.as_deref_mut() {
         Some(skin) => {
             custom_body.is_none()
@@ -2981,6 +2982,13 @@ mod tests {
         };
         let still = glam::Mat4::IDENTITY;
         let same = super::moved_vertex(&v, &still, &glam::Mat3::from_mat4(still));
+        // A packed normal is rarely 127 long: unmoved, its bytes stay as they are.
+        let crooked = Vertex {
+            normal: [-27, 18, 122, -127],
+            ..v
+        };
+        let kept = super::moved_vertex(&crooked, &still, &glam::Mat3::from_mat4(still));
+        assert_eq!(kept.normal, crooked.normal);
         assert_eq!(
             (same.pos, same.normal, same.uv, same.color),
             (v.pos, v.normal, v.uv, v.color)

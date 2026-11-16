@@ -375,12 +375,14 @@ thread_local! {
 }
 
 /// `v` moved by `delta` (the mob's motion since its vertices were drawn): its place, and its
-/// normal turned with it.
+/// normal turned with it. The turn is a rotation (the mob's scale cancels out of `delta`), so the
+/// normal keeps its length: renormalizing moved the bytes of a still mob's normals (a packed
+/// normal is rarely exactly 127 long).
 fn moved_vertex(v: &Vertex, delta: &glam::Mat4, turn: &glam::Mat3) -> Vertex {
     let pos = delta.transform_point3(glam::Vec3::from_array(v.pos)).to_array();
     let [x, y, z, w] = v.normal;
-    let n = *turn * glam::Vec3::new(f32::from(x), f32::from(y), f32::from(z)) / 127.0;
-    let n = n.normalize_or_zero() * 127.0;
+    let n = *turn * glam::Vec3::new(f32::from(x), f32::from(y), f32::from(z));
+    let n = n.clamp(glam::Vec3::splat(-127.0), glam::Vec3::splat(127.0));
     Vertex {
         pos,
         normal: [n.x.round() as i8, n.y.round() as i8, n.z.round() as i8, w],
@@ -395,6 +397,7 @@ fn moved_vertex(v: &Vertex, delta: &glam::Mat4, turn: &glam::Mat3) -> Vertex {
 /// so it stands with the pose, and the pieces handed to the stencil pass are kept and handed
 /// over again, moved the same (a copper golem's body writes the stencil). Left out: the
 /// first-person view, screens' previews and a sulfur cube (its size eases every frame).
+#[allow(clippy::too_many_arguments)]
 fn render_bedrock(
     m: &Mob,
     alpha: f32,
@@ -403,6 +406,7 @@ fn render_bedrock(
     light: u32,
     data: &MobData,
     out: &mut Vec<Vertex>,
+    mut skin: Option<&mut super::skin::Skin>,
 ) -> bool {
     let keepable = !m.extra.first_person
         && !in_first_person_view()
@@ -428,7 +432,7 @@ fn render_bedrock(
         d.get()
     });
     let Some(frame) = frame else {
-        return render_bedrock_uncached(m, alpha, base, atlas, light, data, out);
+        return render_bedrock_uncached(m, alpha, base, atlas, light, data, out, skin);
     };
     super::bedrock::drew_model();
     let settings = super::bedrock_debug::settings();
@@ -446,6 +450,13 @@ fn render_bedrock(
         }
         k.used = draws;
         let _span = horizon_client_render::spans::guard("bd_kept");
+        // Not moved (a still mob, the same frame drawn twice): its vertices as they were;
+        // `base * base⁻¹` is not quite the identity.
+        if base == k.base {
+            out.extend_from_slice(&k.vertices);
+            super::bedrock_stencil::replay(&k.handed, |v| *v);
+            return Some(());
+        }
         let delta = base * k.base.inverse();
         let turn = glam::Mat3::from_mat4(delta);
         out.extend(k.vertices.iter().map(|v| moved_vertex(v, &delta, &turn)));
@@ -456,12 +467,16 @@ fn render_bedrock(
         return true;
     }
     let start = out.len();
+    let jobs = skin.as_ref().map(|s| s.frame.jobs.len());
     let (drew, handed) = super::bedrock_stencil::record(|| {
-        render_bedrock_uncached(m, alpha, base, atlas, light, data, out)
+        render_bedrock_uncached(m, alpha, base, atlas, light, data, out, skin.as_deref_mut())
     });
+    // Posed on the GPU in part (docs/bedrock-gpu-pose.md): its jobs are made again each frame,
+    // so its vertices alone are not the whole mob and are not kept.
+    let posed = skin.as_ref().map(|s| s.frame.jobs.len()) != jobs;
     KEPT_MESHES.with(|kept| {
         let mut kept = kept.borrow_mut();
-        if drew {
+        if drew && !posed {
             kept.insert(
                 m.id,
                 KeptMesh {
@@ -487,6 +502,7 @@ fn render_bedrock(
     drew
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_bedrock_uncached(
     m: &Mob,
     alpha: f32,
@@ -495,6 +511,7 @@ fn render_bedrock_uncached(
     light: u32,
     data: &MobData,
     out: &mut Vec<Vertex>,
+    mut skin: Option<&mut super::skin::Skin>,
 ) -> bool {
     let bedrock = data
         .bedrock
@@ -860,6 +877,47 @@ fn render_bedrock_uncached(
             }
             // A glinting material shows the enchantment's shimmer over its texture.
             let overlay = if flags.glint { ARMOR_GLINT } else { overlay };
+            // An ordinary opaque or cut-out group draws on the GPU as the game's own mobs do
+            // (`super::skin`): none of what follows the CPU draw below changes its vertices.
+            // Step 1 of docs/bedrock-gpu-pose.md; the rest stays here.
+            let plain = lying.is_none()
+                && super::bedrock_stencil::route(&stencil_flags) == super::bedrock_stencil::Route::Scene
+                && flags.stencil_write == 0
+                && flags.stencil_not_equal == 0
+                && !flags.uv_anim
+                && layers_before == 0
+                && gi == 0
+                && !flags.invert_culling
+                && (flags.double_sided
+                    || !(flags.blend
+                        || (!flags.additive && bedrock.has_inside_out(&layer.layer.geometry))))
+                && !layer.layer.flat_lighting
+                && !(flags.blend
+                    || flags.additive
+                    || flags.no_depth_write
+                    || flags.no_depth_test
+                    || (flags.multitexture && layer.layer.secondary)
+                    || layer.layer.color[3] < 1.0)
+                && glow.is_none();
+            if plain
+                && let Some(skin) = skin.as_deref_mut()
+                && skin.draw(
+                    &layer.built.part,
+                    base,
+                    &poses,
+                    super::skin::Paint {
+                        uv,
+                        scroll: 0.0,
+                        color: tint(color, layer_tint),
+                        light: drawn_light,
+                        overlay,
+                    },
+                )
+            {
+                drew_here = true;
+                drew = true;
+                continue;
+            }
             draw(
                 &layer.built.part,
                 base,
@@ -2052,6 +2110,7 @@ pub fn first_person_item(
         light,
         data,
         out,
+        None,
     );
     FP_VIEW.with(|v| v.set(None));
     FP_EYE.with(|v| v.set(None));
@@ -2121,7 +2180,7 @@ pub fn render_pack_at(
     out: &mut Vec<Vertex>,
 ) -> bool {
     let start = out.len();
-    let drew = render_bedrock(m, alpha, base, atlas, light, data, out);
+    let drew = render_bedrock(m, alpha, base, atlas, light, data, out, None);
     if !drew {
         out.truncate(start);
     }
