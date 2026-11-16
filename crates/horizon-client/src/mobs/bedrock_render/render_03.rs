@@ -362,6 +362,8 @@ struct KeptMesh {
     /// The mob's place (`base`) they were drawn at.
     base: glam::Mat4,
     vertices: Vec<Vertex>,
+    /// The pieces the drawing handed to the stencil pass, handed over again with them.
+    handed: Vec<super::bedrock_stencil::Handed>,
     /// The drawing that last used them (`MESH_DRAWS`), to let go of mobs no longer drawn.
     used: u64,
 }
@@ -390,8 +392,9 @@ fn moved_vertex(v: &Vertex, delta: &glam::Mat4, turn: &glam::Mat3) -> Vertex {
 /// to where the mob is now, when nothing else changed. A mob away from the camera keeps its
 /// pose for a few frames (`BedrockMobs::frame`); building its model again each of them was most
 /// of what an add-on's crowd cost. A scrolling texture (`uv_anim`) is part of the frame too,
-/// so it stands with the pose. Left out: the first-person view, screens' previews, a sulfur cube
-/// (its size eases every frame) and drawings that handed pieces to the stencil pass.
+/// so it stands with the pose, and the pieces handed to the stencil pass are kept and handed
+/// over again, moved the same (a copper golem's body writes the stencil). Left out: the
+/// first-person view, screens' previews and a sulfur cube (its size eases every frame).
 fn render_bedrock(
     m: &Mob,
     alpha: f32,
@@ -427,6 +430,7 @@ fn render_bedrock(
     let Some(frame) = frame else {
         return render_bedrock_uncached(m, alpha, base, atlas, light, data, out);
     };
+    super::bedrock::drew_model();
     let settings = super::bedrock_debug::settings();
     let (color, overlay) = (body_color(m, alpha), body_overlay(m, alpha));
     let reused = KEPT_MESHES.with(|kept| {
@@ -445,17 +449,19 @@ fn render_bedrock(
         let delta = base * k.base.inverse();
         let turn = glam::Mat3::from_mat4(delta);
         out.extend(k.vertices.iter().map(|v| moved_vertex(v, &delta, &turn)));
+        super::bedrock_stencil::replay(&k.handed, |v| moved_vertex(v, &delta, &turn));
         Some(())
     });
     if reused.is_some() {
         return true;
     }
     let start = out.len();
-    let handed = super::bedrock_stencil::handed();
-    let drew = render_bedrock_uncached(m, alpha, base, atlas, light, data, out);
+    let (drew, handed) = super::bedrock_stencil::record(|| {
+        render_bedrock_uncached(m, alpha, base, atlas, light, data, out)
+    });
     KEPT_MESHES.with(|kept| {
         let mut kept = kept.borrow_mut();
-        if drew && super::bedrock_stencil::handed() == handed {
+        if drew {
             kept.insert(
                 m.id,
                 KeptMesh {
@@ -466,6 +472,7 @@ fn render_bedrock(
                     overlay,
                     base,
                     vertices: out[start..].to_vec(),
+                    handed,
                     used: draws,
                 },
             );

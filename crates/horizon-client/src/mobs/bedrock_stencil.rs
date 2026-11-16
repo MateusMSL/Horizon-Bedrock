@@ -90,15 +90,41 @@ fn state(f: &MaterialFlags, color: bool) -> pass::State {
     }
 }
 
+/// A piece handed to the pass: where, how, and its vertices as they went.
+pub type Handed = (pass::Target, pass::State, Vec<Vertex>);
+
 thread_local! {
-    /// Pieces this thread handed to the pass so far (`handed`).
-    static HANDED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// The pieces handed to the pass while `record` runs.
+    static RECORDING: std::cell::RefCell<Option<Vec<Handed>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
-/// How many pieces this thread has handed to the pass: a mob whose drawing handed none drew
-/// into its vertices alone, which `render_bedrock` may then keep and draw again.
-pub fn handed() -> u64 {
-    HANDED.with(std::cell::Cell::get)
+/// Runs `f` and gives back, beside its result, the pieces it handed to the pass: what
+/// `render_bedrock` keeps with a mob's vertices to hand over again (`replay`) when it draws
+/// them again.
+pub fn record<R>(f: impl FnOnce() -> R) -> (R, Vec<Handed>) {
+    let outer = RECORDING.with(|r| r.borrow_mut().replace(Vec::new()));
+    let result = f();
+    let handed = RECORDING.with(|r| std::mem::replace(&mut *r.borrow_mut(), outer));
+    (result, handed.unwrap_or_default())
+}
+
+/// Hands `pieces` to the pass again, each vertex through `map` (moved to where the mob is now).
+pub fn replay(pieces: &[Handed], map: impl Fn(&Vertex) -> Vertex) {
+    for (target, state, vertices) in pieces {
+        let moved: Vec<Vertex> = vertices.iter().map(&map).collect();
+        pass::push(*target, *state, &moved);
+    }
+}
+
+/// `pass::push`, kept for `record` when it runs.
+fn push(target: pass::Target, state: pass::State, vertices: &[Vertex]) {
+    RECORDING.with(|r| {
+        if let Some(pieces) = r.borrow_mut().as_mut() {
+            pieces.push((target, state, vertices.to_vec()));
+        }
+    });
+    pass::push(target, state, vertices);
 }
 
 /// The piece just drawn into `out[start..]` with material `f`: handed to the pass as its route
@@ -126,7 +152,6 @@ pub fn hand_over(f: &MaterialFlags, out: &mut Vec<Vertex>, start: usize) {
     if route == Route::Scene || out.len() <= start {
         return;
     }
-    HANDED.with(|h| h.set(h.get() + 1));
     let target = if super::render::in_first_person_view() {
         pass::Target::Hand
     } else {
@@ -143,11 +168,62 @@ pub fn hand_over(f: &MaterialFlags, out: &mut Vec<Vertex>, start: usize) {
             if target == pass::Target::Hand {
                 s.depth_test = false;
             }
-            pass::push(target, s, &out[start..])
+            push(target, s, &out[start..])
         }
         Route::Pass => {
-            pass::push(target, state(f, !f.no_color), &out[start..]);
+            push(target, state(f, !f.no_color), &out[start..]);
             out.truncate(start);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn piece(reference: u8) -> (pass::State, Vec<Vertex>) {
+        let state = pass::State {
+            color: false,
+            additive: false,
+            blended: false,
+            depth_write: true,
+            depth_test: true,
+            cutout: true,
+            compare: pass::Compare::Always,
+            replace: true,
+            reference,
+            read_mask: 255,
+            write_mask: 255,
+        };
+        let v = Vertex {
+            pos: [f32::from(reference); 3],
+            uv: [0.0; 2],
+            layer: 0,
+            color: 0,
+            light: 0,
+            normal: [0; 4],
+            glint_uv: [0.0; 2],
+        };
+        (state, vec![v; 4])
+    }
+
+    /// What a mob's drawing hands to the pass is kept for it, a drawing inside another kept
+    /// apart, and nothing is kept outside `record`.
+    #[test]
+    fn a_drawing_keeps_the_pieces_it_handed_over() {
+        let (a, va) = piece(1);
+        let (b, vb) = piece(2);
+        push(pass::Target::World, a, &va);
+        let ((), outer) = record(|| {
+            push(pass::Target::World, a, &va);
+            let ((), inner) = record(|| push(pass::Target::World, b, &vb));
+            assert_eq!(inner.len(), 1);
+            assert_eq!(inner[0].1.reference, 2);
+        });
+        assert_eq!(outer.len(), 1, "the inner drawing's piece is its own");
+        assert_eq!((outer[0].1.reference, outer[0].2.len()), (1, 4));
+        assert_eq!(outer[0].2[0].pos, [1.0; 3]);
+        let ((), none) = record(|| ());
+        assert!(none.is_empty());
     }
 }

@@ -36,6 +36,8 @@ impl Game<'_> {
         let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
         let scale = self.view_scale();
         self.rendered_mobs.set(0);
+        // The Bedrock pack's crowd last frame, for how often its mobs are posed.
+        horizon_client::mobs::bedrock::begin_frame();
         let skinning = self.skinning();
         // What custom entity model animations read of the frame.
         horizon_client::mobs::cem_anim::set_frame(horizon_client::mobs::cem_anim::Frame {
