@@ -90,6 +90,17 @@ fn state(f: &MaterialFlags, color: bool) -> pass::State {
     }
 }
 
+thread_local! {
+    /// Pieces this thread handed to the pass so far (`handed`).
+    static HANDED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// How many pieces this thread has handed to the pass: a mob whose drawing handed none drew
+/// into its vertices alone, which `render_bedrock` may then keep and draw again.
+pub fn handed() -> u64 {
+    HANDED.with(std::cell::Cell::get)
+}
+
 /// The piece just drawn into `out[start..]` with material `f`: handed to the pass as its route
 /// says, and taken out of the scene's vertices when the pass alone draws it.
 pub fn hand_over(f: &MaterialFlags, out: &mut Vec<Vertex>, start: usize) {
@@ -115,6 +126,7 @@ pub fn hand_over(f: &MaterialFlags, out: &mut Vec<Vertex>, start: usize) {
     if route == Route::Scene || out.len() <= start {
         return;
     }
+    HANDED.with(|h| h.set(h.get() + 1));
     let target = if super::render::in_first_person_view() {
         pass::Target::Hand
     } else {

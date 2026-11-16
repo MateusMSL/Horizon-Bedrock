@@ -349,7 +349,138 @@ fn drops_glide_turn(m: &Mob) -> bool {
     m.extra.fall_flying && !m.extra.auto_spin_attack && super::bedrock::pack_glides(m.id)
 }
 
+/// A mob's vertices as `render_bedrock` last drew them, and what they were drawn from.
+struct KeptMesh {
+    /// The pose: the same frame (`BedrockMobs::frame` hands the last one back while the pose
+    /// stands) is the same model in the same pose. Held, so its address is not reused.
+    frame: std::sync::Arc<super::bedrock::MobFrame>,
+    /// The debug file's settings the vertices were drawn under.
+    settings: std::sync::Arc<super::bedrock_debug::Settings>,
+    light: u32,
+    color: u32,
+    overlay: u32,
+    /// The mob's place (`base`) they were drawn at.
+    base: glam::Mat4,
+    vertices: Vec<Vertex>,
+    /// The drawing that last used them (`MESH_DRAWS`), to let go of mobs no longer drawn.
+    used: u64,
+}
+
+thread_local! {
+    static KEPT_MESHES: std::cell::RefCell<std::collections::HashMap<u32, KeptMesh>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+    static MESH_DRAWS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// `v` moved by `delta` (the mob's motion since its vertices were drawn): its place, and its
+/// normal turned with it.
+fn moved_vertex(v: &Vertex, delta: &glam::Mat4, turn: &glam::Mat3) -> Vertex {
+    let pos = delta.transform_point3(glam::Vec3::from_array(v.pos)).to_array();
+    let [x, y, z, w] = v.normal;
+    let n = *turn * glam::Vec3::new(f32::from(x), f32::from(y), f32::from(z)) / 127.0;
+    let n = n.normalize_or_zero() * 127.0;
+    Vertex {
+        pos,
+        normal: [n.x.round() as i8, n.y.round() as i8, n.z.round() as i8, w],
+        ..*v
+    }
+}
+
+/// A Bedrock pack's mob: [`render_bedrock_uncached`], or the vertices it drew last time moved
+/// to where the mob is now, when nothing else changed. A mob away from the camera keeps its
+/// pose for a few frames (`BedrockMobs::frame`); building its model again each of them was most
+/// of what an add-on's crowd cost. A scrolling texture (`uv_anim`) is part of the frame too,
+/// so it stands with the pose. Left out: the first-person view, screens' previews, a sulfur cube
+/// (its size eases every frame) and drawings that handed pieces to the stencil pass.
 fn render_bedrock(
+    m: &Mob,
+    alpha: f32,
+    base: glam::Mat4,
+    atlas: Atlas,
+    light: u32,
+    data: &MobData,
+    out: &mut Vec<Vertex>,
+) -> bool {
+    let keepable = !m.extra.first_person
+        && !in_first_person_view()
+        && FP_VIEW.with(|v| v.get()).is_none()
+        && !super::cem_anim::is_in_gui()
+        && m.species() != Species::SulfurCube;
+    let frame = keepable
+        .then(|| {
+            let bedrock = data
+                .bedrock
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if bedrock.is_empty() {
+                return None;
+            }
+            horizon_client_render::spans::time("bd_frame", || {
+                bedrock.frame(m, alpha, feet_from_camera(m, pack_model_base(m, alpha, base)))
+            })
+        })
+        .flatten();
+    let draws = MESH_DRAWS.with(|d| {
+        d.set(d.get() + 1);
+        d.get()
+    });
+    let Some(frame) = frame else {
+        return render_bedrock_uncached(m, alpha, base, atlas, light, data, out);
+    };
+    let settings = super::bedrock_debug::settings();
+    let (color, overlay) = (body_color(m, alpha), body_overlay(m, alpha));
+    let reused = KEPT_MESHES.with(|kept| {
+        let mut kept = kept.borrow_mut();
+        let k = kept.get_mut(&m.id)?;
+        if !(std::sync::Arc::ptr_eq(&k.frame, &frame)
+            && std::sync::Arc::ptr_eq(&k.settings, &settings)
+            && k.light == light
+            && k.color == color
+            && k.overlay == overlay)
+        {
+            return None;
+        }
+        k.used = draws;
+        let _span = horizon_client_render::spans::guard("bd_kept");
+        let delta = base * k.base.inverse();
+        let turn = glam::Mat3::from_mat4(delta);
+        out.extend(k.vertices.iter().map(|v| moved_vertex(v, &delta, &turn)));
+        Some(())
+    });
+    if reused.is_some() {
+        return true;
+    }
+    let start = out.len();
+    let handed = super::bedrock_stencil::handed();
+    let drew = render_bedrock_uncached(m, alpha, base, atlas, light, data, out);
+    KEPT_MESHES.with(|kept| {
+        let mut kept = kept.borrow_mut();
+        if drew && super::bedrock_stencil::handed() == handed {
+            kept.insert(
+                m.id,
+                KeptMesh {
+                    frame,
+                    settings,
+                    light,
+                    color,
+                    overlay,
+                    base,
+                    vertices: out[start..].to_vec(),
+                    used: draws,
+                },
+            );
+        } else {
+            kept.remove(&m.id);
+        }
+        // Mobs not drawn for a while (gone, out of view) let go of their vertices.
+        if draws.is_multiple_of(4096) {
+            kept.retain(|_, k| draws - k.used < 4096);
+        }
+    });
+    drew
+}
+
+fn render_bedrock_uncached(
     m: &Mob,
     alpha: f32,
     base: glam::Mat4,
@@ -366,9 +497,7 @@ fn render_bedrock(
         return false;
     }
     let base = pack_model_base(m, alpha, base);
-    let Some(frame) = horizon_client_render::spans::time("bd_frame", || {
-        bedrock.frame(m, alpha, feet_from_camera(m, base))
-    }) else {
+    let Some(frame) = bedrock.frame(m, alpha, feet_from_camera(m, base)) else {
         return false;
     };
     let _mesh_span = horizon_client_render::spans::guard("bd_mesh");
