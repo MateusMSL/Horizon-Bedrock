@@ -1,5 +1,79 @@
-/// The distinct material flags among a layer's bones, in order: one group per look.
+/// The distinct material flags among a layer's bones, in order: one group per look. Kept by
+/// what they follow from (the layer's materials, the model, the debug file, the stencil pass):
+/// each look asks every bone's material, and ordering for the stencil pass asks it again per
+/// look, which for a model of many bones drawn every frame (the first-person player) was a
+/// good part of drawing it. The model is held, so its address is not reused while kept.
 fn material_groups(
+    layer: &horizon_bedrock::entity::Layer,
+    built: &std::sync::Arc<super::bedrock::Built>,
+    materials: &horizon_bedrock::material::Materials,
+) -> std::rc::Rc<MatGroups> {
+    struct Kept {
+        material: String,
+        bone_materials: Vec<(String, String)>,
+        built: std::sync::Arc<super::bedrock::Built>,
+        materials: usize,
+        settings: std::sync::Arc<super::bedrock_debug::Settings>,
+        stencil: bool,
+        groups: std::rc::Rc<MatGroups>,
+    }
+    thread_local! {
+        static KEPT: std::cell::RefCell<Vec<Kept>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    let settings = super::bedrock_debug::settings();
+    let stencil = super::bedrock_stencil::on();
+    let materials_at = std::ptr::from_ref(materials) as usize;
+    let found = KEPT.with(|kept| {
+        kept.borrow()
+            .iter()
+            .find(|k| {
+                std::sync::Arc::ptr_eq(&k.built, built)
+                    && std::sync::Arc::ptr_eq(&k.settings, &settings)
+                    && k.materials == materials_at
+                    && k.stencil == stencil
+                    && k.material == layer.material
+                    && k.bone_materials == layer.bone_materials
+            })
+            .map(|k| k.groups.clone())
+    });
+    if let Some(groups) = found {
+        return groups;
+    }
+    let list = material_groups_of(layer, &built.names, materials);
+    let bone = if list.len() < 2 {
+        vec![0; built.names.len()]
+    } else {
+        built
+            .names
+            .iter()
+            .map(|n| {
+                let g = bone_group(layer, materials, n);
+                list.iter().position(|x| *x == g).unwrap_or(0)
+            })
+            .collect()
+    };
+    let groups = std::rc::Rc::new(MatGroups { list, bone });
+    KEPT.with(|kept| {
+        let mut kept = kept.borrow_mut();
+        // A few hundred models and layers in sight at most; past that, models let go.
+        if kept.len() >= 512 {
+            kept.clear();
+        }
+        kept.push(Kept {
+            material: layer.material.clone(),
+            bone_materials: layer.bone_materials.clone(),
+            built: built.clone(),
+            materials: materials_at,
+            settings,
+            stencil,
+            groups: groups.clone(),
+        });
+    });
+    groups
+}
+
+/// [`material_groups`], worked out.
+fn material_groups_of(
     layer: &horizon_bedrock::entity::Layer,
     names: &[String],
     materials: &horizon_bedrock::material::Materials,
@@ -62,6 +136,13 @@ fn material_groups(
 
 /// What a draw pass shares: the flags of the material and the debug file's tint for the bone.
 type MatGroup = (horizon_bedrock::material::MaterialFlags, [f32; 4]);
+
+/// A layer's looks ([`material_groups`]) and the one each of its model's bones draws in.
+struct MatGroups {
+    list: Vec<MatGroup>,
+    /// By bone, as the model names them (`Built::names`): its look's index in `list`.
+    bone: Vec<usize>,
+}
 
 /// The pass a bone's cubes draw in.
 fn bone_group(

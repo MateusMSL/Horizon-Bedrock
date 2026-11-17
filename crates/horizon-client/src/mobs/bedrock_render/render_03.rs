@@ -778,12 +778,12 @@ fn render_bedrock_uncached(
         // their own pass, with that material's flags.
         let groups = material_groups(
             &layer.layer,
-            &layer.built.names,
+            &layer.built,
             &bedrock.bundle().materials,
         );
         let layers_before = layers_drawn;
         let mut drew_here = false;
-        for (gi, group) in groups.iter().enumerate() {
+        for (gi, group) in groups.list.iter().enumerate() {
             // The layer's pose is the same for each of its groups, which differ only in the bones
             // that draw their cubes: posed once, so the GPU path reuses its part matrices
             // (`Poses::shape_version`), and each later group only skips other bones.
@@ -885,9 +885,9 @@ fn render_bedrock_uncached(
                     holder.entry(name).or_insert(m);
                 }
             }
-            if groups.len() > 1 {
-                for name in &layer.built.names {
-                    if bone_group(&layer.layer, &bedrock.bundle().materials, name) != *group {
+            if groups.list.len() > 1 {
+                for (name, &g) in layer.built.names.iter().zip(&groups.bone) {
+                    if g != gi {
                         // Its own cubes only: a child with another material still draws, in
                         // its own pass (a slime's outer shell hangs under a bone of another look).
                         poses.skip_draw(name);
@@ -963,15 +963,14 @@ fn render_bedrock_uncached(
                     .built
                     .names
                     .iter()
-                    .filter(|n| {
+                    .zip(&groups.bone)
+                    .filter(|(n, g)| {
                         layer.layer.bone_visible(n)
                             && !debug.hides_bone(n)
                             && !debug.solo_hides(n)
-                            && (groups.len() < 2
-                                || bone_group(&layer.layer, &bedrock.bundle().materials, n)
-                                    == *group)
+                            && (groups.list.len() < 2 || **g == gi)
                     })
-                    .map(String::as_str)
+                    .map(|(n, _)| n.as_str())
                     .collect();
                 log_bedrock_once(
                     format!("draw/{}/{}/{gi}/{secs}", m.kind.id, layer.texture),
@@ -983,7 +982,7 @@ fn render_bedrock_uncached(
                             layer.texture,
                             uv,
                             layer.layer.material,
-                            groups.len(),
+                            groups.list.len(),
                             layer_tint,
                             if layer.layer.ignore_lighting { "full" } else { "world" },
                             flags.blend,
@@ -1607,10 +1606,10 @@ fn render_bedrock_uncached(
             // material drew a halo as an opaque disk.
             let groups = material_groups(
                 &layer.layer,
-                &layer.built.names,
+                &layer.built,
                 &bedrock.bundle().materials,
             );
-            for group in &groups {
+            for (gi, group) in groups.list.iter().enumerate() {
                 poses.reset(&layer.built.part);
                 super::bedrock::apply_pose(&att.pose, &layer.built.names, &mut poses);
                 for name in &layer.built.names {
@@ -1652,9 +1651,9 @@ fn render_bedrock_uncached(
                         p[5] += r[2];
                     }
                 }
-                if groups.len() > 1 {
-                    for name in &layer.built.names {
-                        if bone_group(&layer.layer, &bedrock.bundle().materials, name) != *group {
+                if groups.list.len() > 1 {
+                    for (name, &g) in layer.built.names.iter().zip(&groups.bone) {
+                        if g != gi {
                             // Its own cubes only: a child with another material draws in its pass.
                             poses.skip_draw(name);
                         }
@@ -1784,7 +1783,7 @@ fn render_bedrock_uncached(
                     && !lit_glow
                     && (!flags.emissive_alpha
                         || flags.additive
-                        || groups.len() > 1
+                        || groups.list.len() > 1
                         || atlas(&format!("{}_glow", layer.texture)).is_some());
                 // A layer the stencil keeps to the outside of the piece (its rim, its shine) is the
                 // piece's own edge: it darkens with the light the piece does, whatever the
