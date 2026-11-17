@@ -182,6 +182,7 @@ pub struct EvalCtx<'a> {
     pub this: Value,
 }
 
+/// How a run leaves the expression it is in: `return`, `break`, `continue`, or abandoned.
 enum Flow {
     Return(Value),
     Break,
@@ -189,12 +190,14 @@ enum Flow {
     Abort,
 }
 
-type Res = Result<Value, Flow>;
-
 struct Machine<'a, 'b> {
     ctx: &'a mut EvalCtx<'b>,
     temps: Vars,
     steps: u32,
+    /// Set when the run leaves the expressions it is in (`return`, `break`, `continue`, too
+    /// many steps): every enclosing expression stops where it is, as soon as it sees it. A
+    /// field rather than a `Result` returned by each node: the results were most of a run.
+    flow: Option<Flow>,
 }
 
 thread_local! {
@@ -221,6 +224,7 @@ impl Program {
             ctx,
             temps: shared.unwrap_or_default(),
             steps: 0,
+            flow: None,
         };
         let result = self.run_body(&mut m);
         if is_shared {
@@ -233,10 +237,11 @@ impl Program {
     fn run_body(&self, m: &mut Machine) -> Value {
         let mut last = Value::Null;
         for stmt in &self.body {
-            match m.eval(stmt) {
-                Ok(v) => last = v,
-                Err(Flow::Return(v)) => return v,
-                Err(_) => return Value::Num(0.0),
+            last = m.eval(stmt);
+            match m.flow.take() {
+                None => {}
+                Some(Flow::Return(v)) => return v,
+                Some(_) => return Value::Num(0.0),
             }
         }
         if self.single { last } else { Value::Num(0.0) }
@@ -265,30 +270,105 @@ fn builtin_query(name: &str, args: &[Value]) -> Option<Value> {
     }
 }
 
+/// Evaluates `$e` on `$m`, leaving the enclosing node (with `Null`) when the run leaves it.
+macro_rules! ev {
+    ($m:ident, $e:expr) => {{
+        let v = $m.eval($e);
+        if $m.flow.is_some() {
+            return Value::Null;
+        }
+        v
+    }};
+}
+
+/// [`ev!`] as a number ([`Machine::num`]).
+macro_rules! num {
+    ($m:ident, $e:expr) => {{
+        let n = $m.num($e);
+        if $m.flow.is_some() {
+            return Value::Null;
+        }
+        n
+    }};
+}
+
 impl Machine<'_, '_> {
-    fn eval(&mut self, e: &Expr) -> Res {
+    /// Counts a node, abandoning the run past [`STEP_LIMIT`]: `false` when it is abandoned.
+    fn step(&mut self) -> bool {
         self.steps += 1;
         if self.steps > STEP_LIMIT {
-            return Err(Flow::Abort);
+            self.flow = Some(Flow::Abort);
+            return false;
         }
-        Ok(match e {
+        true
+    }
+
+    /// `e`'s value as a number, without making a [`Value`] for the nodes that only make
+    /// numbers (arithmetic, comparisons, logic, variables): most of what conditions and
+    /// keyframes are. The same as `self.eval(e).num()`.
+    fn num(&mut self, e: &Expr) -> f32 {
+        let bool = |b: bool| if b { 1.0 } else { 0.0 };
+        match e {
+            Expr::Num(n) => {
+                if !self.step() {
+                    return 0.0;
+                }
+                *n
+            }
+            Expr::Var(scope, s) => {
+                if !self.step() {
+                    return 0.0;
+                }
+                let vars = match scope {
+                    Scope::Variable => &*self.ctx.vars,
+                    Scope::Temp => &self.temps,
+                };
+                vars.get(s).map_or(0.0, Value::num)
+            }
+            Expr::Neg(inner) => {
+                if !self.step() {
+                    return 0.0;
+                }
+                -self.num(inner)
+            }
+            Expr::Not(inner) => {
+                if !self.step() {
+                    return 0.0;
+                }
+                let n = self.num(inner);
+                bool(n == 0.0)
+            }
+            Expr::Bin(op, l, r) if !matches!(op, BinOp::Eq | BinOp::Ne) => {
+                if !self.step() {
+                    return 0.0;
+                }
+                self.num_bin(*op, l, r)
+            }
+            _ => self.eval(e).num(),
+        }
+    }
+
+    fn eval(&mut self, e: &Expr) -> Value {
+        if !self.step() {
+            return Value::Null;
+        }
+        match e {
             Expr::Num(n) => Value::Num(*n),
             Expr::Str(s) => Value::Str(s.clone()),
             Expr::Var(Scope::Variable, s) => self.ctx.vars.get(s).cloned().unwrap_or_default(),
             Expr::Var(Scope::Temp, s) => self.temps.get(s).cloned().unwrap_or_default(),
-            Expr::Query(name, args) => {
-                let args = self.eval_args(args)?;
-                match builtin_query(name, &args) {
+            Expr::Query(name, args) => self
+                .with_args(args, |m, args| match builtin_query(name, args) {
                     Some(v) => v,
-                    None => self.ctx.host.query(name, &args),
-                }
-            }
+                    None => m.ctx.host.query(name, args),
+                })
+                .unwrap_or_default(),
             Expr::Context(name) => self.ctx.host.context(name),
             Expr::Math(f, args) => {
                 let mut nums = [0f32; 4];
                 let mut extra = Vec::new();
                 for (i, a) in args.iter().enumerate() {
-                    let n = self.eval(a)?.num();
+                    let n = num!(self, a);
                     if i < nums.len() {
                         nums[i] = n;
                     } else {
@@ -305,7 +385,7 @@ impl Machine<'_, '_> {
                 }
             }
             Expr::Array(name, index) => {
-                let i = self.eval(index)?.num();
+                let i = num!(self, index);
                 match self.ctx.host.array(name) {
                     Some(items) if !items.is_empty() => {
                         // Negative indexes use 0; larger ones wrap by the array's size.
@@ -317,26 +397,33 @@ impl Machine<'_, '_> {
             }
             Expr::Resource(kind, name) => Value::Res(*kind, name.clone()),
             Expr::This => self.ctx.this.clone(),
-            Expr::Neg(inner) => Value::Num(-self.eval(inner)?.num()),
-            Expr::Not(inner) => Value::bool(!self.eval(inner)?.truthy()),
-            Expr::Bin(op, l, r) => self.binary(*op, l, r)?,
+            Expr::Neg(inner) => Value::Num(-num!(self, inner)),
+            Expr::Not(inner) => Value::bool(num!(self, inner) == 0.0),
+            Expr::Bin(op, l, r) => self.binary(*op, l, r),
             Expr::Ternary(cond, then, otherwise) => {
-                if self.eval(cond)?.truthy() {
-                    self.eval(then)?
+                if num!(self, cond) != 0.0 {
+                    self.eval(then)
                 } else if let Some(o) = otherwise {
-                    self.eval(o)?
+                    self.eval(o)
                 } else {
                     Value::Num(0.0)
                 }
             }
-            Expr::Coalesce(a, b) => match self.eval(a) {
-                Ok(Value::Null) => self.eval(b)?,
-                Ok(v) => v,
-                Err(Flow::Abort) => return Err(Flow::Abort),
-                Err(_) => self.eval(b)?,
-            },
+            Expr::Coalesce(a, b) => {
+                let v = self.eval(a);
+                match self.flow {
+                    None if v != Value::Null => v,
+                    None => self.eval(b),
+                    Some(Flow::Abort) => Value::Null,
+                    // `return`, `break` or `continue` inside the left side: the right side.
+                    Some(_) => {
+                        self.flow = None;
+                        self.eval(b)
+                    }
+                }
+            }
             Expr::Assign(scope, sym, rhs) => {
-                let v = self.eval(rhs)?;
+                let v = ev!(self, rhs);
                 match scope {
                     Scope::Variable => self.ctx.vars.insert(*sym, v.clone()),
                     Scope::Temp => self.temps.insert(*sym, v.clone()),
@@ -361,23 +448,25 @@ impl Machine<'_, '_> {
             Expr::Block(stmts) => {
                 let mut last = Value::Null;
                 for s in stmts.iter() {
-                    last = self.eval(s)?;
+                    last = ev!(self, s);
                 }
                 last
             }
             Expr::Loop(count, body) => {
-                let n = self.eval(count)?.num();
+                let n = num!(self, count);
                 let n = if n > 0.0 {
                     (n as usize).min(LOOP_LIMIT)
                 } else {
                     0
                 };
                 for _ in 0..n {
-                    match self.eval(body) {
-                        Ok(_) | Err(Flow::Continue) => {}
-                        Err(Flow::Break) => break,
-                        Err(other) => return Err(other),
+                    self.eval(body);
+                    if self.leave_loop() {
+                        break;
                     }
+                }
+                if self.flow.is_some() {
+                    return Value::Null;
                 }
                 Value::Num(0.0)
             }
@@ -388,72 +477,138 @@ impl Machine<'_, '_> {
                         Scope::Variable => self.ctx.vars.insert(*sym, item),
                         Scope::Temp => self.temps.insert(*sym, item),
                     };
-                    match self.eval(body) {
-                        Ok(_) | Err(Flow::Continue) => {}
-                        Err(Flow::Break) => break,
-                        Err(other) => return Err(other),
+                    self.eval(body);
+                    if self.leave_loop() {
+                        break;
                     }
+                }
+                if self.flow.is_some() {
+                    return Value::Null;
                 }
                 Value::Num(0.0)
             }
-            Expr::Return(inner) => return Err(Flow::Return(self.eval(inner)?)),
-            Expr::Break => return Err(Flow::Break),
-            Expr::Continue => return Err(Flow::Continue),
-            Expr::Arrow(entity, rhs) => match self.eval(entity)? {
+            Expr::Return(inner) => {
+                let v = ev!(self, inner);
+                self.flow = Some(Flow::Return(v));
+                Value::Null
+            }
+            Expr::Break => {
+                self.flow = Some(Flow::Break);
+                Value::Null
+            }
+            Expr::Continue => {
+                self.flow = Some(Flow::Continue);
+                Value::Null
+            }
+            Expr::Arrow(entity, rhs) => match ev!(self, entity) {
                 Value::Entity(id) => match &**rhs {
                     Expr::Var(_, sym) => self.ctx.host.entity_var(id, *sym),
-                    Expr::Query(name, args) => {
-                        let args = self.eval_args(args)?;
-                        self.ctx.host.entity_query(id, name, &args)
-                    }
+                    Expr::Query(name, args) => self
+                        .with_args(args, |m, args| m.ctx.host.entity_query(id, name, args))
+                        .unwrap_or_default(),
                     _ => Value::Null,
                 },
                 _ => Value::Null,
             },
-        })
+        }
     }
 
-    fn eval_args(&mut self, args: &[Expr]) -> Result<Vec<Value>, Flow> {
-        let mut out = Vec::with_capacity(args.len());
-        for a in args {
-            out.push(self.eval(a)?);
+    /// After a loop's body: `true` when the loop stops (`break`, or a `return` or an abandoned
+    /// run, which stay set for the nodes around it); `continue` goes on to the next round.
+    fn leave_loop(&mut self) -> bool {
+        match self.flow {
+            None => false,
+            Some(Flow::Continue) => {
+                self.flow = None;
+                false
+            }
+            Some(Flow::Break) => {
+                self.flow = None;
+                true
+            }
+            Some(_) => true,
         }
-        Ok(out)
     }
 
-    fn binary(&mut self, op: BinOp, l: &Expr, r: &Expr) -> Res {
-        match op {
-            BinOp::And => {
-                return Ok(Value::bool(
-                    self.eval(l)?.truthy() && self.eval(r)?.truthy(),
-                ));
-            }
-            BinOp::Or => {
-                return Ok(Value::bool(
-                    self.eval(l)?.truthy() || self.eval(r)?.truthy(),
-                ));
-            }
-            _ => {}
-        }
-        let (a, b) = (self.eval(l)?, self.eval(r)?);
-        Ok(match op {
-            BinOp::Eq => Value::bool(a.equals(&b)),
-            BinOp::Ne => Value::bool(!a.equals(&b)),
-            _ => {
-                let (x, y) = (a.num(), b.num());
-                match op {
-                    BinOp::Add => Value::Num(x + y),
-                    BinOp::Sub => Value::Num(x - y),
-                    BinOp::Mul => Value::Num(x * y),
-                    // Dividing by zero is an error in Molang, and errors are 0.
-                    BinOp::Div => Value::Num(if y == 0.0 { 0.0 } else { x / y }),
-                    BinOp::Lt => Value::bool(x < y),
-                    BinOp::Le => Value::bool(x <= y),
-                    BinOp::Gt => Value::bool(x > y),
-                    BinOp::Ge => Value::bool(x >= y),
-                    BinOp::Eq | BinOp::Ne | BinOp::And | BinOp::Or => Value::Null,
+    /// Runs `f` with the arguments' values; `None` when the run leaves while evaluating them.
+    /// Up to four are kept on the stack: a query's arguments were an allocation each time.
+    fn with_args<R>(
+        &mut self,
+        args: &[Expr],
+        f: impl FnOnce(&mut Self, &[Value]) -> R,
+    ) -> Option<R> {
+        if args.len() <= 4 {
+            let mut values: [Value; 4] = Default::default();
+            for (slot, a) in values.iter_mut().zip(args) {
+                *slot = self.eval(a);
+                if self.flow.is_some() {
+                    return None;
                 }
             }
-        })
+            return Some(f(self, &values[..args.len()]));
+        }
+        let mut values = Vec::with_capacity(args.len());
+        for a in args {
+            let v = self.eval(a);
+            if self.flow.is_some() {
+                return None;
+            }
+            values.push(v);
+        }
+        Some(f(self, &values))
+    }
+
+    fn binary(&mut self, op: BinOp, l: &Expr, r: &Expr) -> Value {
+        match op {
+            BinOp::Eq | BinOp::Ne => {
+                let a = ev!(self, l);
+                let b = ev!(self, r);
+                Value::bool(a.equals(&b) == (op == BinOp::Eq))
+            }
+            _ => {
+                let n = self.num_bin(op, l, r);
+                if self.flow.is_some() {
+                    return Value::Null;
+                }
+                Value::Num(n)
+            }
+        }
+    }
+
+    /// The numeric binary operators on their sides' numbers; `&&` and `||` stop early.
+    fn num_bin(&mut self, op: BinOp, l: &Expr, r: &Expr) -> f32 {
+        let x = self.num(l);
+        if self.flow.is_some() {
+            return 0.0;
+        }
+        match op {
+            BinOp::And if x == 0.0 => return 0.0,
+            BinOp::Or if x != 0.0 => return 1.0,
+            _ => {}
+        }
+        let y = self.num(r);
+        if self.flow.is_some() {
+            return 0.0;
+        }
+        let bool = |b: bool| if b { 1.0 } else { 0.0 };
+        match op {
+            BinOp::Add => x + y,
+            BinOp::Sub => x - y,
+            BinOp::Mul => x * y,
+            // Dividing by zero is an error in Molang, and errors are 0.
+            BinOp::Div => {
+                if y == 0.0 {
+                    0.0
+                } else {
+                    x / y
+                }
+            }
+            BinOp::Lt => bool(x < y),
+            BinOp::Le => bool(x <= y),
+            BinOp::Gt => bool(x > y),
+            BinOp::Ge => bool(x >= y),
+            BinOp::And | BinOp::Or => bool(y != 0.0),
+            BinOp::Eq | BinOp::Ne => unreachable!(),
+        }
     }
 }

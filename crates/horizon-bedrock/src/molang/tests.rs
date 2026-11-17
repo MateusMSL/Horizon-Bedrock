@@ -123,6 +123,25 @@ fn blocks_return_and_statements() {
 }
 
 #[test]
+fn a_return_leaves_every_loop_and_expression_around_it() {
+    // From the innermost loop: nothing after it runs, in the loops or the program.
+    assert_eq!(
+        run(
+            "t.s = 0; loop(3, { loop(3, { t.s = t.s + 1; t.s == 2 ? { return t.s * 10; }; }); t.s = 100; }); return 1;"
+        ),
+        20.0
+    );
+    // Inside an assignment's right side: the variable is not set.
+    assert_eq!(run("v.a = 5; v.a = { return 7; }; return v.a;"), 7.0);
+    // `&&` and `||` stop at their left side: the right side's assignment does not run.
+    assert_eq!(
+        run("t.a = 0; 0 && (t.a = 1); 1 || (t.a = 2); return t.a;"),
+        0.0
+    );
+    assert_eq!(run("t.a = 0; 1 && (t.a = 3); return t.a;"), 3.0);
+}
+
+#[test]
 fn loops() {
     assert_eq!(
         run("t.s = 0; loop(5, { t.s = t.s + 2; }); return t.s;"),

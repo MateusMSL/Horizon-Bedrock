@@ -983,7 +983,7 @@ pub struct Instance {
     /// A pack asked where a bone is.
     uses_bones: bool,
     /// The bones' offsets from their parents' pivots, over the entity's models (`Pose::rest`).
-    rest: Option<std::sync::Arc<HashMap<String, [f32; 3]>>>,
+    rest: Option<std::sync::Arc<crate::animation::StrMap<[f32; 3]>>>,
     /// Where an attachable's own space sits in its holder's (rows of an affine map, pixels,
     /// y up from the holder's feet): what asks where one of its bones is (`query.bone_origin`,
     /// `query.bone_orientation_trs`) is told where the bone is on the holder, as Bedrock, which
@@ -1035,7 +1035,7 @@ impl Instance {
         Instance {
             vars: Vars::default(),
             rng: Rng::new(seed),
-            nodes: Children::new(),
+            nodes: Children::default(),
             initialized: false,
             origins: HashMap::new(),
             moved: HashMap::new(),
@@ -1139,7 +1139,7 @@ impl Instance {
                 pose.rest =
                     self.rest
                         .get_or_insert_with(|| {
-                            let mut rest = HashMap::new();
+                            let mut rest = crate::animation::StrMap::default();
                             let mut names: Vec<&String> = def.geometry.values().collect();
                             names.sort();
                             for name in names {

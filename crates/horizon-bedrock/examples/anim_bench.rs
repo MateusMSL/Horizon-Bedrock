@@ -7,6 +7,10 @@
 //! The converted folder is the one the game keeps in `.horizon-cache/bedrock/`. The host
 //! answers a few movement queries as a walking mob would and nothing else, so the controllers
 //! take the paths a mob walking on the ground takes.
+//!
+//! With `ANIM_CHECK=1` it also prints a hash of what each entity's next updates give (its sorted
+//! bone poses, layers, emits, scale): the same before and after a change that only makes
+//! posing faster.
 
 use horizon_bedrock::bundle::Bundle;
 use horizon_bedrock::entity::{Assets, Instance};
@@ -70,6 +74,20 @@ fn main() {
             std::hint::black_box(instance.update(def, &assets, &mut host, dt));
         }
         rows.push((t.elapsed().as_secs_f64() * 1e6 / f64::from(frames), id));
+        if std::env::var_os("ANIM_CHECK").is_some() {
+            let mut sum = String::new();
+            for _ in 0..40 {
+                host.time += dt;
+                let f = instance.update(def, &assets, &mut host, dt);
+                let mut bones: Vec<_> = f.pose.bones.iter().collect();
+                bones.sort_by(|a, b| a.0.cmp(b.0));
+                sum += &format!("{:?}{:?}{:?}{:?}", bones, f.layers, f.emits, f.scale);
+            }
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            sum.hash(&mut h);
+            eprintln!("check {id} {:016x}", h.finish());
+        }
     }
     let total: f64 = rows.iter().map(|(us, _)| us).sum();
     rows.sort_by(|a, b| b.0.total_cmp(&a.0));

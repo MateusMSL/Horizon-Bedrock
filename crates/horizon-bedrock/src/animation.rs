@@ -602,10 +602,10 @@ impl Default for BonePose {
 /// Every animated bone, by lower-case name.
 #[derive(Clone, Debug, Default)]
 pub struct Pose {
-    pub bones: HashMap<String, BonePose>,
+    pub bones: StrMap<BonePose>,
     /// Where each bone with a parent sits from that parent's pivot, in the model's own axes
     /// (pixels): what `this` starts from in a bone's `position` channel.
-    pub rest: std::sync::Arc<HashMap<String, [f32; 3]>>,
+    pub rest: std::sync::Arc<StrMap<[f32; 3]>>,
 }
 
 impl Pose {
@@ -706,7 +706,14 @@ impl Animation {
         }
         {
             for b in &self.bones {
-                let entry = pose.bones.entry(b.bone.clone()).or_default();
+                // Looked up before it is made: `entry` takes an owned key, a string made for
+                // every bone of every animation of every mob on every frame.
+                if !pose.bones.contains_key(&b.bone) {
+                    pose.bones.insert(b.bone.clone(), BonePose::default());
+                }
+                let Some(entry) = pose.bones.get_mut(&b.bone) else {
+                    continue;
+                };
                 if self.override_previous {
                     *entry = BonePose::default();
                 }
@@ -721,7 +728,7 @@ impl Animation {
                     }
                 }
                 if let Some(c) = &b.position {
-                    let rest = pose.rest.get(&b.bone.to_ascii_lowercase());
+                    let rest = pose.rest.get(&*lower(&b.bone));
                     let here =
                         std::array::from_fn(|a| entry.position[a] + rest.map_or(0.0, |r| r[a]));
                     let v = c.sample(st.time, env, scope, here);
@@ -901,8 +908,8 @@ impl Controller {
 /// Every animation and controller of a pack.
 #[derive(Debug, Default)]
 pub struct Library {
-    pub animations: HashMap<String, Animation>,
-    pub controllers: HashMap<String, Controller>,
+    pub animations: StrMap<Animation>,
+    pub controllers: StrMap<Controller>,
 }
 
 impl Library {
@@ -943,7 +950,11 @@ pub struct CtrlState {
     entered: bool,
 }
 
-pub type Children = HashMap<String, Node>;
+pub type Children = StrMap<Node>;
+
+/// A map by name with a fast hash: the maps posing reads for every bone and node of every mob
+/// on every frame, where SipHash was a measurable part of it.
+pub type StrMap<V> = HashMap<String, V, std::hash::BuildHasherDefault<rustc_hash::FxHasher>>;
 
 /// `name` in lower case, made only when it has an upper-case letter: the entity's names are
 /// looked up in the library on every frame.
@@ -1054,7 +1065,7 @@ impl Run<'_, '_> {
                         time: 0.0,
                         previous: None,
                         blend: 1.0,
-                        children: HashMap::new(),
+                        children: Children::default(),
                         entered: false,
                     })),
                 );
@@ -1373,7 +1384,7 @@ mod tests {
     fn keyframes_lerp_and_loop() {
         let l = lib(WALK);
         let n = names(&[("walk", "animation.t.walk")]);
-        let mut nodes = Children::new();
+        let mut nodes = Children::default();
         let mut rig = Rig::new();
         rig.host.q.insert("speed".into(), 3.0);
         rig.frame(&l, &n, &mut nodes, "walk", 0.0);
@@ -1394,7 +1405,7 @@ mod tests {
     fn one_shot_animation_ends_and_fires_events_once() {
         let l = lib(WALK);
         let n = names(&[("once", "animation.t.once")]);
-        let mut nodes = Children::new();
+        let mut nodes = Children::default();
         let mut rig = Rig::new();
         rig.frame(&l, &n, &mut nodes, "once", 0.0);
         assert_eq!(
@@ -1432,7 +1443,7 @@ mod tests {
             r#"{"animations":{"animation.t.l":{"loop":true,"animation_length":1.0,"sound_effects":{"0.25":{"effect":"tick"}}}}}"#,
         );
         let n = names(&[("l", "animation.t.l")]);
-        let mut nodes = Children::new();
+        let mut nodes = Children::default();
         let mut rig = Rig::new();
         for _ in 0..30 {
             rig.frame(&l, &n, &mut nodes, "l", 0.1);
@@ -1449,7 +1460,7 @@ mod tests {
           "2":{"post":[0,0,0],"lerp_mode":"catmullrom"},"3":[0,0,0]}}}}}}"#,
         );
         let n = names(&[("c", "animation.t.c")]);
-        let mut nodes = Children::new();
+        let mut nodes = Children::default();
         let mut rig = Rig::new();
         rig.frame(&l, &n, &mut nodes, "c", 0.0);
         rig.frame(&l, &n, &mut nodes, "c", 1.0);
@@ -1488,7 +1499,7 @@ mod tests {
             r#"{"animations":{"animation.t.u":{"loop":true,"animation_length":10,"anim_time_update":"q.speed * 2","bones":{"b":{"position":["q.anim_time",0,0]}}}}}"#,
         );
         let n = names(&[("u", "animation.t.u")]);
-        let mut nodes = Children::new();
+        let mut nodes = Children::default();
         let mut rig = Rig::new();
         rig.host.q.insert("speed".into(), 3.0);
         rig.frame(&l, &n, &mut nodes, "u", 0.1);
@@ -1501,7 +1512,7 @@ mod tests {
           "animation.t.d":{"loop":true,"animation_length":1,"start_delay":"0.5","loop_delay":1,
             "bones":{"b":{"position":["q.anim_time * 10",0,0]}}}}}"#);
         let n = names(&[("d", "animation.t.d")]);
-        let mut nodes = Children::new();
+        let mut nodes = Children::default();
         let mut rig = Rig::new();
         // Nothing plays through the start delay.
         rig.frame(&l, &n, &mut nodes, "d", 0.3);
@@ -1535,7 +1546,7 @@ mod tests {
             ("a", "animation.t.a"),
             ("z", "animation.t.z"),
         ]);
-        let mut nodes = Children::new();
+        let mut nodes = Children::default();
         let mut rig = Rig::new();
         rig.frame(&l, &n, &mut nodes, "c", 0.1);
         rig.host.q.insert("speed".into(), 2.0);
@@ -1578,7 +1589,7 @@ mod tests {
             ("a", "animation.t.a"),
             ("b", "animation.t.b"),
         ]);
-        let mut nodes = Children::new();
+        let mut nodes = Children::default();
         let mut rig = Rig::new();
         // `q.x` is 0: the second condition reads the first one's `t.k`.
         rig.frame(&l, &n, &mut nodes, "c", 0.1);
@@ -1590,7 +1601,7 @@ mod tests {
     fn controller_switches_blends_and_finishes() {
         let l = lib(CTRL);
         let n = ctrl_names();
-        let mut nodes = Children::new();
+        let mut nodes = Children::default();
         let mut rig = Rig::new();
         rig.frame(&l, &n, &mut nodes, "c", 0.1);
         assert_eq!(rig.pose.get("b").unwrap().position, [1.0, 0.0, 0.0]);
@@ -1632,7 +1643,7 @@ mod tests {
             ("parent", "controller.animation.t.parent"),
             ("child", "controller.animation.t.child"),
         ]);
-        let mut nodes = Children::new();
+        let mut nodes = Children::default();
         let mut rig = Rig::new();
         let busy = molang::intern("busy");
         rig.frame(&l, &n, &mut nodes, "parent", 0.1);
@@ -1647,7 +1658,7 @@ mod tests {
     #[test]
     fn unknown_names_do_nothing() {
         let l = lib(WALK);
-        let mut nodes = Children::new();
+        let mut nodes = Children::default();
         let mut rig = Rig::new();
         rig.frame(&l, &names(&[("x", "animation.nope")]), &mut nodes, "x", 0.1);
         rig.frame(&l, &names(&[]), &mut nodes, "y", 0.1);
@@ -1666,7 +1677,7 @@ mod tests {
             ("c", "controller.animation.t.c"),
             ("blink", "animation.t.blink"),
         ]);
-        let mut nodes = Children::new();
+        let mut nodes = Children::default();
         let mut rig = Rig::new();
         let mut shown = Vec::new();
         for _ in 0..40 {

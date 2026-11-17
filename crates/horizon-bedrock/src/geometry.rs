@@ -133,7 +133,7 @@ pub fn fitted_mesh_id(geometry: &str, key: &str, path: &str) -> String {
 impl Geometry {
     /// Each bone with a parent: its pivot less the parent's, in the model's own axes (pixels).
     /// A bone named in an earlier model keeps that one's.
-    pub fn rest_offsets(&self, out: &mut std::collections::HashMap<String, [f32; 3]>) {
+    pub fn rest_offsets(&self, out: &mut crate::animation::StrMap<[f32; 3]>) {
         let pivots: std::collections::HashMap<String, [f32; 3]> = self
             .bones
             .iter()
@@ -905,7 +905,7 @@ mod tests {
         )
         .unwrap()
         .remove(0);
-        let mut rest = std::collections::HashMap::new();
+        let mut rest = crate::animation::StrMap::default();
         g.rest_offsets(&mut rest);
         assert_eq!(rest.get("eye"), Some(&[-2.0, -1.0, 0.0]));
         assert!(!rest.contains_key("head"));
