@@ -364,8 +364,101 @@ struct KeptMesh {
     vertices: Vec<Vertex>,
     /// The pieces the drawing handed to the stencil pass, handed over again with them.
     handed: Vec<super::bedrock_stencil::Handed>,
+    /// What the drawing posed on the GPU (docs/bedrock-gpu-pose.md), drawn again with them.
+    posed: Option<KeptPose>,
     /// The drawing that last used them (`MESH_DRAWS`), to let go of mobs no longer drawn.
     used: u64,
+}
+
+/// A mob's draws posed on the GPU: its part matrices and jobs as the drawing made them, made
+/// again from these by moving the matrices (a few dozen) instead of walking the model.
+struct KeptPose {
+    /// `SkinModels::epoch`: the jobs name model vertices by where the store held them.
+    epoch: u64,
+    parts: Vec<crate::gfx::entity_skin::SkinPart>,
+    /// Their `part` counted from the first of `parts`.
+    jobs: Vec<crate::gfx::entity_skin::SkinJob>,
+    stencil: Vec<crate::gfx::entity_skin::SkinJob>,
+    /// Where the stencil jobs' output stood before them, and the posed pieces handed over.
+    stencil_at: u32,
+    pieces: Vec<super::bedrock_stencil::PosedHanded>,
+    bounds: Option<(glam::Vec3, glam::Vec3)>,
+}
+
+impl KeptPose {
+    /// What `skin` holds of a drawing that started at `from` (parts, jobs, stencil jobs and
+    /// output), with the posed `pieces` it handed over.
+    fn take(
+        skin: &super::skin::Skin,
+        from: (usize, usize, usize, u32),
+        pieces: Vec<super::bedrock_stencil::PosedHanded>,
+    ) -> Self {
+        let (parts, jobs, stencil, stencil_at) = from;
+        let rebase = |j: &crate::gfx::entity_skin::SkinJob| crate::gfx::entity_skin::SkinJob {
+            part: j.part - parts as u32,
+            ..*j
+        };
+        Self {
+            epoch: skin.store_epoch(),
+            parts: skin.frame.parts[parts..].to_vec(),
+            jobs: skin.frame.jobs[jobs..].iter().map(rebase).collect(),
+            stencil: skin.frame.stencil_jobs[stencil..].iter().map(rebase).collect(),
+            stencil_at,
+            pieces,
+            bounds: skin.bounds,
+        }
+    }
+
+    /// Draws it again into `skin`, moved by `delta` (`None`: where it was).
+    fn draw(&self, skin: &mut super::skin::Skin, delta: Option<glam::Mat4>) {
+        let first = skin.frame.parts.len() as u32;
+        let turn = delta.map(glam::Mat3::from_mat4);
+        skin.frame.parts.extend(self.parts.iter().map(|p| match (delta, turn) {
+            (Some(d), Some(t)) => crate::gfx::entity_skin::SkinPart {
+                matrix: (d * glam::Mat4::from_cols_array(&p.matrix)).to_cols_array(),
+                normal: (t * glam::Mat3::from_cols_array(&p.normal)).to_cols_array(),
+            },
+            _ => *p,
+        }));
+        for j in &self.jobs {
+            skin.frame.jobs.push(crate::gfx::entity_skin::SkinJob {
+                part: j.part + first,
+                dst: skin.frame.vertices,
+                ..*j
+            });
+            skin.frame.vertices += j.count;
+        }
+        let at = skin.frame.stencil_vertices;
+        for j in &self.stencil {
+            skin.frame.stencil_jobs.push(crate::gfx::entity_skin::SkinJob {
+                part: j.part + first,
+                dst: skin.frame.stencil_vertices,
+                ..*j
+            });
+            skin.frame.stencil_vertices += j.count;
+        }
+        super::bedrock_stencil::replay_posed(&self.pieces, self.stencil_at, at);
+        if let Some((lo, hi)) = self.bounds {
+            let (lo, hi) = match delta {
+                None => (lo, hi),
+                Some(d) => {
+                    let corners = (0..8).map(|i| {
+                        d.transform_point3(glam::Vec3::new(
+                            if i & 1 == 0 { lo.x } else { hi.x },
+                            if i & 2 == 0 { lo.y } else { hi.y },
+                            if i & 4 == 0 { lo.z } else { hi.z },
+                        ))
+                    });
+                    corners.fold((glam::Vec3::MAX, glam::Vec3::MIN), |(a, b), c| (a.min(c), b.max(c)))
+                }
+            };
+            skin.bounds = Some(match skin.bounds {
+                Some((a, b)) => (a.min(lo), b.max(hi)),
+                None => (lo, hi),
+            });
+        }
+        skin.forget_last();
+    }
 }
 
 thread_local! {
@@ -395,8 +488,9 @@ fn moved_vertex(v: &Vertex, delta: &glam::Mat4, turn: &glam::Mat3) -> Vertex {
 /// pose for a few frames (`BedrockMobs::frame`); building its model again each of them was most
 /// of what an add-on's crowd cost. A scrolling texture (`uv_anim`) is part of the frame too,
 /// so it stands with the pose, and the pieces handed to the stencil pass are kept and handed
-/// over again, moved the same (a copper golem's body writes the stencil). Left out: the
-/// first-person view, screens' previews and a sulfur cube (its size eases every frame).
+/// over again, moved the same (a copper golem's body writes the stencil). What it posed on the
+/// GPU is kept too (`KeptPose`): its part matrices are moved instead of the vertices. Left out:
+/// the first-person view, screens' previews and a sulfur cube (its size eases every frame).
 #[allow(clippy::too_many_arguments)]
 fn render_bedrock(
     m: &Mob,
@@ -448,6 +542,12 @@ fn render_bedrock(
         {
             return None;
         }
+        // What it posed on the GPU needs the GPU path, and the models stored where they were.
+        if let Some(posed) = &k.posed
+            && skin.as_ref().is_none_or(|s| s.store_epoch() != posed.epoch)
+        {
+            return None;
+        }
         k.used = draws;
         let _span = horizon_client_render::spans::guard("bd_kept");
         // Not moved (a still mob, the same frame drawn twice): its vertices as they were;
@@ -455,28 +555,43 @@ fn render_bedrock(
         if base == k.base {
             out.extend_from_slice(&k.vertices);
             super::bedrock_stencil::replay(&k.handed, |v| *v);
+            if let (Some(posed), Some(skin)) = (&k.posed, skin.as_deref_mut()) {
+                posed.draw(skin, None);
+            }
             return Some(());
         }
         let delta = base * k.base.inverse();
         let turn = glam::Mat3::from_mat4(delta);
         out.extend(k.vertices.iter().map(|v| moved_vertex(v, &delta, &turn)));
         super::bedrock_stencil::replay(&k.handed, |v| moved_vertex(v, &delta, &turn));
+        if let (Some(posed), Some(skin)) = (&k.posed, skin.as_deref_mut()) {
+            posed.draw(skin, Some(delta));
+        }
         Some(())
     });
     if reused.is_some() {
         return true;
     }
     let start = out.len();
-    let jobs = skin.as_ref().map(|s| s.frame.jobs.len());
-    let (drew, handed) = super::bedrock_stencil::record(|| {
-        render_bedrock_uncached(m, alpha, base, atlas, light, data, out, skin.as_deref_mut())
+    let from = skin.as_ref().map(|s| {
+        let f = &s.frame;
+        (f.parts.len(), f.jobs.len(), f.stencil_jobs.len(), f.stencil_vertices)
     });
-    // Posed on the GPU in part (docs/bedrock-gpu-pose.md): its jobs are made again each frame,
-    // so its vertices alone are not the whole mob and are not kept.
-    let posed = skin.as_ref().map(|s| s.frame.jobs.len()) != jobs;
+    let ((drew, handed), pieces) = super::bedrock_stencil::record_posed(|| {
+        super::bedrock_stencil::record(|| {
+            render_bedrock_uncached(m, alpha, base, atlas, light, data, out, skin.as_deref_mut())
+        })
+    });
+    // Posed on the GPU in part (docs/bedrock-gpu-pose.md): a walk adds parts, whether its jobs
+    // stay in the scene or go to the stencil pass.
+    let posed = skin
+        .as_deref()
+        .zip(from)
+        .filter(|(s, from)| s.frame.parts.len() > from.0)
+        .map(|(s, from)| KeptPose::take(s, from, pieces));
     KEPT_MESHES.with(|kept| {
         let mut kept = kept.borrow_mut();
-        if drew && !posed {
+        if drew {
             kept.insert(
                 m.id,
                 KeptMesh {
@@ -488,6 +603,7 @@ fn render_bedrock(
                     base,
                     vertices: out[start..].to_vec(),
                     handed,
+                    posed,
                     used: draws,
                 },
             );

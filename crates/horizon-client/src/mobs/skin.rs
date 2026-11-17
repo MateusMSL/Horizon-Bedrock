@@ -51,6 +51,8 @@ pub struct SkinModels {
     /// render type's (spiders', endermen's...) as [`SkinJob::FLAT`] draws, and
     /// `entityTranslucent` layers (a horse's markings, a slime's outer cube).
     pub tagged: bool,
+    /// Restarts of the store (`epoch`).
+    epoch: u64,
 }
 
 /// A stored item model: its quads' vertices in order, by runs of quads that
@@ -139,6 +141,12 @@ impl SkinModels {
     /// Starts a frame: drops the models nothing else holds (their vertices
     /// stay in the store until it restarts), restarts the store when it grew
     /// too large or the renderer's (`stored`, its size) is out of step.
+    /// Counts the store's restarts: a job kept from an earlier frame names its model's vertices
+    /// by where they were stored, which only holds within one epoch.
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
     pub fn begin(&mut self, frame: &mut SkinFrame, stored: u32) {
         if self.vertices > STORE_LIMIT || stored + frame.new_model.len() as u32 != self.vertices {
             self.restart(frame);
@@ -151,6 +159,7 @@ impl SkinModels {
     }
 
     pub fn restart(&mut self, frame: &mut SkinFrame) {
+        self.epoch += 1;
         self.stored.clear();
         self.items.clear();
         self.vertices = 0;
@@ -427,6 +436,17 @@ impl<'a> Skin<'a> {
     /// the scene): where they land in its posed output, and how many vertices.
     pub fn stencil_copy_since(&mut self, first: usize) -> (u32, u32) {
         self.frame.stencil_copy_since(first)
+    }
+
+    /// The models' store epoch (`SkinModels::epoch`).
+    pub fn store_epoch(&self) -> u64 {
+        self.models.epoch()
+    }
+
+    /// Parts or jobs were added by hand (draws kept from an earlier frame): no later draw
+    /// repeats the last walk.
+    pub fn forget_last(&mut self) {
+        self.last = None;
     }
 
     /// The draws since job `first` go to the Bedrock stencil pass instead of the scene (a piece
@@ -1308,10 +1328,6 @@ mod tests {
                     assert_eq!(store.len() as u32, frame.base);
                     store.extend_from_slice(&frame.new_model);
                     frame.handed();
-                    let mut cpu = Vec::new();
-                    let ((), cpu_pieces) = crate::mobs::bedrock_stencil::record(|| {
-                        render::render_with(&m, 0.4, camera, &atlas, 0x50a0, &data, &[], &mut cpu);
-                    });
                     if !frame.jobs.is_empty() {
                         posed.insert(id.clone());
                     }
@@ -1322,6 +1338,41 @@ mod tests {
                     let scene = set(&mut expand(&store, &frame)
                         .into_iter()
                         .chain(gpu.iter().copied()));
+                    let pieces = set(&mut crate::gfx::entity_skin::expand_stencil(&store, &frame)
+                        .into_iter()
+                        .chain(gpu_pieces.into_iter().flat_map(|(_, _, v)| v)));
+                    // Drawn again in the same pose and place, before the CPU path draws it (its
+                    // drawing is kept in place of this one): from what the first drawing kept
+                    // (`KeptPose`), its part matrices and jobs replayed without a walk.
+                    models.begin(&mut frame, store.len() as u32);
+                    let mut again = Vec::new();
+                    let ((), again_pieces) = crate::mobs::bedrock_stencil::record(|| {
+                        let mut skin = Skin::new(&mut models, &mut frame);
+                        render::render_skinned(
+                            &m, 0.4, camera, &atlas, 0x50a0, &data, &mut again, &mut skin,
+                        );
+                    });
+                    if frame.reset {
+                        store.clear();
+                    }
+                    store.extend_from_slice(&frame.new_model);
+                    frame.handed();
+                    let scene_again = set(&mut expand(&store, &frame)
+                        .into_iter()
+                        .chain(again.iter().copied()));
+                    assert!(
+                        scene_again == scene,
+                        "{what}: drawn again from what it kept"
+                    );
+                    let pieces_again =
+                        set(&mut crate::gfx::entity_skin::expand_stencil(&store, &frame)
+                            .into_iter()
+                            .chain(again_pieces.into_iter().flat_map(|(_, _, v)| v)));
+                    assert!(pieces_again == pieces, "{what}: kept stencil pieces");
+                    let mut cpu = Vec::new();
+                    let ((), cpu_pieces) = crate::mobs::bedrock_stencil::record(|| {
+                        render::render_with(&m, 0.4, camera, &atlas, 0x50a0, &data, &[], &mut cpu);
+                    });
                     let want = set(&mut cpu.iter().copied());
                     assert_eq!(scene.len(), want.len(), "{what}: scene vertex count");
                     if scene != want {
@@ -1339,9 +1390,6 @@ mod tests {
                             .collect();
                         panic!("{what}\nGPU {a:?}\nCPU {b:?}");
                     }
-                    let pieces = set(&mut crate::gfx::entity_skin::expand_stencil(&store, &frame)
-                        .into_iter()
-                        .chain(gpu_pieces.into_iter().flat_map(|(_, _, v)| v)));
                     let want = set(&mut cpu_pieces.into_iter().flat_map(|(_, _, v)| v));
                     assert_eq!(pieces.len(), want.len(), "{what}: stencil vertex count");
                     assert!(

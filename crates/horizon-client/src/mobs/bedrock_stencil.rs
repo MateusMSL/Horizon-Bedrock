@@ -132,11 +132,54 @@ pub fn record<R>(f: impl FnOnce() -> R) -> (R, Vec<Handed>) {
     (result, handed)
 }
 
+/// A piece posed for the pass (`hand_over_posed`): where, how, and its vertices' place in the
+/// stencil jobs' output and their count.
+pub type PosedHanded = (pass::Target, pass::State, u32, u32);
+
+thread_local! {
+    /// The posed pieces handed to the pass while `record_posed` runs.
+    static POSED: std::cell::RefCell<Option<Vec<PosedHanded>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// [`record`] for the pieces posed on the GPU: `render_bedrock` keeps them with a mob's posed
+/// draws and hands them over again (`replay_posed`) when it draws the mob from them.
+pub fn record_posed<R>(f: impl FnOnce() -> R) -> (R, Vec<PosedHanded>) {
+    let outer = POSED.with(|r| r.borrow_mut().replace(Vec::new()));
+    let result = f();
+    let handed = POSED
+        .with(|r| std::mem::replace(&mut *r.borrow_mut(), outer))
+        .unwrap_or_default();
+    POSED.with(|r| {
+        if let Some(outer) = r.borrow_mut().as_mut() {
+            outer.extend(handed.iter().copied());
+        }
+    });
+    (result, handed)
+}
+
+/// Hands `pieces` to the pass again, their vertices now from `at` in the stencil jobs' output
+/// where they were from `was`.
+pub fn replay_posed(pieces: &[PosedHanded], was: u32, at: u32) {
+    for (target, state, first, count) in pieces {
+        push_posed(*target, *state, at + (first - was), *count);
+    }
+}
+
+fn push_posed(target: pass::Target, state: pass::State, first: u32, count: u32) {
+    POSED.with(|r| {
+        if let Some(pieces) = r.borrow_mut().as_mut() {
+            pieces.push((target, state, first, count));
+        }
+    });
+    pass::push_posed(target, state, first, count);
+}
+
 /// Hands `pieces` to the pass again, each vertex through `map` (moved to where the mob is now).
 pub fn replay(pieces: &[Handed], map: impl Fn(&Vertex) -> Vertex) {
     for (target, state, vertices) in pieces {
         let moved: Vec<Vertex> = vertices.iter().map(&map).collect();
-        pass::push(*target, *state, &moved);
+        push(*target, *state, &moved);
     }
 }
 
@@ -163,11 +206,11 @@ pub fn hand_over_posed(
         Route::Scene => {}
         Route::SceneAndPass => {
             let (at, count) = skin.stencil_copy_since(first);
-            pass::push_posed(pass::Target::World, state(f, false), at, count);
+            push_posed(pass::Target::World, state(f, false), at, count);
         }
         Route::Pass => {
             let (at, count) = skin.stencil_move_since(first, vertices);
-            pass::push_posed(pass::Target::World, state(f, !f.no_color), at, count);
+            push_posed(pass::Target::World, state(f, !f.no_color), at, count);
         }
     }
 }

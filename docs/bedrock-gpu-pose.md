@@ -105,9 +105,10 @@ padrão de `outline_jobs`:
    para a GPU.
 3. Fora do caminho de GPU: primeira pessoa, prévias da interface, cubo de enxofre, UV animado,
    inversão de culling, casco invertido sem o passe, camadas translúcidas/aditivas (até a etapa 5).
-4. Vértices guardados (`KeptMesh`): um mob que usou a GPU passa a guardar só a parte da CPU; os
-   jobs da GPU são refeitos a cada quadro (a caminhada é barata). Se a medição mostrar custo, guardar
-   também os jobs.
+4. Vértices guardados (`KeptMesh`): um mob que usou a GPU guarda a parte da CPU e também o que
+   posou na GPU (`KeptPose`: matrizes das partes, jobs da cena e do stencil, peças entregues ao passe,
+   limites). Enquanto a pose não muda, as matrizes são movidas pelo deslocamento do mob em vez de
+   caminhar o modelo de novo; vale só na mesma época do armazenamento de modelos (`SkinModels::epoch`).
 5. Sem GPU de compute (ou `HORIZON_NO_ENTITY_SKIN`), tudo segue na CPU como hoje.
 
 ## Ordem de implementação
