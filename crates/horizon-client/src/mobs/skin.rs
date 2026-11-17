@@ -438,6 +438,48 @@ impl<'a> Skin<'a> {
         self.frame.stencil_copy_since(first)
     }
 
+    /// `render::draw_attached` on the GPU: an attachable's model (a held sword, a worn helmet),
+    /// each part under the holder's bone it binds (`base_of`). False when the model cannot be
+    /// posed here (nothing was drawn).
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_attached(
+        &mut self,
+        model: &Arc<Part>,
+        chain: glam::Mat4,
+        base: glam::Mat4,
+        bound_only: bool,
+        base_of: &dyn Fn(&str) -> Option<glam::Mat4>,
+        poses: &Poses,
+        paint: Paint,
+    ) -> bool {
+        let Some((stored, _)) = self.models.entry(model, self.frame) else {
+            return false;
+        };
+        let first_part = self.frame.parts.len() as u32;
+        self.frame.parts.resize(
+            self.frame.parts.len() + stored.parts.len(),
+            bytemuck::Zeroable::zeroed(),
+        );
+        let mut walk = AttachedWalk {
+            stored,
+            poses,
+            parts: &mut self.frame.parts[first_part as usize..],
+            jobs: &mut self.frame.jobs,
+            vertices: &mut self.frame.vertices,
+            bounds: &mut self.bounds,
+            first_part,
+            paint,
+            base,
+            bound_only,
+            base_of,
+            index: 0,
+        };
+        walk.part(model, chain, None);
+        // Not a walk a later `draw` may repeat.
+        self.last = None;
+        true
+    }
+
     /// The models' store epoch (`SkinModels::epoch`).
     pub fn store_epoch(&self) -> u64 {
         self.models.epoch()
@@ -661,6 +703,78 @@ impl Paint {
             spare: 0,
             bias: self.bias,
             reserved: [0; 3],
+        }
+    }
+}
+
+/// [`Skin::draw_attached`]'s walk: `render::draw_attached_under` without the vertices. Each part
+/// hangs from the holder's bone it binds (`base_of`), else from the nearest bound part above it
+/// (`inherited`), else from `base` (or nowhere, `bound_only`); its normals come from its whole
+/// matrix, as the CPU's do.
+struct AttachedWalk<'a, 'b> {
+    stored: &'a Stored,
+    poses: &'a Poses,
+    parts: &'a mut [SkinPart],
+    jobs: &'a mut Vec<SkinJob>,
+    vertices: &'a mut u32,
+    bounds: &'a mut Option<(glam::Vec3, glam::Vec3)>,
+    first_part: u32,
+    paint: Paint,
+    base: glam::Mat4,
+    bound_only: bool,
+    base_of: &'b dyn Fn(&str) -> Option<glam::Mat4>,
+    index: u32,
+}
+
+impl AttachedWalk<'_, '_> {
+    fn part(&mut self, part: &Part, chain: glam::Mat4, inherited: Option<glam::Mat4>) {
+        let index = self.index;
+        let stored = self.stored.parts[index as usize];
+        let p = self.poses.pose(part);
+        if self.poses.is_hidden(part) || p[6] == 0.0 && p[7] == 0.0 && p[8] == 0.0 {
+            self.index = stored.end;
+            return;
+        }
+        let mine = super::render::posed(chain, p);
+        let bound = (self.base_of)(&part.name);
+        let under = match bound.or(inherited) {
+            Some(bound) => bound,
+            None if self.bound_only => glam::Mat4::ZERO,
+            None => self.base,
+        };
+        let m = under * mine;
+        let skip = under == glam::Mat4::ZERO || self.poses.skips(part);
+        self.parts[index as usize] = SkinPart {
+            matrix: m.to_cols_array(),
+            normal: normal_matrix(ModelNormals::new(m)).to_cols_array(),
+        };
+        if !skip && stored.count > 0 {
+            Walk::emit_into(
+                self.stored,
+                self.jobs,
+                0,
+                self.vertices,
+                self.first_part,
+                self.paint,
+                stored,
+            );
+            if let Some((lo, hi)) = self.stored.bounds[index as usize] {
+                let (lo, hi) = (glam::Vec3::from_array(lo), glam::Vec3::from_array(hi));
+                let center = m.transform_point3((lo + hi) * 0.5);
+                let half = (hi - lo) * 0.5;
+                let r = glam::Mat3::from_mat4(m);
+                let extent =
+                    r.x_axis.abs() * half.x + r.y_axis.abs() * half.y + r.z_axis.abs() * half.z;
+                let (a, b) = (center - extent, center + extent);
+                *self.bounds = Some(match *self.bounds {
+                    Some((l, h)) => (l.min(a), h.max(b)),
+                    None => (a, b),
+                });
+            }
+        }
+        self.index += 1;
+        for child in &part.children {
+            self.part(child, mine, bound.or(inherited));
         }
     }
 }
@@ -1316,6 +1430,10 @@ mod tests {
                     m.age = age;
                     m.limb_speed = 0.6;
                     m.limb_position = age as f32 * 0.37;
+                    // Some hold an item the pack dresses (its attachable posed too).
+                    if n % 3 == 0 {
+                        m.extra.main_hand = Some("minecraft:iron_sword".into());
+                    }
                     // The GPU path first: a mob it poses keeps no vertices for the CPU path.
                     models.begin(&mut frame, store.len() as u32);
                     let mut gpu = Vec::new();
@@ -1524,6 +1642,11 @@ mod tests {
                 assert!(
                     room.end <= gpu.len(),
                     "{what}: no room for the posed vertices"
+                );
+                eprintln!(
+                    "{what}: {} vertices posed, {} left on the CPU",
+                    frame.hand_vertices,
+                    gpu.len() - room.len()
                 );
                 let mut drawn = gpu[..room.start].to_vec();
                 drawn.extend_from_slice(&gpu[room.end..]);

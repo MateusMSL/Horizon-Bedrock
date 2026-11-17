@@ -1939,6 +1939,62 @@ fn render_bedrock_uncached(
                     overlay
                 };
 
+                // Posed on the GPU when nothing below changes the vertices after they are drawn
+                // (a held sword, a bucket, a tool): no stencil, culling, single texel, band,
+                // scrolling texture, flattened light or second draw, and a plain material. The
+                // layer's lift is the job's bias.
+                let plain = super::bedrock_stencil::route(&stencil_flags)
+                    == super::bedrock_stencil::Route::Scene
+                    && flags.stencil_write == 0
+                    && flags.stencil_equal == 0
+                    && flags.stencil_not_equal == 0
+                    && (flags.double_sided
+                        || !(flags.blend
+                            || (!flags.additive && bedrock.has_inside_out(&layer.layer.geometry))))
+                    && !layer.built.single_texel
+                    && !banded
+                    && !behind
+                    && !flags.uv_anim
+                    && !layer.layer.flat_lighting
+                    && !glows
+                    && !lit_glow
+                    && !flags.armor_dye
+                    && !flags.invert_culling
+                    && !(flags.blend
+                        || flags.additive
+                        || flags.no_depth_write
+                        || flags.no_depth_test
+                        || (flags.multitexture && layer.layer.secondary)
+                        || layer.layer.color[3] < 1.0);
+                if plain && let Some(skin) = skin.as_deref_mut() {
+                    let jobs = skin.frame.jobs.len();
+                    let paint = super::skin::Paint {
+                        uv,
+                        scroll: 0.0,
+                        color: tint(dyed, layer.layer.tint()),
+                        light: drawn_light,
+                        overlay: drawn_overlay,
+                        bias: if layers_on > 0 {
+                            BEDROCK_LAYER_BIAS * layers_on as f32
+                        } else {
+                            0.0
+                        },
+                    };
+                    if skin.draw_attached(
+                        &layer.built.part,
+                        glam::Mat4::IDENTITY,
+                        base,
+                        bound_only,
+                        &base_of,
+                        &poses,
+                        paint,
+                    ) {
+                        let pushed = skin.frame.jobs.len() > jobs;
+                        glinted |= pushed && drawn_overlay == ARMOR_GLINT;
+                        layers_on += usize::from(pushed);
+                        continue;
+                    }
+                }
                 draw_attached(
                     &layer.built.part,
                     glam::Mat4::IDENTITY,
