@@ -13,7 +13,7 @@ No IntelliJ: configuração **Horizon - Bedrock release**.
 A tarefa (`xtask/src/bedrock_build.rs`) compila o `horizon-official` com o perfil `release`, igual ao workflow de release, e copia o programa para `release/horizon-bedrock/horizon-client.exe`.
 
 - `horizon-official` é o jogo com as partes do Horizon (amigos, presença, servidores oficiais, Discord). O binário `horizon-client` das configurações dev não tem essas partes.
-- O launcher aceita um programa solto só com nome começando em `horizon-client`, ou um `.zip`/`.tar.gz` que tenha `horizon-client.exe` dentro. Por isso, distribuir `release/horizon-bedrock.zip` com a pasta `release/horizon-bedrock`.
+- O launcher aceita um programa solto só com nome começando em `horizon-client`, ou um `.zip`/`.tar.gz` que tenha o programa do sistema dentro (`horizon-client.exe` no Windows, `horizon-client` no Linux). Um `.exe` não roda no Linux: cada sistema tem o seu pacote, gerado nele (`horizon-bedrock-windows.zip` no Windows, `horizon-bedrock-linux.tar.gz` no Linux, que mantém o programa executável). O guia vem de `packaging/<sistema>/LEIA-ME.md`.
 
 ## Conta
 
@@ -58,7 +58,7 @@ Gera em `release/`:
 | Arquivo | Para quê |
 |---|---|
 | `horizon-bedrock/horizon-client.exe` | O jogo. Importar no launcher oficial (**Versões > Importar uma compilação do jogo…**): abre com a conta logada nele. |
-| `horizon-bedrock.zip` | O mesmo programa + `GUIDE.md`, para importar ou distribuir. |
+| `horizon-bedrock-windows.zip` / `horizon-bedrock-linux.tar.gz` | O mesmo programa + `GUIDE.md` do sistema, para importar ou distribuir. |
 | `horizon-launcher/horizon-launcher.exe` | O launcher do fork. Não se atualiza para o do upstream. |
 
 Conta: o caminho de teste é o jogo importado no launcher oficial, que confere a conta e entrega a sessão. O `horizon-launcher.exe` do fork só faz login com o client ID do app Azure do próprio fork (`HORIZON_MSA_CLIENT_ID` na configuração); sem ele avisa que o login não está configurado. Usar a sessão do launcher oficial ou o client ID do Horizon é proibido (docs/forking.md).
