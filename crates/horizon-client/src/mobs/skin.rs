@@ -1416,6 +1416,129 @@ mod tests {
         assert!(!posed.is_empty(), "no pack mob took the GPU path");
     }
 
+    /// A Bedrock pack's first-person view model posed on the GPU (into the hand's room,
+    /// `SkinFrame::hand_jobs`) draws what the CPU draws, holding a few items.
+    #[test]
+    fn a_bedrock_packs_first_person_view_posed_on_the_gpu_draws_what_the_cpu_draws() {
+        let Some(pack) =
+            std::env::var_os("HORIZON_TEST_BEDROCK_PACK").map(std::path::PathBuf::from)
+        else {
+            eprintln!("no HORIZON_TEST_BEDROCK_PACK: skipped");
+            return;
+        };
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = std::env::var_os("HORIZON_TEST_RESOURCES")
+            .map_or_else(|| repo.join(".local/horizon-client/26.3"), Into::into);
+        if !root.join("entity-models.json").exists() {
+            eprintln!("no prepared resources: skipped");
+            return;
+        }
+        let types = MobTypes::load(&root).unwrap();
+        let bedrock = Arc::new(crate::mobs::bedrock::BedrockMobs::load(&pack));
+        let data = MobData {
+            states: Vec::new(),
+            placements: Default::default(),
+            heightmaps: Default::default(),
+            animations: MobData::load_animations(&root),
+            biome_tags: Default::default(),
+            entity_tags: Default::default(),
+            villager_hats: Default::default(),
+            cem: Default::default(),
+            bedrock: std::sync::RwLock::new(bedrock.clone()),
+            random_textures: Default::default(),
+            emissive: Default::default(),
+            blinks: Default::default(),
+            pois: Default::default(),
+            species_placements: Default::default(),
+        };
+        let atlas = |name: &str| {
+            let h = name
+                .bytes()
+                .fold(7u32, |h, b| h.wrapping_mul(31).wrapping_add(u32::from(b)));
+            let u = (h % 61) as f32 / 64.0;
+            let v = (h / 61 % 61) as f32 / 64.0;
+            Some([u, v, u + 1.0 / 64.0, v + 1.0 / 32.0])
+        };
+        // The player, as the game draws it (its own type is made outside this crate).
+        let mut kind = types.types["minecraft:zombie"].clone();
+        kind.id = "minecraft:player".into();
+        let kind = Arc::new(kind);
+        let set = |vertices: &mut dyn Iterator<Item = crate::mesher::Vertex>| {
+            let mut all: Vec<Vec<u8>> = vertices.map(|v| bytemuck::bytes_of(&v).to_vec()).collect();
+            all.sort_unstable();
+            all
+        };
+        let hand = glam::Mat4::from_translation(glam::Vec3::new(0.3, -0.4, -0.7));
+        let mut models = SkinModels::default();
+        let mut frame = SkinFrame::default();
+        let mut store: Vec<crate::gfx::entity_skin::SkinVertex> = Vec::new();
+        let mut posed = 0;
+        for tagged in [false, true] {
+            for (n, items) in [
+                (None, None),
+                (Some("minecraft:netherite_sword"), None),
+                (Some("minecraft:iron_pickaxe"), Some("minecraft:shield")),
+                (Some("minecraft:bow"), Some("minecraft:golden_carrot")),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let mut m = Mob::new(500 + n as u32, kind.clone(), Default::default(), 30.0);
+                m.age = 40 + n as u32 * 7;
+                let draw = |skin: Option<&mut Skin>, out: &mut Vec<crate::mesher::Vertex>| {
+                    render::first_person_item(
+                        &m,
+                        items.0,
+                        items.1,
+                        0.4,
+                        hand,
+                        [30.0, 10.0, 1.62],
+                        &atlas,
+                        0x50a0,
+                        &data,
+                        out,
+                        skin,
+                    )
+                };
+                let mut cpu = Vec::new();
+                draw(None, &mut cpu);
+                models.begin(&mut frame, store.len() as u32);
+                models.tagged = tagged;
+                let mut gpu = Vec::new();
+                draw(Some(&mut Skin::new(&mut models, &mut frame)), &mut gpu);
+                if frame.reset {
+                    store.clear();
+                }
+                store.extend_from_slice(&frame.new_model);
+                frame.handed();
+                let room =
+                    frame.hand_first as usize..(frame.hand_first + frame.hand_vertices) as usize;
+                if !frame.hand_jobs.is_empty() {
+                    posed += 1;
+                }
+                let what = format!("items {items:?} tagged {tagged}");
+                assert!(
+                    frame.jobs.is_empty(),
+                    "{what}: posed outside the hand's room"
+                );
+                assert!(
+                    room.end <= gpu.len(),
+                    "{what}: no room for the posed vertices"
+                );
+                let mut drawn = gpu[..room.start].to_vec();
+                drawn.extend_from_slice(&gpu[room.end..]);
+                drawn.extend(crate::gfx::entity_skin::expand_hand(&store, &frame));
+                assert_eq!(drawn.len(), cpu.len(), "{what}: vertex count");
+                assert!(
+                    set(&mut drawn.into_iter()) == set(&mut cpu.into_iter()),
+                    "{what}: the paths draw other vertices"
+                );
+                frame.clear_draws();
+            }
+        }
+        assert!(posed > 0, "the first-person view never took the GPU path");
+    }
+
     /// A measure, not a check: for the pack mobs `HORIZON_CPU_KINDS` names (comma separated,
     /// `first_person` for the player's view model), what the GPU path poses and what stays on
     /// the CPU and why, in vertices (`render_03::cpu_why`).

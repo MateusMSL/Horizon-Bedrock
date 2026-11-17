@@ -9770,7 +9770,7 @@ impl Renderer {
                     skin,
                     &self.entity_buffer,
                     0,
-                    outline_base,
+                    (outline_base, (world_quads + additive_quads) * 4),
                 );
             }
         }

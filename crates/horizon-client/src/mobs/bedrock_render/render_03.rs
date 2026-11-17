@@ -1109,6 +1109,12 @@ fn render_bedrock_uncached(
                     else { "plain (GPU refused)" };
                 cpu_why::OPEN.with(|o| o.set(Some((why, out.len(), super::bedrock_stencil::pushed_for_test()))));
             }
+            // The first-person view's posed pieces go to the hand's room, and the stencil pass's
+            // posed pieces are the world's: its stencil pieces stay on the CPU.
+            let plain = plain
+                && (!in_first_person_view()
+                    || super::bedrock_stencil::route(&stencil_flags)
+                        == super::bedrock_stencil::Route::Scene);
             if plain && let Some(skin) = skin.as_deref_mut() {
                 let (jobs, vertices) = (skin.frame.jobs.len(), skin.frame.vertices);
                 let bias = if layers_before > 0 || gi > 0 {
@@ -2257,6 +2263,7 @@ pub fn first_person_item(
     light: u32,
     data: &MobData,
     out: &mut Vec<Vertex>,
+    skin: Option<&mut super::skin::Skin>,
 ) -> bool {
     let settings = super::bedrock_debug::settings();
     if settings.first_person_off {
@@ -2325,6 +2332,12 @@ pub fn first_person_item(
             .inverse(),
         ))
     });
+    // The GPU path (`skin`: the caller's, when the renderer draws the hand's room,
+    // `gfx::Renderer::skins_hand`) while that room is free: one view model a frame.
+    let mut skin = skin.filter(|s| s.frame.hand_jobs.is_empty());
+    let (fp_jobs, fp_vertices) = skin
+        .as_ref()
+        .map_or((0, 0), |s| (s.frame.jobs.len(), s.frame.vertices));
     render_bedrock(
         &copy,
         alpha,
@@ -2340,8 +2353,20 @@ pub fn first_person_item(
         light,
         data,
         out,
-        None,
+        skin.as_deref_mut(),
     );
+    // What the GPU posed of it goes into room left here in the hand's vertices
+    // (`SkinFrame::hand_jobs`): every draw of the hand takes it with the rest.
+    if let Some(skin) = skin
+        && skin.frame.jobs.len() > fp_jobs
+    {
+        let before = skin.frame.hand_vertices;
+        skin.frame.hand_move_since(fp_jobs, fp_vertices);
+        skin.frame.hand_first = out.len() as u32;
+        let room = (skin.frame.hand_vertices - before) as usize;
+        out.resize(out.len() + room, bytemuck::Zeroable::zeroed());
+        skin.forget_last();
+    }
     FP_VIEW.with(|v| v.set(None));
     FP_EYE.with(|v| v.set(None));
     let drawn = out.len() - start;

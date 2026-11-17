@@ -68,6 +68,12 @@ impl Game<'_> {
         horizon_client::mobs::render::set_first_person_arm_heights(
             self.heights.interpolated(alpha),
         );
+        // Posed on the GPU into the hand's vertices when this frame's models are posed there and
+        // the renderer draws that room (`skins_hand`: no shader pack).
+        let posing = self.skinning() && self.renderer.as_ref().is_some_and(|r| r.skins_hand());
+        let (mut models, mut frame) = (self.skin_models.borrow_mut(), self.skin_frame.borrow_mut());
+        let mut skin =
+            posing.then(|| horizon_client::mobs::skin::Skin::new(&mut models, &mut frame));
         horizon_client::mobs::render::first_person_item(
             player,
             main,
@@ -84,6 +90,7 @@ impl Game<'_> {
             packed,
             self.res.mob_data(),
             out,
+            skin.as_mut(),
         )
     }
 

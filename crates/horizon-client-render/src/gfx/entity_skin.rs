@@ -124,6 +124,14 @@ pub struct SkinFrame {
     pub stencil_jobs: Vec<SkinJob>,
     /// Vertices the stencil jobs write.
     pub stencil_vertices: u32,
+    /// A Bedrock pack's first-person view model posed here, into room the game left for it in
+    /// the hand's own vertices (`Frame::hand`, from `hand_first`): every draw of the hand
+    /// (its pass, the world's end, HDR marks) takes it with the rest. `dst` counts from there.
+    pub hand_jobs: Vec<SkinJob>,
+    /// Vertices the hand jobs write.
+    pub hand_vertices: u32,
+    /// Where in the hand's vertices their room starts.
+    pub hand_first: u32,
 }
 
 impl SkinFrame {
@@ -137,6 +145,9 @@ impl SkinFrame {
         self.outline_vertices = 0;
         self.stencil_jobs.clear();
         self.stencil_vertices = 0;
+        self.hand_jobs.clear();
+        self.hand_vertices = 0;
+        self.hand_first = 0;
     }
 
     /// Copies the draws since job `first` into the glowing entities' outline
@@ -177,6 +188,21 @@ impl SkinFrame {
         self.jobs.truncate(first);
         self.vertices = vertices;
         placed
+    }
+    /// Moves the draws since job `first` (`vertices` the frame had before them) to the
+    /// first-person hand's range (`hand_jobs`): the caller leaves them that many vertices of
+    /// room in the hand's.
+    pub fn hand_move_since(&mut self, first: usize, vertices: u32) {
+        for i in first..self.jobs.len() {
+            let job = self.jobs[i];
+            self.hand_jobs.push(SkinJob {
+                dst: self.hand_vertices,
+                ..job
+            });
+            self.hand_vertices += job.count;
+        }
+        self.jobs.truncate(first);
+        self.vertices = vertices;
     }
     /// The vertices the posed copies write past the ordinary entities: the glowing silhouettes,
     /// then the Bedrock stencil pass's pieces.
@@ -221,6 +247,16 @@ impl SkinFrame {
             || !self.jobs.is_empty()
             || !self.outline_jobs.is_empty()
             || !self.stencil_jobs.is_empty()
+            || !self.hand_jobs.is_empty()
+    }
+}
+
+impl super::Renderer {
+    /// Whether the game may pose a Bedrock pack's first-person view model on the GPU, into the
+    /// hand's vertices (`SkinFrame::hand_jobs`): with entity skinning and no shader pack, whose
+    /// own path (`dispatch_pack`) does not write them.
+    pub fn skins_hand(&self) -> bool {
+        self.skins_entities() && self.pack_post.is_none()
     }
 }
 
@@ -376,7 +412,8 @@ impl EntitySkin {
 
     /// Records the frame's jobs: they write `frame.vertices` vertices into
     /// `out` from vertex `base` on, and the outline jobs `frame.outline_vertices`
-    /// from vertex `outline_base` on. Call after the CPU vertices' upload.
+    /// from vertex `outline_base` on; the hand's, into its room (`hand`: where the hand's
+    /// vertices start in `out`). Call after the CPU vertices' upload.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn dispatch(
         &mut self,
@@ -386,10 +423,11 @@ impl EntitySkin {
         frame: &SkinFrame,
         out: &wgpu::Buffer,
         base: u32,
-        outline_base: u32,
+        (outline_base, hand): (u32, u32),
     ) {
         // The stencil pass's pieces right after the silhouettes (`SkinFrame::tail`).
         let stencil_base = outline_base + frame.outline_vertices;
+        let hand_base = hand + frame.hand_first;
         self.dispatch_jobs(
             device,
             uploads,
@@ -408,6 +446,10 @@ impl EntitySkin {
                 }))
                 .chain(frame.stencil_jobs.iter().map(|job| SkinJob {
                     dst: job.dst + stencil_base,
+                    ..*job
+                }))
+                .chain(frame.hand_jobs.iter().map(|job| SkinJob {
+                    dst: job.dst + hand_base,
                     ..*job
                 })),
             out,
@@ -529,6 +571,11 @@ pub fn expand(model: &[SkinVertex], frame: &SkinFrame) -> Vec<Vertex> {
 /// [`expand`] of the frame's outline jobs: the silhouettes they write.
 pub fn expand_stencil(model: &[SkinVertex], frame: &SkinFrame) -> Vec<Vertex> {
     expand_jobs(model, frame, &frame.stencil_jobs, frame.stencil_vertices)
+}
+
+/// The first-person hand's range as the shader writes it (`SkinFrame::hand_jobs`).
+pub fn expand_hand(model: &[SkinVertex], frame: &SkinFrame) -> Vec<Vertex> {
+    expand_jobs(model, frame, &frame.hand_jobs, frame.hand_vertices)
 }
 
 /// `p` moved `bias` toward the camera (the origin), as `lift_toward_camera` moves a Bedrock
@@ -745,6 +792,9 @@ mod tests {
             outline_vertices: 0,
             stencil_jobs: Vec::new(),
             stencil_vertices: 0,
+            hand_jobs: Vec::new(),
+            hand_vertices: 0,
+            hand_first: 0,
         };
         // A glowing entity's silhouette: the item job and the first job again,
         // in its team colour with no normal.
@@ -807,7 +857,7 @@ mod tests {
             &frame,
             &out,
             before,
-            outline_base,
+            (outline_base, 0),
         );
         let read = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,

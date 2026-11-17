@@ -283,6 +283,12 @@ impl Game<'_> {
                 let first = if dressed_hands[0] { held[0] } else { held[1] };
                 let item_id = first.map_or(0, |s| self.rendered_item_id(&s.item));
                 runs.push((out.len() as u32, item_id));
+                // The room the GPU path left in `dressed` moves with it.
+                let mut skin = self.skin_frame.borrow_mut();
+                if !skin.hand_jobs.is_empty() {
+                    skin.hand_first += out.len() as u32;
+                }
+                drop(skin);
                 out.append(&mut dressed);
                 view_model = true;
             }
