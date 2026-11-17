@@ -1301,9 +1301,12 @@ mod tests {
             all.sort_unstable();
             all
         };
-        // Without and with the stencil pass (its pieces posed for it, `hand_over_posed`).
-        for pass_on in [false, true] {
+        // Without and with the stencil pass (its pieces posed for it, `hand_over_posed`), and
+        // with improved transparency on and off (off, the glow of an emissive layer is posed
+        // too: `SkinModels::tagged`).
+        for (pass_on, tagged) in [(false, false), (true, false), (true, true)] {
             crate::mobs::bedrock_stencil::set_on_for_test(pass_on);
+            models.tagged = tagged;
             for (n, id) in ids.iter().enumerate() {
                 let kind = Arc::new(types.types[id].clone());
                 for (age, yaw) in [(0u32, 0.0f32), (37, 123.0), (412, -71.5)] {
@@ -1334,7 +1337,7 @@ mod tests {
                     if !frame.stencil_jobs.is_empty() {
                         stenciled.insert(id.clone());
                     }
-                    let what = format!("{id} age {age} pass {pass_on}");
+                    let what = format!("{id} age {age} pass {pass_on} tagged {tagged}");
                     let scene = set(&mut expand(&store, &frame)
                         .into_iter()
                         .chain(gpu.iter().copied()));
@@ -1461,7 +1464,11 @@ mod tests {
             let (mut gpu, mut gpu_stencil, mut cpu, mut cpu_stencil) = (0usize, 0usize, 0, 0);
             for frame_no in 0..30u32 {
                 m.age = 100 + frame_no;
-                let mut models = SkinModels::default();
+                // `HORIZON_CPU_TAGGED`: as with improved transparency off.
+                let mut models = SkinModels {
+                    tagged: std::env::var_os("HORIZON_CPU_TAGGED").is_some(),
+                    ..Default::default()
+                };
                 let mut frame = SkinFrame::default();
                 models.begin(&mut frame, 0);
                 let mut out = Vec::new();

@@ -1134,12 +1134,27 @@ fn render_bedrock_uncached(
                     drew |= pushed
                         && super::bedrock_stencil::route(&stencil_flags)
                             != super::bedrock_stencil::Route::Pass;
-                    // An emissive layer's glow (its `_glow` texels lit full) is a second,
-                    // translucent draw: the CPU's, over the base the GPU posed.
+                    // An emissive layer's glow (its `_glow` texels lit full) is a second draw,
+                    // with the translucent entities: with improved transparency off they are
+                    // ordinary entity quads (`SkinModels::tagged`) and the GPU poses it too, its
+                    // tag in the overlay word as the CPU's `mark_oit` puts it; on, the CPU draws it.
                     if let Some(glow) = glow {
                         let from = out.len();
                         let push = BEDROCK_LAYER_BIAS * layers_before as f32
                             + BEDROCK_PASS_BIAS * (gi + 1) as f32;
+                        let jobs = skin.frame.jobs.len();
+                        let paint = super::skin::Paint {
+                            uv: glow,
+                            scroll: 0.0,
+                            color: tint(color, layer.layer.tint()),
+                            light: FULL_BRIGHT,
+                            overlay: overlay | crate::gfx::OIT_ENTITY,
+                            bias: push,
+                        };
+                        if skin.models.tagged && skin.draw(&layer.built.part, base, &poses, paint) {
+                            drew |= skin.frame.jobs.len() > jobs;
+                            continue;
+                        }
                         draw_glow(&layer.built.part, base, &poses, glow, tint(color, layer.layer.tint()), overlay, push, out);
                         drew |= out.len() > from;
                     }
