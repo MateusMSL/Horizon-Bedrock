@@ -51,7 +51,7 @@ Junta as listas pedidas na conversa (lista de tarefas da sessão, notas "Anotado
 - [ ] Slime, cubo de enxofre, magma: textura; cubo de enxofre tremendo, parando a animação e com o item absorvido desalinhado.
 - [ ] Estande de armadura: armaduras do pack e animação colocado no chão.
 - [ ] Golem de cobre.
-- [ ] Golem de cobre piscando e com o olho bugado depois da pose na GPU (branch `bedrock-gpu-pose`, relato de 2026-11-17; os outros mobs ok). Capturas: num quadro o corpo sai chapado, cor de cobre sem textura e sem a camada de cima; no outro sai normal. Suspeitas: o stencil posado (`hand_over_posed`, o corpo escreve o stencil que a casca lê) reaproveitado do quadro anterior (`KeptPose`: peças do passe com o lugar errado no buffer posado) ou a ordem entre os lotes posados e os da CPU no passe de stencil. Testar com `HORIZON_NO_ENTITY_SKIN=1` e com `cpu_stencil: true` no `bedrock-debug.json` para separar GPU, stencil e reaproveitamento.
+- [ ] Golem de cobre piscando e com o olho bugado depois da pose na GPU (branch `bedrock-gpu-pose`, relato de 2026-11-17; os outros mobs ok). Capturas: num quadro o corpo sai chapado, cor de cobre sem textura e sem a camada de cima; no outro sai normal. Suspeitas: o stencil posado (`hand_over_posed`, o corpo escreve o stencil que a casca lê) reaproveitado do quadro anterior (`KeptPose`: peças do passe com o lugar errado no buffer posado) ou a ordem entre os lotes posados e os da CPU no passe de stencil. Com shader pack (stencil desligado) não pisca. Testar com `HORIZON_NO_ENTITY_SKIN=1` e com `cpu_stencil: true` no `bedrock-debug.json` para separar GPU, stencil e reaproveitamento.
 - [?] Lula brilhante: halo atravessando parede (v214).
 - [?] Ovelha "Halloween" (v219, confirmado).
 
@@ -126,6 +126,9 @@ Junta as listas pedidas na conversa (lista de tarefas da sessão, notas "Anotado
 - [ ] Morphs: ferramentas e armaduras não encaixam no corpo do Morph (testado em raposa, olho do fim e golem de redstone).
 - [ ] Costumes: trim aparece na armadura de couro, mas nenhuma fantasia (opção ligada).
 - [ ] Abóboras e Snow Golem sempre com o mesmo rosto (sem variações).
-- [ ] Glows com shader pack ligado: olhos brilhantes, tochas, allays e outros brilhos ficam bugados. Revisar a passagem emissiva com shaders.
+- [ ] Compatibilidade com shader packs (o A&S não suporta shaders oficialmente; relato de 2026-11-17, erros anteriores à otimização de desempenho):
+  - Glows bugados: olhos brilhantes, tochas, allays e outros brilhos estouram num borrão branco (olhos do golem de cobre, allay inteiro). Revisar a passagem emissiva com shaders.
+  - Slimes chapados ("flat"): a camada externa translúcida sai opaca e sem sombreamento, escondendo o corpo de dentro.
+  - O golem de cobre não pisca com shaders: o passe de stencil fica desligado sob shader packs, o que reforça a suspeita no stencil posado (item do golem em Mobs).
 - [ ] Texture Style Vanilla Experience com outro resource pack por cima: itens bugam.
 - [ ] Nametags: avaliar uma a uma; `Halloween` no slime não aplica a variante de caveira.
