@@ -98,7 +98,12 @@ fn main() {
         total / rows.len().max(1) as f64,
         started.elapsed().as_secs_f32()
     );
-    for (us, id) in rows.iter().take(15) {
+    // `ANIM_ROWS=n`: how many of the slowest to list (15).
+    let shown = std::env::var("ANIM_ROWS")
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(15);
+    for (us, id) in rows.iter().take(shown) {
         println!("  {us:8.2} us  {id}");
     }
 }

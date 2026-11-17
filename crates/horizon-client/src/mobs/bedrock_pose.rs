@@ -26,6 +26,77 @@ pub fn drew_model() {
     DRAWN.fetch_add(1, Relaxed);
 }
 
+/// `Instance::update` timed as `bd_update`: the poses worked out (Molang, animations,
+/// controllers), apart from the frames `BedrockMobs::frame` hands back kept.
+pub(super) fn update(
+    instance: &mut horizon_bedrock::entity::Instance,
+    def: &horizon_bedrock::entity::ClientEntity,
+    assets: &horizon_bedrock::entity::Assets,
+    host: &mut dyn horizon_bedrock::molang::Host,
+    dt: f32,
+) -> horizon_bedrock::entity::Frame {
+    if !profiling() {
+        return horizon_client_render::spans::time("bd_update", || {
+            instance.update(def, assets, host, dt)
+        });
+    }
+    let started = std::time::Instant::now();
+    let frame =
+        horizon_client_render::spans::time("bd_update", || instance.update(def, assets, host, dt));
+    profile(&def.id, def.attachable, started.elapsed());
+    frame
+}
+
+/// `HORIZON_BEDROCK_PROFILE=1`: the pose updates' time by entity (and attachable), logged every
+/// five seconds, to find which of a crowd's kinds costs what in the real game, where the hosts'
+/// answers take the pack down paths a benchmark does not.
+fn profiling() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("HORIZON_BEDROCK_PROFILE").is_some())
+}
+
+fn profile(id: &str, attachable: bool, took: std::time::Duration) {
+    type Table = (
+        std::time::Instant,
+        std::collections::HashMap<String, (u32, f64)>,
+    );
+    thread_local! {
+        static TABLE: std::cell::RefCell<Option<Table>> = const { std::cell::RefCell::new(None) };
+    }
+    TABLE.with(|t| {
+        let mut t = t.borrow_mut();
+        let (since, by) = t.get_or_insert_with(|| (std::time::Instant::now(), Default::default()));
+        let key = if attachable {
+            format!("{id} (attachable)")
+        } else {
+            id.to_owned()
+        };
+        let e = by.entry(key).or_default();
+        e.0 += 1;
+        e.1 += took.as_secs_f64() * 1e6;
+        let secs = since.elapsed().as_secs_f64();
+        if secs < 5.0 {
+            return;
+        }
+        let mut rows: Vec<_> = by.drain().collect();
+        rows.sort_by(|a, b| b.1.1.total_cmp(&a.1.1));
+        let line: Vec<String> = rows
+            .iter()
+            .take(12)
+            .map(|(k, (n, us))| {
+                format!(
+                    "{k}: {:.0} us/s, {:.0}/s, {:.1} us each",
+                    us / secs,
+                    f64::from(*n) / secs,
+                    us / f64::from(*n)
+                )
+            })
+            .collect();
+        log::info!("bedrock-profile: {}", line.join(" | "));
+        *since = std::time::Instant::now();
+    });
+}
+
 /// Whether `m`, posed at `then` (ticks) and drawn now at `now`, `from_camera` (blocks) away,
 /// keeps that pose.
 pub(super) fn keeps(m: &Mob, then: f32, now: f32, from_camera: [f32; 3]) -> bool {

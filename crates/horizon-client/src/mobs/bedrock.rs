@@ -2782,7 +2782,7 @@ impl BedrockMobs {
                 st.instance.update(def, &assets, &mut host, WARM_STEP);
             }
         }
-        let mut frame = st.instance.update(def, &assets, &mut host, dt);
+        let mut frame = pose::update(&mut st.instance, def, &assets, &mut host, dt);
         if let Some(stand) = &m.extra.stand_pose {
             pose_stand(&mut frame.pose, stand);
         }
@@ -3257,7 +3257,7 @@ impl BedrockMobs {
                     st.instance.update(def, &assets, &mut warming, WARM_STEP);
                 }
             }
-            let mut frame = st.instance.update(def, &assets, &mut host, dt);
+            let mut frame = pose::update(&mut st.instance, def, &assets, &mut host, dt);
             // Where each effect starts: its locator in the attachable's model, carried to the
             // holder's bone the item is bound to (Bedrock draws the attachable as part of the
             // holder's skeleton; its y 24 sits on the bone); the bone itself without a locator.
