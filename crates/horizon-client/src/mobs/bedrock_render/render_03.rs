@@ -467,6 +467,33 @@ thread_local! {
     static MESH_DRAWS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
+/// `rest_pivot` and `rest_floor` of `bone` in `part`, kept per model: an attachable held in the
+/// hand asks for them each frame, and each walks the whole model (every polygon, for the floor),
+/// which with a detailed item in the first-person hand was a fifth of the frame. Holds the
+/// model, so its address is not reused while the answer is kept.
+fn rest_of(part: &std::sync::Arc<Part>, bone: &str) -> (Option<glam::Vec3>, Option<f32>) {
+    type Rest = (std::sync::Arc<Part>, String, (Option<glam::Vec3>, Option<f32>));
+    thread_local! {
+        static RESTS: std::cell::RefCell<Vec<Rest>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    RESTS.with(|rests| {
+        let mut rests = rests.borrow_mut();
+        if let Some((_, _, rest)) = rests
+            .iter()
+            .find(|(p, b, _)| std::sync::Arc::ptr_eq(p, part) && b == bone)
+        {
+            return *rest;
+        }
+        let rest = (rest_pivot(part, bone), rest_floor(part, bone));
+        // A handful are in use at a time (what is held and worn); the rest are models let go.
+        if rests.len() >= 64 {
+            rests.clear();
+        }
+        rests.push((part.clone(), bone.to_owned(), rest));
+        rest
+    })
+}
+
 /// `v` moved by `delta` (the mob's motion since its vertices were drawn): its place, and its
 /// normal turned with it. The turn is a rotation (the mob's scale cancels out of `delta`), so the
 /// normal keeps its length: renormalizing moved the bytes of a still mob's normals (a packed
@@ -1359,13 +1386,13 @@ fn render_bedrock_uncached(
                 let rest_at = att
                     .layers
                     .iter()
-                    .find_map(|l| rest_pivot(&l.built.part, bone))
+                    .find_map(|l| rest_of(&l.built.part, bone).0)
                     .unwrap_or(glam::Vec3::new(0.0, MODEL_FEET, 0.0));
                 let height = (MODEL_FEET - rest_at.y) * 16.0;
                 let floor = att
                     .layers
                     .iter()
-                    .filter_map(|l| rest_floor(&l.built.part, bone))
+                    .filter_map(|l| rest_of(&l.built.part, bone).1)
                     .reduce(f32::min);
                 // First person (`fp_held_anchor`): Bedrock binds the bone to the hand the way
                 // a child bone hangs from its parent, so the model keeps its place against the
@@ -1415,7 +1442,7 @@ fn render_bedrock_uncached(
                 let anchor = if slot_follow.is_none() {
                     att.layers
                         .iter()
-                        .find_map(|l| rest_pivot(&l.built.part, bone))
+                        .find_map(|l| rest_of(&l.built.part, bone).0)
                         .filter(|p| {
                             p.x.abs() < 1.0 / 16.0 && p.z.abs() < 1.0 / 16.0 && (p.y - MODEL_FEET).abs() <= 1.0 / 16.0
                         })
