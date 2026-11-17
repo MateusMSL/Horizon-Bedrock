@@ -641,11 +641,18 @@ fn render_bedrock_uncached(
         let layers_before = layers_drawn;
         let mut drew_here = false;
         for (gi, group) in groups.iter().enumerate() {
-            poses.reset(&layer.built.part);
-            // What the attachables' animations do to the holder's bones (an arm a held item
-            // raises) is in `frame.pose` already (`bedrock.rs`, both persons): adding it again
-            // here in first person turned the arm twice as far (the sword's swing overshot).
-            super::bedrock::apply_pose(&frame.pose, &layer.built.names, &mut poses);
+            // The layer's pose is the same for each of its groups, which differ only in the bones
+            // that draw their cubes: posed once, so the GPU path reuses its part matrices
+            // (`Poses::shape_version`), and each later group only skips other bones.
+            if gi == 0 {
+                poses.reset(&layer.built.part);
+                // What the attachables' animations do to the holder's bones (an arm a held item
+                // raises) is in `frame.pose` already (`bedrock.rs`, both persons): adding it again
+                // here in first person turned the arm twice as far (the sword's swing overshot).
+                super::bedrock::apply_pose(&frame.pose, &layer.built.names, &mut poses);
+            } else {
+                poses.clear_skips();
+            }
             for name in &layer.built.names {
                 let debug = super::bedrock_debug::settings();
                 // A hidden bone hides its own cubes only: its children follow their own rules.
@@ -654,6 +661,9 @@ fn render_bedrock_uncached(
                     || debug.solo_hides(name)
                 {
                     poses.skip_draw(name);
+                }
+                if gi > 0 {
+                    continue;
                 }
                 // The debug file's `push_bones`: a bone forward of the ones under it (-z).
                 let push = debug.push_for(name);

@@ -126,6 +126,9 @@ pub struct Poses {
     /// Names this content: a fresh number at each change, kept by copies
     /// ([`Poses::version`]).
     version: u64,
+    /// The same for what places the parts, leaving out which ones skip their
+    /// cubes ([`Poses::shape_version`]).
+    shape: u64,
 }
 /// The next [`Poses::version`].
 static NEXT_VERSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -182,8 +185,27 @@ impl Poses {
     pub fn version(&self) -> u64 {
         self.version
     }
+    /// Names what places the parts (poses and hidden parts), not which skip
+    /// their own cubes: two draws with the same shape version have the same
+    /// part matrices, and may draw other parts of them (a Bedrock model's
+    /// material groups, `skin::Skin::draw`).
+    pub fn shape_version(&self) -> u64 {
+        self.shape
+    }
     fn changed(&mut self) {
         self.version = NEXT_VERSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.shape = self.version;
+    }
+    /// Only which parts skip their cubes changed: the shape stays.
+    fn skips_changed(&mut self) {
+        self.version = NEXT_VERSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    /// No part skips its cubes any more; the shape stays.
+    pub fn clear_skips(&mut self) {
+        if !self.skipped.is_empty() {
+            self.skipped.clear();
+            self.skips_changed();
+        }
     }
     /// Makes this a copy of `other`, keeping this one's capacity.
     pub fn copy_from(&mut self, other: &Poses) {
@@ -192,6 +214,7 @@ impl Poses {
         self.skipped.clone_from(&other.skipped);
         self.hidden.clone_from(&other.hidden);
         self.version = other.version;
+        self.shape = other.shape;
     }
     /// Refills this for another model, keeping the map and the sets' capacity:
     /// a mob draws its body and every equipment layer each frame.
@@ -222,7 +245,7 @@ impl Poses {
     }
     pub fn skip_draw(&mut self, name: &str) {
         if self.skipped.insert(key(name)) {
-            self.changed();
+            self.skips_changed();
         }
     }
     pub fn skips(&self, part: &Part) -> bool {
@@ -1169,6 +1192,7 @@ mod body_pose_tests {
             skipped: Default::default(),
             hidden: Default::default(),
             version: 0,
+            shape: 0,
         };
         let at_rest = BODY_PARTS.map(|b| p.has(b).then(|| *p.get(b)));
         // What the walk animation did: the head looks aside, the arm swings.
@@ -1223,6 +1247,7 @@ mod flight_pose_tests {
             skipped: Default::default(),
             hidden: Default::default(),
             version: 0,
+            shape: 0,
         };
         player_model_visibility(&mut p, 0, true);
         for part in ["body", "right_arm", "left_arm", "right_leg", "left_leg"] {
@@ -1251,6 +1276,7 @@ mod flight_pose_tests {
                     skipped: Default::default(),
                     hidden: Default::default(),
                     version: 0,
+                    shape: 0,
                 };
                 let arm = if right { "right_arm" } else { "left_arm" };
                 p.xrot("head", pitch);
@@ -1291,6 +1317,7 @@ mod flight_pose_tests {
                     skipped: Default::default(),
                     hidden: Default::default(),
                     version: 0,
+                    shape: 0,
                 };
                 let arm = if right { "right_arm" } else { "left_arm" };
                 p.xrot("head", pitch);
@@ -1345,6 +1372,7 @@ mod flight_pose_tests {
             skipped: Default::default(),
             hidden: Default::default(),
             version: 0,
+            shape: 0,
         };
         enderman::anim(&seated, &state, &mut poses);
         let right = *poses.get("right_leg");
@@ -1401,6 +1429,7 @@ mod flight_pose_tests {
             skipped: Default::default(),
             hidden: Default::default(),
             version: 0,
+            shape: 0,
         };
         let mut ground = make();
         let mut flight = make();
@@ -1443,6 +1472,7 @@ mod flight_pose_tests {
             skipped: Default::default(),
             hidden: Default::default(),
             version: 0,
+            shape: 0,
         };
         let same_angle = |a: f32, b: f32| ((a - b + PI).rem_euclid(PI * 2.0) - PI).abs() < 1e-5;
         let mut h = Hum::new(ArmPose::Empty, ArmPose::Empty);
@@ -1550,6 +1580,7 @@ mod flight_pose_tests {
             skipped: Default::default(),
             hidden: Default::default(),
             version: 0,
+            shape: 0,
         };
         let mut m = player();
         m.extra.main_hand = Some("minecraft:shield".into());
@@ -1572,6 +1603,7 @@ mod flight_pose_tests {
             skipped: Default::default(),
             hidden: Default::default(),
             version: 0,
+            shape: 0,
         };
         setup(&m, &state, &mut p, &HashMap::new());
         assert!((p.get("right_arm")[3] + PI / 10.0).abs() < 1e-6);
@@ -1601,6 +1633,7 @@ mod flight_pose_tests {
             skipped: Default::default(),
             hidden: Default::default(),
             version: 0,
+            shape: 0,
         };
         let mut m = player();
         m.extra.main_hand = Some("minecraft:brush".into());
