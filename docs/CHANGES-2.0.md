@@ -1,7 +1,8 @@
 # Horizon Bedrock 2.0: desempenho do motor de add-ons
 
-Versão focada em desempenho com add-ons Bedrock pesados (testada com Actions & Stuff 1.13).
-Mede-se num servidor com uma fazenda de golems de cobre (~90 golems em cena), build release.
+Mudanças desde a `bedrock-v275`. Versão focada em estabilidade de memória e desempenho com
+add-ons Bedrock pesados (testada com Actions & Stuff 1.13). Os números vêm de um servidor com
+uma fazenda de golems de cobre (~90 golems em cena), build release.
 
 ## Resultados
 
@@ -12,6 +13,32 @@ Mede-se num servidor com uma fazenda de golems de cobre (~90 golems em cena), bu
 | Montagem dos mobs (`bd_mesh` + `bd_kept`) | ~2,0 ms | ~0,5 ms |
 | Preparo do passe de stencil | 0,49 ms | 0,06 ms |
 | Pose Molang de um golem (host real do jogo) | 114 µs | 99 µs |
+
+## Memória e travamentos
+
+- Sprites com profundidade de pixel (`use_pixel_depth`): os sprites de 1024 px do A&S geravam
+  72 milhões de caixas (~15 GB) ao carregar os mobs, e o jogo era morto por falta de memória antes
+  da tela inicial. Agora a silhueta tem no máximo 32 células por lado, e cada modelo e textura é
+  lido uma vez só.
+- Terreno distante (LOD): um bloco que continuava ativo ficava com amostras antigas na malha
+  (pânico em `check_mesh_samples`); agora a malha usa as amostras novas.
+- Registro de memória: uma thread anota no log a memória residente e o heap quando mudam 256 MB,
+  avisa ao passar de 3/4 do limite e mostra quem ocupa o heap (build `alloc-census`). A recarga de
+  packs, a conversão Bedrock e o carregamento dos mobs registram tempo, memória e pico.
+
+## Primeira pessoa
+
+- As duas mãos passam por um único view model Bedrock; as queries de uso e de comer seguem a mão
+  ativa; as animações recomeçam ao voltar para a primeira pessoa.
+
+## Desempenho na CPU (antes da GPU)
+
+- Menos alocações por quadro no motor Bedrock (pose e montagem), e um benchmark de pose
+  (`anim_bench`).
+- Mobs distantes têm a pose recalculada menos vezes, com fases espalhadas entre os quadros; em
+  multidões grandes, os passos começam mais perto.
+- Pose mantida: um mob cuja pose não mudou é desenhado de novo a partir dos vértices que já
+  montou, movidos junto com ele.
 
 ## Modelos dos packs na GPU
 
@@ -51,6 +78,14 @@ Mede-se num servidor com uma fazenda de golems de cobre (~90 golems em cena), bu
   (`HORIZON_POSE_KIND`, `HORIZON_POSE_HANDS`) e `what_a_pack_mob_leaves_on_the_cpu`.
 - `anim_bench`: `ANIM_CHECK=1` (soma de verificação das poses) e `ANIM_ROWS`.
 
+## Ferramentas
+
+- Tarefas `bedrock-play` (compila e abre pelo launcher oficial), `bedrock-run` (abre o cliente
+  direto com os arquivos preparados) e a tarefa completa de distribuição de teste Bedrock.
+- `tools/ide_session.py`: perfis do IntelliJ usando a instância e a conta do launcher instalado,
+  com limite de 8 GB de memória (`HORIZON_MEMORY_MAX`).
+- README e status de validação do Bedrock atualizados.
+
 ## Organização do código
 
 - `mobs/bedrock.rs` dividido: as respostas às queries foram para `mobs/bedrock_host.rs`.
@@ -60,4 +95,4 @@ Mede-se num servidor com uma fazenda de golems de cobre (~90 golems em cena), bu
 
 Ver `docs/bedrock-pendencias.md`: golem de cobre piscando com o stencil, brilhos e slimes com
 shader pack, borda vermelha do arco encantado, animação de pulo, idle, elytra com textura de capa,
-som da lança. Próximo passo de desempenho: compilar o Molang para bytecode.
+som da lança, variante do lobo. Próximo passo de desempenho: compilar o Molang para bytecode.
