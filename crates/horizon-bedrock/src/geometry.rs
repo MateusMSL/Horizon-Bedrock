@@ -267,14 +267,29 @@ impl Geometry {
                                     let cw = (step.min(w - col)) as f32;
                                     let ch = (step.min(h - row)) as f32;
                                     let (u, v) = (col as f32, row as f32);
+                                    // A side against a neighbouring cell is inside the solid,
+                                    // face to face with that cell's: left out (most of a
+                                    // detailed sprite's faces, drawn each frame).
+                                    let open = |dc: i64, dr: i64| {
+                                        let (c, r) = (i64::from(col) + dc, i64::from(row) + dr);
+                                        c < 0
+                                            || r < 0
+                                            || c >= i64::from(w)
+                                            || r >= i64::from(h)
+                                            || !shows(c as u32, r as u32)
+                                    };
+                                    let side = |dc: i64, dr: i64, f: Option<FaceUv>| {
+                                        f.filter(|_| open(dc, dr))
+                                    };
+                                    let step = i64::from(step);
                                     push(
                                         at(u * sx, -depth, v * sz),
                                         [cw * sx, depth, ch * sz],
                                         [
-                                            face(u, v, cw, 1.0),
-                                            face(u, v + ch - 1.0, cw, 1.0),
-                                            face(u, v, 1.0, ch),
-                                            face(u + cw - 1.0, v, 1.0, ch),
+                                            side(0, -step, face(u, v, cw, 1.0)),
+                                            side(0, step, face(u, v + ch - 1.0, cw, 1.0)),
+                                            side(-step, 0, face(u, v, 1.0, ch)),
+                                            side(step, 0, face(u + cw - 1.0, v, 1.0, ch)),
                                             face(u, v, cw, ch),
                                             face(u, v, cw, ch),
                                         ],
@@ -956,6 +971,21 @@ mod tests {
         assert_eq!(xs, [0.0, 4.0, 12.0]);
         // One texel deep below the plane (Blockbench: y from -1 to 0).
         assert_eq!(cubes[0].origin, [0.0, -1.0, 0.0]);
+        // Each box shows its top and bottom, and a side only where no box is next to it: the
+        // first two touch (`##`), so the first has no east-west side toward the second and the
+        // second none toward the first; the third stands alone with all four.
+        let sides = |c: &Cube| match &c.uv {
+            Uv::Faces(f) => f[..4].iter().map(Option::is_some).collect::<Vec<_>>(),
+            Uv::Box(_) => unreachable!(),
+        };
+        assert_eq!(sides(&cubes[0]), [true, true, true, false]);
+        assert_eq!(sides(&cubes[1]), [true, true, false, true]);
+        assert_eq!(sides(&cubes[2]), [true, true, true, true]);
+        assert!(
+            cubes
+                .iter()
+                .all(|c| matches!(&c.uv, Uv::Faces(f) if f[4].is_some() && f[5].is_some()))
+        );
         let flat = g.mesh_variant("b", Some(&sprite));
         assert_eq!(flat.bones[0].cubes.len(), 1);
         assert_eq!(flat.bones[0].cubes[0].size[0], 16.0);
