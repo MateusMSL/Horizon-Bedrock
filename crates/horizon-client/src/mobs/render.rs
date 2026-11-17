@@ -13,9 +13,9 @@ use std::borrow::Cow;
 use std::f32::consts::PI;
 #[path = "render_textures.rs"]
 mod textures;
-pub use textures::{body, body_color, layers};
 #[cfg(test)]
 use textures::humanoid_armor;
+pub use textures::{body, body_color, layers};
 
 /// A texture lookup into the shared atlas (name without namespace -> uv rect).
 pub type Atlas<'a> = &'a dyn Fn(&str) -> Option<[f32; 4]>;

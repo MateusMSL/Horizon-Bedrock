@@ -183,8 +183,21 @@ pub fn replay(pieces: &[Handed], map: impl Fn(&Vertex) -> Vertex) {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static PUSHED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Tests: the vertices handed to the pass from the CPU so far.
+#[cfg(test)]
+pub fn pushed_for_test() -> usize {
+    PUSHED.with(|p| p.get())
+}
+
 /// `pass::push`, kept for `record` when it runs.
 fn push(target: pass::Target, state: pass::State, vertices: &[Vertex]) {
+    #[cfg(test)]
+    PUSHED.with(|p| p.set(p.get() + vertices.len()));
     RECORDING.with(|r| {
         if let Some(pieces) = r.borrow_mut().as_mut() {
             pieces.push((target, state, vertices.to_vec()));

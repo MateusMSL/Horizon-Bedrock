@@ -645,6 +645,45 @@ fn render_bedrock(
     drew
 }
 
+/// An emissive layer's glow: the part drawn again from its `_glow` texels (`uv`) at full light,
+/// over its own faces by a hair (`push`, under the planes a pack puts that close in front), with
+/// the translucent entities.
+#[allow(clippy::too_many_arguments)]
+fn draw_glow(
+    part: &Part,
+    base: glam::Mat4,
+    poses: &Poses,
+    uv: [f32; 4],
+    color: u32,
+    overlay: u32,
+    push: f32,
+    out: &mut Vec<Vertex>,
+) {
+    let from = out.len();
+    draw(part, base, poses, uv, color, FULL_BRIGHT, overlay, out);
+    lift_toward_camera(&mut out[from..], push);
+    mark_oit(&mut out[from..]);
+}
+
+/// Tests: why a mob's groups stayed on the CPU, and how many vertices each reason drew there
+/// (the scene's and the stencil pass's): what moving them to the GPU would take off it.
+#[cfg(test)]
+pub(crate) mod cpu_why {
+    thread_local! {
+        pub static OPEN: std::cell::Cell<Option<(&'static str, usize, usize)>> =
+            const { std::cell::Cell::new(None) };
+        pub static TALLY: std::cell::RefCell<std::collections::BTreeMap<&'static str, usize>> =
+            std::cell::RefCell::new(Default::default());
+    }
+    pub fn close(out: usize) {
+        if let Some((why, at, pushed)) = OPEN.with(|o| o.take()) {
+            let drawn = out.saturating_sub(at)
+                + super::super::bedrock_stencil::pushed_for_test().saturating_sub(pushed);
+            TALLY.with(|t| *t.borrow_mut().entry(why).or_default() += drawn);
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_bedrock_uncached(
     m: &Mob,
@@ -784,6 +823,8 @@ fn render_bedrock_uncached(
         let layers_before = layers_drawn;
         let mut drew_here = false;
         for (gi, group) in groups.list.iter().enumerate() {
+            #[cfg(test)]
+            cpu_why::close(out.len());
             // The layer's pose is the same for each of its groups, which differ only in the bones
             // that draw their cubes: posed once, so the GPU path reuses its part matrices
             // (`Poses::shape_version`), and each later group only skips other bones.
@@ -1048,8 +1089,26 @@ fn render_bedrock_uncached(
                     || flags.no_depth_write
                     || flags.no_depth_test
                     || (flags.multitexture && layer.layer.secondary)
-                    || layer.layer.color[3] < 1.0)
-                && glow.is_none();
+                    || layer.layer.color[3] < 1.0);
+            #[cfg(test)]
+            {
+                let why = if lying.is_some() { "lying (death)" }
+                    else if glow.is_some() { "glow" }
+                    else if flags.stencil_write != 0 { "stencil write" }
+                    else if flags.stencil_not_equal != 0 { "stencil not-equal" }
+                    else if flags.uv_anim { "uv anim" }
+                    else if flags.invert_culling { "invert culling" }
+                    else if layer.layer.flat_lighting { "flat lighting" }
+                    else if flags.additive { "additive" }
+                    else if flags.blend { "blend" }
+                    else if flags.no_depth_write || flags.no_depth_test { "no depth" }
+                    else if flags.multitexture && layer.layer.secondary { "multitexture" }
+                    else if layer.layer.color[3] < 1.0 { "translucent colour" }
+                    else if !plain { "inside out" }
+                    else if skin.is_none() { "no skin" }
+                    else { "plain (GPU refused)" };
+                cpu_why::OPEN.with(|o| o.set(Some((why, out.len(), super::bedrock_stencil::pushed_for_test()))));
+            }
             if plain && let Some(skin) = skin.as_deref_mut() {
                 let (jobs, vertices) = (skin.frame.jobs.len(), skin.frame.vertices);
                 let bias = if layers_before > 0 || gi > 0 {
@@ -1075,6 +1134,15 @@ fn render_bedrock_uncached(
                     drew |= pushed
                         && super::bedrock_stencil::route(&stencil_flags)
                             != super::bedrock_stencil::Route::Pass;
+                    // An emissive layer's glow (its `_glow` texels lit full) is a second,
+                    // translucent draw: the CPU's, over the base the GPU posed.
+                    if let Some(glow) = glow {
+                        let from = out.len();
+                        let push = BEDROCK_LAYER_BIAS * layers_before as f32
+                            + BEDROCK_PASS_BIAS * (gi + 1) as f32;
+                        draw_glow(&layer.built.part, base, &poses, glow, tint(color, layer.layer.tint()), overlay, push, out);
+                        drew |= out.len() > from;
+                    }
                     continue;
                 }
             }
@@ -1207,22 +1275,9 @@ fn render_bedrock_uncached(
                 });
             }
             if let Some(glow) = glow {
-                let from = out.len();
-                draw(
-                    &layer.built.part,
-                    base,
-                    &poses,
-                    glow,
-                    tint(color, layer.layer.tint()),
-                    FULL_BRIGHT,
-                    overlay,
-                    out,
-                );
-                // Over its own faces by a hair, under the planes a pack puts that close in front.
                 let push = BEDROCK_LAYER_BIAS * layers_before as f32
                     + BEDROCK_PASS_BIAS * (gi + 1) as f32;
-                lift_toward_camera(&mut out[from..], push);
-                mark_oit(&mut out[from..]);
+                draw_glow(&layer.built.part, base, &poses, glow, tint(color, layer.layer.tint()), overlay, push, out);
             }
             if bedrock_debug() {
                 let inverse = base.inverse();
@@ -2344,5 +2399,7 @@ pub fn render_pack_at(
     if !drew {
         out.truncate(start);
     }
+    #[cfg(test)]
+    cpu_why::close(out.len());
     drew
 }

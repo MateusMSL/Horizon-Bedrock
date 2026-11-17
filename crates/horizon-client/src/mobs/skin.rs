@@ -1413,6 +1413,85 @@ mod tests {
         assert!(!posed.is_empty(), "no pack mob took the GPU path");
     }
 
+    /// A measure, not a check: for the pack mobs `HORIZON_CPU_KINDS` names (comma separated,
+    /// `first_person` for the player's view model), what the GPU path poses and what stays on
+    /// the CPU and why, in vertices (`render_03::cpu_why`).
+    #[test]
+    #[ignore]
+    fn what_a_pack_mob_leaves_on_the_cpu() {
+        let Some(pack) =
+            std::env::var_os("HORIZON_TEST_BEDROCK_PACK").map(std::path::PathBuf::from)
+        else {
+            return;
+        };
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = std::env::var_os("HORIZON_TEST_RESOURCES")
+            .map_or_else(|| repo.join(".local/horizon-client/26.3"), Into::into);
+        let types = MobTypes::load(&root).unwrap();
+        let bedrock = Arc::new(crate::mobs::bedrock::BedrockMobs::load(&pack));
+        let data = MobData {
+            states: Vec::new(),
+            placements: Default::default(),
+            heightmaps: Default::default(),
+            animations: MobData::load_animations(&root),
+            biome_tags: Default::default(),
+            entity_tags: Default::default(),
+            villager_hats: Default::default(),
+            cem: Default::default(),
+            bedrock: std::sync::RwLock::new(bedrock.clone()),
+            random_textures: Default::default(),
+            emissive: Default::default(),
+            blinks: Default::default(),
+            pois: Default::default(),
+            species_placements: Default::default(),
+        };
+        let atlas = |_: &str| Some([0.0, 0.0, 1.0 / 64.0, 1.0 / 32.0]);
+        let camera = glam::DVec3::new(0.3, 62.0, -4.0);
+        crate::mobs::bedrock_stencil::set_on_for_test(true);
+        let kinds = std::env::var("HORIZON_CPU_KINDS")
+            .unwrap_or_else(|_| "minecraft:copper_golem".to_owned());
+        for id in kinds.split(',') {
+            let kind = Arc::new(types.types[id].clone());
+            let at = horizon_core::geometry::Vec3::new(0.5, 64.0, 3.25);
+            let mut m = Mob::new(9, kind, at, 30.0);
+            if let Ok(item) = std::env::var("HORIZON_CPU_HOLD") {
+                m.extra.main_hand = Some(item.as_str().into());
+            }
+            crate::mobs::render::cpu_why::TALLY.with(|t| t.borrow_mut().clear());
+            let (mut gpu, mut gpu_stencil, mut cpu, mut cpu_stencil) = (0usize, 0usize, 0, 0);
+            for frame_no in 0..30u32 {
+                m.age = 100 + frame_no;
+                let mut models = SkinModels::default();
+                let mut frame = SkinFrame::default();
+                models.begin(&mut frame, 0);
+                let mut out = Vec::new();
+                let ((), pieces) = crate::mobs::bedrock_stencil::record(|| {
+                    let mut skin = Skin::new(&mut models, &mut frame);
+                    render::render_skinned(
+                        &m, 0.4, camera, &atlas, 0x50a0, &data, &mut out, &mut skin,
+                    );
+                });
+                gpu += frame.vertices as usize;
+                gpu_stencil += frame.stencil_vertices as usize;
+                cpu += out.len();
+                cpu_stencil += pieces.iter().map(|(_, _, v)| v.len()).sum::<usize>();
+            }
+            eprintln!(
+                "{id}: per frame GPU {} (+{} stencil), CPU {} (+{} stencil)",
+                gpu / 30,
+                gpu_stencil / 30,
+                cpu / 30,
+                cpu_stencil / 30
+            );
+            crate::mobs::render::cpu_why::TALLY.with(|t| {
+                for (why, n) in t.borrow().iter() {
+                    eprintln!("    {why}: {} vertices a frame", n / 30);
+                }
+            });
+        }
+        crate::mobs::bedrock_stencil::set_on_for_test(false);
+    }
+
     /// `BatModel` and `BabyTurtleModel` draw with `entityCutoutCull`: their
     /// zero-depth ears, wings, feet and legs put two quads in one place, and
     /// only culling tells them apart. Their vertices ask for the shaded cull
