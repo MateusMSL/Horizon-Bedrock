@@ -362,6 +362,7 @@ impl PlayerDraw for DrawPlayer<'_, '_> {
                 color: 0xFFFF_FFFF,
                 light,
                 overlay: 0,
+                bias: 0.0,
             };
             if skin.draw(&model, matrix, poses, paint) {
                 self.bounds = skin.bounds;

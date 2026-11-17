@@ -29,9 +29,25 @@ pub enum Route {
     Pass,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// A test's stand-in for the renderer's pass being on, on its own thread.
+    static TEST_ON: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// Whether pieces go to the stencil pass now.
 pub fn on() -> bool {
-    pass::active() && !super::cem_anim::is_in_gui() && !super::bedrock_debug::settings().cpu_stencil
+    #[cfg(test)]
+    let active = pass::active() || TEST_ON.get();
+    #[cfg(not(test))]
+    let active = pass::active();
+    active && !super::cem_anim::is_in_gui() && !super::bedrock_debug::settings().cpu_stencil
+}
+
+/// Routes pieces as if the renderer's pass were on (`on`), on this thread only.
+#[cfg(test)]
+pub fn set_on_for_test(on: bool) {
+    TEST_ON.set(on);
 }
 
 pub fn route(f: &MaterialFlags) -> Route {
@@ -101,12 +117,19 @@ thread_local! {
 
 /// Runs `f` and gives back, beside its result, the pieces it handed to the pass: what
 /// `render_bedrock` keeps with a mob's vertices to hand over again (`replay`) when it draws
-/// them again.
+/// them again. A `record` running around this one keeps them too: they are part of its drawing.
 pub fn record<R>(f: impl FnOnce() -> R) -> (R, Vec<Handed>) {
     let outer = RECORDING.with(|r| r.borrow_mut().replace(Vec::new()));
     let result = f();
-    let handed = RECORDING.with(|r| std::mem::replace(&mut *r.borrow_mut(), outer));
-    (result, handed.unwrap_or_default())
+    let handed = RECORDING
+        .with(|r| std::mem::replace(&mut *r.borrow_mut(), outer))
+        .unwrap_or_default();
+    RECORDING.with(|r| {
+        if let Some(outer) = r.borrow_mut().as_mut() {
+            outer.extend(handed.iter().cloned());
+        }
+    });
+    (result, handed)
 }
 
 /// Hands `pieces` to the pass again, each vertex through `map` (moved to where the mob is now).
@@ -125,6 +148,28 @@ fn push(target: pass::Target, state: pass::State, vertices: &[Vertex]) {
         }
     });
     pass::push(target, state, vertices);
+}
+
+/// [`hand_over`] for a piece posed on the GPU: the jobs `skin` pushed since job `first` (the
+/// scene's posed output stood at `vertices` before them) go to the pass as the route says, copied
+/// or moved to its posed output. The world's only: the first-person view draws on the CPU.
+pub fn hand_over_posed(
+    f: &MaterialFlags,
+    skin: &mut super::skin::Skin,
+    first: usize,
+    vertices: u32,
+) {
+    match route(f) {
+        Route::Scene => {}
+        Route::SceneAndPass => {
+            let (at, count) = skin.stencil_copy_since(first);
+            pass::push_posed(pass::Target::World, state(f, false), at, count);
+        }
+        Route::Pass => {
+            let (at, count) = skin.stencil_move_since(first, vertices);
+            pass::push_posed(pass::Target::World, state(f, !f.no_color), at, count);
+        }
+    }
 }
 
 /// The piece just drawn into `out[start..]` with material `f`: handed to the pass as its route
@@ -207,8 +252,8 @@ mod tests {
         (state, vec![v; 4])
     }
 
-    /// What a mob's drawing hands to the pass is kept for it, a drawing inside another kept
-    /// apart, and nothing is kept outside `record`.
+    /// What a mob's drawing hands to the pass is kept for it, a drawing inside another kept for
+    /// both (it is part of the outer one), and nothing is kept outside `record`.
     #[test]
     fn a_drawing_keeps_the_pieces_it_handed_over() {
         let (a, va) = piece(1);
@@ -220,8 +265,13 @@ mod tests {
             assert_eq!(inner.len(), 1);
             assert_eq!(inner[0].1.reference, 2);
         });
-        assert_eq!(outer.len(), 1, "the inner drawing's piece is its own");
-        assert_eq!((outer[0].1.reference, outer[0].2.len()), (1, 4));
+        let references: Vec<u8> = outer.iter().map(|p| p.1.reference).collect();
+        assert_eq!(
+            references,
+            [1, 2],
+            "the inner drawing's piece is the outer one's too"
+        );
+        assert_eq!(outer[0].2.len(), 4);
         assert_eq!(outer[0].2[0].pos, [1.0; 3]);
         let ((), none) = record(|| ());
         assert!(none.is_empty());

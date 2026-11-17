@@ -9723,11 +9723,11 @@ impl Renderer {
         let additive_quads = (frame.additive.len() / 4) as u32 - self.entity_batch.moved_additive;
         let see_through_quads = (frame.see_through.len() / 4) as u32;
         let shadow_only_quads = (frame.shadow_only.len() / 4) as u32;
-        // Glowing entities' silhouettes posed on the GPU go last, past every
-        // material (the outline pass draws them from there).
+        // Glowing entities' silhouettes posed on the GPU go last (the outline pass draws them),
+        // then a Bedrock pack's pieces for the stencil pass (`SkinFrame::tail`).
         let outline_base = posed + all_entities.len() as u32;
         let outlined = skin.map_or(0, |s| s.outline_vertices);
-        let entity_vertices = u64::from(outline_base) + u64::from(outlined);
+        let entity_vertices = u64::from(outline_base) + u64::from(skin.map_or(0, |s| s.tail()));
         if entity_vertices > self.entity_capacity {
             self.entity_capacity = entity_vertices.next_power_of_two();
             self.entity_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -11735,8 +11735,7 @@ impl Renderer {
                 self.draw_hand(&mut pass, hand_quads, world_quads + additive_quads);
             }
         }
-        // Bedrock packs' stencil pieces among the world's entities, over the world, with its
-        // depth (`bedrock_stencil`).
+        // Bedrock packs' stencil pieces (the posed ones past the silhouettes), over the world.
         if self.bedrock_stencil.has_world() {
             self.bedrock_stencil.draw_world(
                 &mut encoder,
@@ -11744,6 +11743,7 @@ impl Renderer {
                 world_depth,
                 &self.entity_group,
                 &self.indices,
+                (&self.entity_buffer, outline_base + outlined),
             );
         }
         if let Some((color, depth)) = &scaled

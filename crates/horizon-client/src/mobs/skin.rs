@@ -367,6 +367,9 @@ pub struct Paint {
     pub color: u32,
     pub light: u32,
     pub overlay: u32,
+    /// How far (blocks) the vertices move toward the camera (`SkinJob::bias`): 0 but for a
+    /// Bedrock pack's later layers.
+    pub bias: f32,
 }
 
 /// Where a frame's posed draws go, and the bounds of the current mob's.
@@ -414,6 +417,20 @@ impl<'a> Skin<'a> {
     /// Whether this model can be posed here (stored on first sight).
     pub fn supports(&mut self, model: &Arc<Part>) -> bool {
         self.models.entry(model, self.frame).is_some()
+    }
+
+    /// The draws since job `first` also go to the Bedrock stencil pass (a piece it draws besides
+    /// the scene): where they land in its posed output, and how many vertices.
+    pub fn stencil_copy_since(&mut self, first: usize) -> (u32, u32) {
+        self.frame.stencil_copy_since(first)
+    }
+
+    /// The draws since job `first` go to the Bedrock stencil pass instead of the scene (a piece
+    /// only it draws); `vertices` is where the scene's posed output stood before them.
+    pub fn stencil_move_since(&mut self, first: usize, vertices: u32) -> (u32, u32) {
+        // The jobs a repeated walk would copy are gone from the scene.
+        self.last = None;
+        self.frame.stencil_move_since(first, vertices)
     }
 
     /// `render::draw_scrolled` on the GPU: false (nothing done) when the
@@ -513,6 +530,8 @@ impl Paint {
             mode: SkinJob::MODEL,
             cull,
             spare: 0,
+            bias: self.bias,
+            reserved: [0; 3],
         }
     }
 }
@@ -703,6 +722,7 @@ mod tests {
             color: 0xff80_c0ff,
             light: 0x70a0,
             overlay: 0,
+            bias: 0.0,
         };
         for (i, enabled) in [false, true, false, true].into_iter().enumerate() {
             let mut poses = Poses::new(&model);
@@ -802,6 +822,7 @@ mod tests {
                 color: 0xff80_c0ff,
                 light: 0x70a0,
                 overlay: 0,
+                bias: 0.0,
             };
             let mut expected = Vec::new();
             render::draw(
@@ -1053,59 +1074,89 @@ mod tests {
             .collect();
         ids.sort();
         let mut posed = std::collections::BTreeSet::new();
-        for (n, id) in ids.iter().enumerate() {
-            let kind = Arc::new(types.types[id].clone());
-            for (age, yaw) in [(0u32, 0.0f32), (37, 123.0), (412, -71.5)] {
-                let at = horizon_core::geometry::Vec3::new(1.5 + n as f64 % 5.0, 64.0, 3.25);
-                let mut m = Mob::new(n as u32 + 1, kind.clone(), at, yaw);
-                m.previous = horizon_core::geometry::Vec3::new(at.x - 0.1, at.y, at.z + 0.05);
-                m.age = age;
-                m.limb_speed = 0.6;
-                m.limb_position = age as f32 * 0.37;
-                // The GPU path first: a mob it poses keeps no vertices for the CPU path to reuse.
-                models.begin(&mut frame, store.len() as u32);
-                let mut gpu = Vec::new();
-                let mut skin = Skin::new(&mut models, &mut frame);
-                render::render_skinned(&m, 0.4, camera, &atlas, 0x50a0, &data, &mut gpu, &mut skin);
-                if frame.reset {
-                    store.clear();
-                }
-                assert_eq!(store.len() as u32, frame.base);
-                store.extend_from_slice(&frame.new_model);
-                frame.handed();
-                let mut cpu = Vec::new();
-                render::render_with(&m, 0.4, camera, &atlas, 0x50a0, &data, &[], &mut cpu);
-                if !frame.jobs.is_empty() {
-                    posed.insert(id.clone());
-                }
-                let mut both: Vec<&[u8]> = expand(&store, &frame)
-                    .iter()
-                    .chain(&gpu)
-                    .map(|v| bytemuck::bytes_of(v).to_vec().leak() as &[u8])
-                    .collect();
-                let mut want: Vec<&[u8]> = cpu.iter().map(bytemuck::bytes_of).collect();
-                both.sort_unstable();
-                want.sort_unstable();
-                assert_eq!(both.len(), want.len(), "{id} age {age}: vertex count");
-                if both != want {
-                    let only_gpu: Vec<_> = both
-                        .iter()
-                        .filter(|b| !want.contains(b))
-                        .take(3)
-                        .map(|b| *bytemuck::from_bytes::<crate::mesher::Vertex>(b))
-                        .collect();
-                    let only_cpu: Vec<_> = want
-                        .iter()
-                        .filter(|b| !both.contains(b))
-                        .take(3)
-                        .map(|b| *bytemuck::from_bytes::<crate::mesher::Vertex>(b))
-                        .collect();
-                    panic!(
-                        "{id} age {age}: the paths draw other vertices\nGPU {only_gpu:#?}\nCPU {only_cpu:#?}"
+        let mut stenciled = std::collections::BTreeSet::new();
+        // As a set: vertices in any order, each as its bytes.
+        let set = |vertices: &mut dyn Iterator<Item = crate::mesher::Vertex>| {
+            let mut all: Vec<Vec<u8>> = vertices.map(|v| bytemuck::bytes_of(&v).to_vec()).collect();
+            all.sort_unstable();
+            all
+        };
+        // Without and with the stencil pass (its pieces posed for it, `hand_over_posed`).
+        for pass_on in [false, true] {
+            crate::mobs::bedrock_stencil::set_on_for_test(pass_on);
+            for (n, id) in ids.iter().enumerate() {
+                let kind = Arc::new(types.types[id].clone());
+                for (age, yaw) in [(0u32, 0.0f32), (37, 123.0), (412, -71.5)] {
+                    let at = horizon_core::geometry::Vec3::new(1.5 + n as f64 % 5.0, 64.0, 3.25);
+                    let mut m = Mob::new(n as u32 + 1, kind.clone(), at, yaw);
+                    m.previous = horizon_core::geometry::Vec3::new(at.x - 0.1, at.y, at.z + 0.05);
+                    m.age = age;
+                    m.limb_speed = 0.6;
+                    m.limb_position = age as f32 * 0.37;
+                    // The GPU path first: a mob it poses keeps no vertices for the CPU path.
+                    models.begin(&mut frame, store.len() as u32);
+                    let mut gpu = Vec::new();
+                    let ((), gpu_pieces) = crate::mobs::bedrock_stencil::record(|| {
+                        let mut skin = Skin::new(&mut models, &mut frame);
+                        render::render_skinned(
+                            &m, 0.4, camera, &atlas, 0x50a0, &data, &mut gpu, &mut skin,
+                        );
+                    });
+                    if frame.reset {
+                        store.clear();
+                    }
+                    assert_eq!(store.len() as u32, frame.base);
+                    store.extend_from_slice(&frame.new_model);
+                    frame.handed();
+                    let mut cpu = Vec::new();
+                    let ((), cpu_pieces) = crate::mobs::bedrock_stencil::record(|| {
+                        render::render_with(&m, 0.4, camera, &atlas, 0x50a0, &data, &[], &mut cpu);
+                    });
+                    if !frame.jobs.is_empty() {
+                        posed.insert(id.clone());
+                    }
+                    if !frame.stencil_jobs.is_empty() {
+                        stenciled.insert(id.clone());
+                    }
+                    let what = format!("{id} age {age} pass {pass_on}");
+                    let scene = set(&mut expand(&store, &frame)
+                        .into_iter()
+                        .chain(gpu.iter().copied()));
+                    let want = set(&mut cpu.iter().copied());
+                    assert_eq!(scene.len(), want.len(), "{what}: scene vertex count");
+                    if scene != want {
+                        let a: Vec<_> = scene
+                            .iter()
+                            .filter(|b| !want.contains(b))
+                            .take(4)
+                            .map(|b| *bytemuck::from_bytes::<crate::mesher::Vertex>(b))
+                            .collect();
+                        let b: Vec<_> = want
+                            .iter()
+                            .filter(|b| !scene.contains(b))
+                            .take(4)
+                            .map(|b| *bytemuck::from_bytes::<crate::mesher::Vertex>(b))
+                            .collect();
+                        panic!("{what}\nGPU {a:?}\nCPU {b:?}");
+                    }
+                    let pieces = set(&mut crate::gfx::entity_skin::expand_stencil(&store, &frame)
+                        .into_iter()
+                        .chain(gpu_pieces.into_iter().flat_map(|(_, _, v)| v)));
+                    let want = set(&mut cpu_pieces.into_iter().flat_map(|(_, _, v)| v));
+                    assert_eq!(pieces.len(), want.len(), "{what}: stencil vertex count");
+                    assert!(
+                        pieces == want,
+                        "{what}: the paths hand the stencil pass other pieces"
                     );
                 }
             }
         }
+        crate::mobs::bedrock_stencil::set_on_for_test(false);
+        eprintln!("posing for the stencil pass on the GPU: {stenciled:?}");
+        assert!(
+            !stenciled.is_empty(),
+            "no pack mob posed pieces for the stencil pass"
+        );
         eprintln!(
             "posed on the GPU: {} of {} pack mobs: {posed:?}",
             posed.len(),
@@ -1185,7 +1236,8 @@ mod tests {
                     scroll: 0.0,
                     color: u32::MAX,
                     light: 0,
-                    overlay: 0
+                    overlay: 0,
+                    bias: 0.0,
                 },
             ));
             assert!(frame.jobs.iter().all(|j| j.cull == cull), "{id}");

@@ -878,15 +878,14 @@ fn render_bedrock_uncached(
             // A glinting material shows the enchantment's shimmer over its texture.
             let overlay = if flags.glint { ARMOR_GLINT } else { overlay };
             // An ordinary opaque or cut-out group draws on the GPU as the game's own mobs do
-            // (`super::skin`): none of what follows the CPU draw below changes its vertices.
-            // Step 1 of docs/bedrock-gpu-pose.md; the rest stays here.
+            // (`super::skin`), with what the CPU would do after drawing it done there too: a later
+            // layer's lift toward the camera (`SkinJob::bias`) and, with the stencil pass on, its
+            // pieces for the pass (`bedrock_stencil::hand_over_posed`). Steps 1 and 3 of
+            // docs/bedrock-gpu-pose.md; the rest stays here.
             let plain = lying.is_none()
-                && super::bedrock_stencil::route(&stencil_flags) == super::bedrock_stencil::Route::Scene
                 && flags.stencil_write == 0
                 && flags.stencil_not_equal == 0
                 && !flags.uv_anim
-                && layers_before == 0
-                && gi == 0
                 && !flags.invert_culling
                 && (flags.double_sided
                     || !(flags.blend
@@ -899,24 +898,33 @@ fn render_bedrock_uncached(
                     || (flags.multitexture && layer.layer.secondary)
                     || layer.layer.color[3] < 1.0)
                 && glow.is_none();
-            if plain
-                && let Some(skin) = skin.as_deref_mut()
-                && skin.draw(
-                    &layer.built.part,
-                    base,
-                    &poses,
-                    super::skin::Paint {
-                        uv,
-                        scroll: 0.0,
-                        color: tint(color, layer_tint),
-                        light: drawn_light,
-                        overlay,
-                    },
-                )
-            {
-                drew_here = true;
-                drew = true;
-                continue;
+            if plain && let Some(skin) = skin.as_deref_mut() {
+                let (jobs, vertices) = (skin.frame.jobs.len(), skin.frame.vertices);
+                let bias = if layers_before > 0 || gi > 0 {
+                    BEDROCK_LAYER_BIAS * layers_before as f32 + BEDROCK_PASS_BIAS * gi as f32
+                } else {
+                    0.0
+                };
+                let paint = super::skin::Paint {
+                    uv,
+                    scroll: 0.0,
+                    color: tint(color, layer_tint),
+                    light: drawn_light,
+                    overlay,
+                    bias,
+                };
+                if skin.draw(&layer.built.part, base, &poses, paint) {
+                    // As below, counted by what was drawn (every bone of a group may be hidden):
+                    // a piece lifts the layers after it, even one the stencil pass alone draws,
+                    // which is not what the mob drew in the scene.
+                    let pushed = skin.frame.jobs.len() > jobs;
+                    super::bedrock_stencil::hand_over_posed(&stencil_flags, skin, jobs, vertices);
+                    drew_here |= pushed;
+                    drew |= pushed
+                        && super::bedrock_stencil::route(&stencil_flags)
+                            != super::bedrock_stencil::Route::Pass;
+                    continue;
+                }
             }
             draw(
                 &layer.built.part,

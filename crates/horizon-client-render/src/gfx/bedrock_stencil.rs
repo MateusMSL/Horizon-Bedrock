@@ -92,9 +92,12 @@ pub enum Target {
 #[derive(Clone, Copy, Debug)]
 struct Batch {
     state: State,
-    /// The first vertex, in its target's list.
+    /// The first vertex, in its target's list, or (posed) in the stencil jobs' output.
     first: u32,
     vertices: u32,
+    /// Posed on the GPU (`entity_skin::SkinFrame::stencil_jobs`): its vertices are in the entity
+    /// vertex buffer, past the scene's, not in this pass's own list.
+    posed: bool,
 }
 
 #[derive(Default)]
@@ -146,14 +149,56 @@ pub fn push(target: Target, state: State, vertices: &[Vertex]) {
         v
     }));
     match lists.batches[t].last_mut() {
-        Some(last) if last.state == state && last.first + last.vertices == first => {
+        Some(last) if !last.posed && last.state == state && last.first + last.vertices == first => {
             last.vertices += count;
         }
         _ => lists.batches[t].push(Batch {
             state,
             first,
             vertices: count,
+            posed: false,
         }),
+    }
+}
+
+/// Hands the pass a piece of a Bedrock model posed on the GPU: `count` vertices from `first` in
+/// the stencil jobs' output (`SkinFrame::stencil_jobs`), drawn with its material's `state`.
+pub fn push_posed(target: Target, state: State, first: u32, count: u32) {
+    if count < 4 || !active() {
+        return;
+    }
+    let count = count / 4 * 4;
+    let t = target as usize;
+    let mut lists = PENDING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match lists.batches[t].last_mut() {
+        Some(last) if last.posed && last.state == state && last.first + last.vertices == first => {
+            last.vertices += count;
+        }
+        _ => lists.batches[t].push(Batch {
+            state,
+            first,
+            vertices: count,
+            posed: true,
+        }),
+    }
+}
+
+/// The posed pieces from `first` on were taken back (a mob culled after it drew): the pass
+/// forgets them.
+pub fn forget_posed_from(first: u32) {
+    let mut lists = PENDING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    for batches in &mut lists.batches {
+        batches.retain_mut(|b| {
+            if !b.posed || b.first + b.vertices <= first {
+                return true;
+            }
+            b.vertices = first.saturating_sub(b.first) / 4 * 4;
+            b.vertices > 0
+        });
     }
 }
 
@@ -347,9 +392,12 @@ impl Stencil {
             frame.vertices[t].clear();
             return;
         }
-        // The kept pieces' vertices, packed.
+        // The kept pieces' vertices, packed (the posed ones are on the GPU already).
         let mut vertices = Vec::with_capacity(frame.vertices[t].len());
         for b in &mut frame.batches[t] {
+            if b.posed {
+                continue;
+            }
             let from = b.first as usize;
             b.first = vertices.len() as u32;
             vertices.extend_from_slice(&frame.vertices[t][from..from + b.vertices as usize]);
@@ -375,6 +423,8 @@ impl Stencil {
 
     /// The world's pieces, over the world drawn into `color` with `depth`, transformed as the
     /// world's entities (`group`, the entity bindings).
+    /// `posed`: the entity vertex buffer and where the stencil jobs' output starts in it, for the
+    /// pieces posed on the GPU (there are none without entity skinning).
     pub fn draw_world(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -382,8 +432,17 @@ impl Stencil {
         depth: &wgpu::TextureView,
         group: &wgpu::BindGroup,
         indices: &wgpu::Buffer,
+        posed: (&wgpu::Buffer, u32),
     ) {
-        self.draw(Target::World, encoder, color, depth, group, indices);
+        self.draw(
+            Target::World,
+            encoder,
+            color,
+            depth,
+            group,
+            indices,
+            Some(posed),
+        );
     }
 
     /// The first-person hand's pieces, over the hand drawn into `color` with `depth` (stored by
@@ -396,7 +455,7 @@ impl Stencil {
         group: &wgpu::BindGroup,
         indices: &wgpu::Buffer,
     ) {
-        self.draw(Target::Hand, encoder, color, depth, group, indices);
+        self.draw(Target::Hand, encoder, color, depth, group, indices, None);
     }
 
     /// The hand's pieces when nothing else of the hand drew (no arm, no other item): from an
@@ -410,10 +469,11 @@ impl Stencil {
         indices: &wgpu::Buffer,
     ) {
         self.copy_depth = false;
-        self.draw(Target::Hand, encoder, color, depth, group, indices);
+        self.draw(Target::Hand, encoder, color, depth, group, indices, None);
         self.copy_depth = true;
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw(
         &mut self,
         target: Target,
@@ -422,9 +482,12 @@ impl Stencil {
         depth: &wgpu::TextureView,
         group: &wgpu::BindGroup,
         indices: &wgpu::Buffer,
+        posed: Option<(&wgpu::Buffer, u32)>,
     ) {
         let t = target as usize;
-        if self.frame.batches[t].is_empty() || self.buffer.is_none() {
+        let own = self.frame.batches[t].iter().any(|b| !b.posed);
+        let any_posed = self.frame.batches[t].iter().any(|b| b.posed);
+        if (!own || self.buffer.is_none()) && (!any_posed || posed.is_none()) {
             return;
         }
         let color_texture = color.texture();
@@ -462,11 +525,10 @@ impl Stencil {
                 resource: wgpu::BindingResource::TextureView(depth),
             }],
         });
-        let (Some((ds, _)), Some((buffer, _))) =
-            (self.targets.iter().find(|(_, s)| *s == size), &self.buffer)
-        else {
+        let Some((ds, _)) = self.targets.iter().find(|(_, s)| *s == size) else {
             return;
         };
+        let buffer = self.buffer.as_ref().map(|(b, _)| b);
         let attachments = [Some(wgpu::RenderPassColorAttachment {
             view: color,
             resolve_target: None,
@@ -508,12 +570,23 @@ impl Stencil {
             0
         };
         pass.set_bind_group(0, group, &[]);
-        pass.set_vertex_buffer(0, buffer.slice(..));
         pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+        // Which vertex buffer is bound: this pass's own list, or the entity buffer for the
+        // pieces posed on the GPU.
+        let mut bound = None;
         for batch in &self.frame.batches[t] {
+            let (source, first) = match (batch.posed, posed, buffer) {
+                (true, Some((entities, at)), _) => (entities, at as i32 + batch.first as i32),
+                (false, _, Some(own)) => (own, base + batch.first as i32),
+                _ => continue,
+            };
+            if bound != Some(batch.posed) {
+                pass.set_vertex_buffer(0, source.slice(..));
+                bound = Some(batch.posed);
+            }
             pass.set_pipeline(&self.pipelines[&(format, batch.state)]);
             pass.set_stencil_reference(u32::from(batch.state.reference));
-            pass.draw_indexed(0..batch.vertices / 4 * 6, base + batch.first as i32, 0..1);
+            pass.draw_indexed(0..batch.vertices / 4 * 6, first, 0..1);
         }
     }
 
@@ -756,6 +829,7 @@ mod tests {
             },
             first: 0,
             vertices: 4,
+            posed: false,
         };
         let mut frame = Lists {
             vertices: [vec![quad(0)[0]; 12], Vec::new()],
@@ -804,6 +878,7 @@ mod tests {
             },
             first: 0,
             vertices: 4,
+            posed: false,
         };
         // Leggings (body, outline), then boots (body, outline).
         let mut frame = Lists {

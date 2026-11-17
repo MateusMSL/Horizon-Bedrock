@@ -13,12 +13,13 @@ const MODEL_WORDS: u32 = 7u;
 // normal matrix (9, by columns), its columns already normalized when the
 // part's scale is not uniform (`ModelNormals.trusted` false).
 const PART_WORDS: u32 = 25u;
-// A job (16 words): first model vertex, vertex count, first part, first output
+// A job (20 words): first model vertex, vertex count, first part, first output
 // vertex, the texture rect (4 floats), scroll, colour, light, overlay,
 // whether the overlay is the armour glint (its model UV in `glint_uv`), the mode
 // (`SkinJob::mode`: 0 a model, 1 an item's quads, 2 a model with no normal),
-// whether its quads cull back faces (`SkinJob::cull`), 1 spare (0: `keep`'s).
-const JOB_WORDS: u32 = 16u;
+// whether its quads cull back faces (`SkinJob::cull`), 1 spare (0: `keep`'s), the
+// bias toward the camera (`SkinJob::bias`) and 3 reserved.
+const JOB_WORDS: u32 = 20u;
 // `mesher::Vertex` (11 words): pos (3), uv (2), layer, color, light, normal
 // (4 x i8), glint_uv (2).
 const VERTEX_WORDS: u32 = 11u;
@@ -91,6 +92,7 @@ fn skin(
     let mode = jobs[j + 13u];
     let cull = jobs[j + 14u] != 0u;
     keep = jobs[j + 15u];
+    let bias = f(jobs[j + 16u]);
     for (var k = lane; k < count; k += 64u) {
         let v = (first + k) * MODEL_WORDS;
         let p = vec3(f(model[v]), f(model[v + 1u]), f(model[v + 2u]));
@@ -102,6 +104,14 @@ fn skin(
         pos = r3(r3(vec3(part_f(part, 4u), part_f(part, 5u), part_f(part, 6u)) * p.y) + pos);
         pos = r3(r3(vec3(part_f(part, 8u), part_f(part, 9u), part_f(part, 10u)) * p.z) + pos);
         pos = r3(vec3(part_f(part, 12u), part_f(part, 13u), part_f(part, 14u)) + pos);
+        // `entity_skin::lifted`: a Bedrock later layer moved toward the camera, in glam's order.
+        // The division and square root may round a last bit apart from the CPU's here.
+        if bias != 0.0 {
+            let len = sqrt(r(r(r(pos.x * pos.x) + r(pos.y * pos.y)) + r(pos.z * pos.z)));
+            if len > 1e-4 {
+                pos = r3(pos - r3(r3(pos / len) * bias));
+            }
+        }
         // An axis normal times the normal matrix is that column, exactly.
         let c = 16u + (axis % 3u) * 3u;
         var n = vec3(part_f(part, c), part_f(part, c + 1u), part_f(part, c + 2u));

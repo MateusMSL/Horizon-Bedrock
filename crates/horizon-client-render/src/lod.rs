@@ -11,7 +11,7 @@ pub mod bake;
 pub mod cache;
 mod kept;
 mod mesh;
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test))]
 mod mesh_checks;
 pub mod packed;
 mod samples;

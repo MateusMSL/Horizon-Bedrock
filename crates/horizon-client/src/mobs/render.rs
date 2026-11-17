@@ -1714,6 +1714,7 @@ pub fn put(
         color,
         light,
         overlay,
+        bias: 0.0,
     };
     if let Some(skin) = skin
         && skin.draw(part, base, poses, paint)
