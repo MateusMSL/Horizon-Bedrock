@@ -183,4 +183,60 @@ mod tests {
         assert_eq!(at(4.0, 96), 0.0, "next to the camera every frame");
         assert_eq!(at(40.0, 24), at(40.0, 0), "no crowd below the threshold");
     }
+
+    /// The time one update of a pack's mob takes with the game's own host (`MobHost`), which a
+    /// benchmark's host cannot stand in for: `HORIZON_TEST_BEDROCK_PACK` (a converted pack),
+    /// `HORIZON_POSE_KIND` (default the copper golem). A measure, not a check: run it by name
+    /// with `--ignored --nocapture`, and profile it.
+    #[test]
+    #[ignore]
+    fn time_a_pack_mob_posed_with_the_game_host() {
+        let Some(pack) = std::env::var_os("HORIZON_TEST_BEDROCK_PACK") else {
+            eprintln!("no HORIZON_TEST_BEDROCK_PACK: skipped");
+            return;
+        };
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = std::env::var_os("HORIZON_TEST_RESOURCES")
+            .map_or_else(|| repo.join(".local/horizon-client/26.3"), Into::into);
+        let types = crate::mobs::MobTypes::load(&root).unwrap();
+        let bedrock = super::super::BedrockMobs::load(std::path::Path::new(&pack));
+        let kind = std::env::var("HORIZON_POSE_KIND")
+            .unwrap_or_else(|_| "minecraft:copper_golem".to_owned());
+        let kind = std::sync::Arc::new(types.types[&kind].clone());
+        let rounds: u32 = std::env::var("HORIZON_POSE_ROUNDS")
+            .ok()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(3000);
+        let at = horizon_core::geometry::Vec3::new(0.5, 64.0, 0.5);
+        let mut m = super::Mob::new(7, kind, at, 30.0);
+        m.limb_speed = 0.6;
+        let started = std::time::Instant::now();
+        let mut updates = 0u32;
+        // What the poses were, to compare a change that only makes posing faster.
+        let mut sum = std::collections::hash_map::DefaultHasher::new();
+        for i in 0..rounds {
+            // Three frames a tick: each one a new time, so each is posed.
+            if i % 3 == 0 {
+                m.age += 1;
+                m.limb_position += 0.37;
+            }
+            let alpha = (i % 3) as f32 / 3.0;
+            if let Some(f) = bedrock.frame(&m, alpha, [0.0, 0.0, 3.0]) {
+                updates += 1;
+                if i % 97 == 0 {
+                    use std::hash::Hash;
+                    let mut bones: Vec<_> = f.pose.bones.iter().collect();
+                    bones.sort_by(|a, b| a.0.cmp(b.0));
+                    format!("{bones:?}").hash(&mut sum);
+                }
+            }
+        }
+        let us = started.elapsed().as_secs_f64() * 1e6 / f64::from(updates.max(1));
+        use std::hash::Hasher;
+        eprintln!(
+            "{}: {updates} updates, {us:.1} us each, poses {:016x}",
+            m.kind.id,
+            sum.finish()
+        );
+    }
 }

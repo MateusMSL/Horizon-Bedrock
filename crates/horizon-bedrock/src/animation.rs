@@ -610,7 +610,8 @@ pub struct Pose {
 
 impl Pose {
     pub fn get(&self, bone: &str) -> Option<&BonePose> {
-        self.bones.get(&bone.to_ascii_lowercase())
+        // A name already in lower case (most are) is looked up as it is, with no string made.
+        self.bones.get(&*lower(bone))
     }
 }
 

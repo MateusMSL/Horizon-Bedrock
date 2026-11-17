@@ -517,16 +517,9 @@ struct WithBones<'a> {
     pivots: &'a HashMap<String, [f32; 3]>,
     rotations: &'a HashMap<String, [f32; 3]>,
     partial: Option<Pose>,
-    fresh: Option<BoneTables>,
     /// `Instance::place`.
     place: Option<[[f32; 4]; 3]>,
 }
-
-type BoneTables = (
-    HashMap<String, [f32; 3]>,
-    HashMap<String, [f32; 3]>,
-    HashMap<String, [f32; 3]>,
-);
 
 impl Host for WithBones<'_> {
     fn query(&mut self, name: &str, args: &[Value]) -> Value {
@@ -544,14 +537,17 @@ impl Host for WithBones<'_> {
             }
             _ => return Value::Vec3([0.0; 3]),
         };
-        if let (Some(g), Some(pose)) = (self.geometry, &self.partial)
-            && self.fresh.is_none()
-        {
-            self.fresh = Some(bone_origins(g, pose));
-        }
-        let (origins, pivots, rotations) = match &self.fresh {
-            Some((o, p, r)) => (o, p, r),
-            None => (self.origins, self.pivots, self.rotations),
+        // Under a pose that changed this update, the bone asked for is worked out alone, as
+        // `bone_origins` works out each (every bone's, after every animation, was a fifth of a
+        // copper golem's update); else the last update's tables answer.
+        let (origin, pivot, rotation) = match (self.geometry, &self.partial) {
+            (Some(g), Some(pose)) => one_bone(g, pose, &bone)
+                .map_or((None, None, None), |p| (Some(p.0), Some(p.1), Some(p.2))),
+            _ => (
+                self.origins.get(&bone).copied(),
+                self.pivots.get(&bone).copied(),
+                self.rotations.get(&bone).copied(),
+            ),
         };
         let placed = |o: [f32; 3]| match &self.place {
             Some(m) => {
@@ -575,24 +571,23 @@ impl Host for WithBones<'_> {
                     .map(|o| placed(*o))
                     .map_or([0.0; 3], |o| [o[0], 24.0 - o[1], o[2]]),
             },
-            "get_default_bone_pivot" => pivots.get(&bone).copied().unwrap_or([0.0; 3]),
+            "get_default_bone_pivot" => pivot.unwrap_or([0.0; 3]),
             // Where the bone is in the entity's space (pixels, y up from the feet), how it is
             // turned, and its scale.
             "bone_orientation_trs" => {
                 return Value::Trs([
-                    origins.get(&bone).map_or([0.0; 3], |o| placed(*o)),
-                    rotations.get(&bone).copied().unwrap_or([0.0; 3]),
+                    origin.map_or([0.0; 3], placed),
+                    rotation.unwrap_or([0.0; 3]),
                     [1.0; 3],
                 ]);
             }
-            _ => rotations.get(&bone).copied().unwrap_or([0.0; 3]),
+            _ => rotation.unwrap_or([0.0; 3]),
         };
         Value::Vec3(value)
     }
     fn pose_changed(&mut self, pose: &Pose) {
         if *self.wanted && self.geometry.is_some() {
             self.partial = Some(pose.clone());
-            self.fresh = None;
         }
     }
     fn variables(&mut self) -> Vec<(&'static str, Value)> {
@@ -788,23 +783,41 @@ pub fn bone_origins(
         .enumerate()
         .map(|(i, b)| (b.name.to_ascii_lowercase(), i))
         .collect();
-    let mut origins = HashMap::new();
-    let mut pivots = HashMap::new();
-    let mut rotations = HashMap::new();
-    for bone in &geometry.bones {
+    let mut origins = HashMap::with_capacity(geometry.bones.len());
+    let mut pivots = HashMap::with_capacity(geometry.bones.len());
+    let mut rotations = HashMap::with_capacity(geometry.bones.len());
+    // Each bone's pose and parent, looked up once: the walks below climb through the same bones
+    // over and over (every bone's chain to the root), and each step looked them up by name.
+    let locals: Vec<crate::animation::BonePose> = geometry
+        .bones
+        .iter()
+        .map(|b| pose.get(&b.name).cloned().unwrap_or_default())
+        .collect();
+    let parents: Vec<Option<usize>> = geometry
+        .bones
+        .iter()
+        .map(|b| {
+            b.parent
+                .as_ref()
+                .and_then(|n| index.get(&n.to_ascii_lowercase()))
+                .copied()
+        })
+        .collect();
+    for (at, bone) in geometry.bones.iter().enumerate() {
         let name = bone.name.to_ascii_lowercase();
         pivots.insert(name.clone(), bone.pivot);
-        let own = pose.get(&bone.name).cloned().unwrap_or_default();
+        let own = &locals[at];
         rotations.insert(
             name.clone(),
             std::array::from_fn(|i| bone.rotation[i] + own.rotation[i]),
         );
         // The pivot, then up through each bone that holds it.
         let mut p = bone.pivot;
-        let mut cur = Some(bone);
+        let mut cur = Some(at);
         let mut guard = 0;
-        while let Some(b) = cur {
-            let local = pose.get(&b.name).cloned().unwrap_or_default();
+        while let Some(i) = cur {
+            let b = &geometry.bones[i];
+            let local = &locals[i];
             let scale = if local.scale == [0.0; 3] {
                 [1.0; 3]
             } else {
@@ -819,16 +832,59 @@ pub fn bone_origins(
             let r = rotate_point(rel, turn);
             p = std::array::from_fn(|i| b.pivot[i] + r[i] + local.position[i]);
             guard += 1;
-            cur = b
-                .parent
-                .as_ref()
-                .and_then(|n| index.get(&n.to_ascii_lowercase()))
-                .map(|&i| &geometry.bones[i])
-                .filter(|_| guard < 64);
+            cur = parents[i].filter(|_| guard < 64);
         }
         origins.insert(name, p);
     }
     (origins, pivots, rotations)
+}
+
+/// What [`bone_origins`] gives for `bone` (lower case), worked out for it alone with the same
+/// steps: its origin, its pivot and its rotation. A name two bones share is the last of them's,
+/// as in those tables; `None` for a bone the model does not have.
+fn one_bone(
+    geometry: &crate::geometry::Geometry,
+    pose: &Pose,
+    bone: &str,
+) -> Option<([f32; 3], [f32; 3], [f32; 3])> {
+    let last_named = |name: &str| {
+        geometry
+            .bones
+            .iter()
+            .rposition(|b| b.name.eq_ignore_ascii_case(name))
+    };
+    let at = last_named(bone)?;
+    let start = &geometry.bones[at];
+    let own = pose.get(&start.name).cloned().unwrap_or_default();
+    let rotation = std::array::from_fn(|i| start.rotation[i] + own.rotation[i]);
+    // The pivot, then up through each bone that holds it.
+    let mut p = start.pivot;
+    let mut cur = Some(at);
+    let mut guard = 0;
+    while let Some(i) = cur {
+        let b = &geometry.bones[i];
+        let local = pose.get(&b.name).cloned().unwrap_or_default();
+        let scale = if local.scale == [0.0; 3] {
+            [1.0; 3]
+        } else {
+            local.scale
+        };
+        let rel = [
+            (p[0] - b.pivot[0]) * scale[0],
+            (p[1] - b.pivot[1]) * scale[1],
+            (p[2] - b.pivot[2]) * scale[2],
+        ];
+        let turn = std::array::from_fn(|k| b.rotation[k] + local.rotation[k]);
+        let r = rotate_point(rel, turn);
+        p = std::array::from_fn(|k| b.pivot[k] + r[k] + local.position[k]);
+        guard += 1;
+        cur = b
+            .parent
+            .as_ref()
+            .and_then(|n| last_named(n))
+            .filter(|_| guard < 64);
+    }
+    Some((p, start.pivot, rotation))
 }
 
 /// `bone`'s pivot (pixels, y up, in the model's space) moved by its own `position` and those of
@@ -1105,7 +1161,6 @@ impl Instance {
                 pivots: &self.pivots,
                 rotations: &self.rotations,
                 partial: None,
-                fresh: None,
                 place: self.place,
             };
             let host: &mut dyn Host = &mut bones;
