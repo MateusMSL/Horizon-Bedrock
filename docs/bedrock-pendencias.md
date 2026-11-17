@@ -51,6 +51,7 @@ Junta as listas pedidas na conversa (lista de tarefas da sessão, notas "Anotado
 - [ ] Slime, cubo de enxofre, magma: textura; cubo de enxofre tremendo, parando a animação e com o item absorvido desalinhado.
 - [ ] Estande de armadura: armaduras do pack e animação colocado no chão.
 - [ ] Golem de cobre.
+- [ ] Golem de cobre piscando e com o olho bugado depois da pose na GPU (branch `bedrock-gpu-pose`, relato de 2026-11-17; os outros mobs ok). Capturas: num quadro o corpo sai chapado, cor de cobre sem textura e sem a camada de cima; no outro sai normal. Suspeitas: o stencil posado (`hand_over_posed`, o corpo escreve o stencil que a casca lê) reaproveitado do quadro anterior (`KeptPose`: peças do passe com o lugar errado no buffer posado) ou a ordem entre os lotes posados e os da CPU no passe de stencil. Testar com `HORIZON_NO_ENTITY_SKIN=1` e com `cpu_stencil: true` no `bedrock-debug.json` para separar GPU, stencil e reaproveitamento.
 - [?] Lula brilhante: halo atravessando parede (v214).
 - [?] Ovelha "Halloween" (v219, confirmado).
 
