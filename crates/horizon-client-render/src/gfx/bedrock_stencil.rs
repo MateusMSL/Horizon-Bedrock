@@ -384,26 +384,37 @@ impl Stencil {
                 || b.state.color
                 || (b.state.replace && masks.iter().any(|mask| b.state.write_mask & mask != 0))
         };
+        let mut dropped = false;
         if masks.is_empty() {
             frame.batches[t].clear();
         } else if !frame.batches[t].iter().all(read) {
             frame.batches[t].retain(read);
+            dropped = true;
         }
         if frame.batches[t].is_empty() {
             frame.vertices[t].clear();
             return;
         }
-        // The kept pieces' vertices, packed (the posed ones are on the GPU already).
-        let mut vertices = Vec::with_capacity(frame.vertices[t].len());
+        // Nothing dropped: the pieces' vertices stay where their batches point. A crowd's
+        // pieces are a megabyte or more a frame, and packing them anyway (a new list, every
+        // vertex copied) was most of a server's copper golem farm's frame setup here.
+        if !dropped {
+            return;
+        }
+        // The kept pieces' vertices, packed in place (each one moves down, never up; the
+        // posed ones are on the GPU already).
+        let mut at = 0usize;
         for b in &mut frame.batches[t] {
             if b.posed {
                 continue;
             }
             let from = b.first as usize;
-            b.first = vertices.len() as u32;
-            vertices.extend_from_slice(&frame.vertices[t][from..from + b.vertices as usize]);
+            let n = b.vertices as usize;
+            frame.vertices[t].copy_within(from..from + n, at);
+            b.first = at as u32;
+            at += n;
         }
-        frame.vertices[t] = vertices;
+        frame.vertices[t].truncate(at);
     }
 
     /// Bedrock's order: the opaque and cut-out pieces first, the blended ones after, each in
@@ -612,7 +623,8 @@ impl Stencil {
             .map(|b| {
                 let s = b.state;
                 format!(
-                    "{}{:?} ref {} mask {:#x}{} {}q",
+                    "{}{}{:?} ref {} mask {:#x}{} {}q",
+                    if b.posed { "posed " } else { "" },
                     if s.color { "" } else { "nocolor " },
                     s.compare,
                     s.reference,
@@ -860,6 +872,74 @@ mod tests {
         let kept: Vec<u8> = frame.batches[0].iter().map(|b| b.state.reference).collect();
         assert_eq!(kept, [2, 0]);
         assert_eq!(frame.vertices[0].len(), 8);
+    }
+
+    /// The pieces kept point at their own vertices after one between them is dropped, and with
+    /// none dropped the list stays as it was.
+    #[test]
+    fn kept_pieces_keep_their_vertices() {
+        let piece = |id: u32, reference, write_mask, compare| Batch {
+            state: State {
+                color: false,
+                additive: false,
+                blended: false,
+                depth_write: true,
+                depth_test: true,
+                cutout: true,
+                compare,
+                replace: compare == Compare::Always,
+                reference,
+                read_mask: 2,
+                write_mask,
+            },
+            first: id * 8,
+            vertices: 8,
+            posed: false,
+        };
+        let frame = |middle_mask| Lists {
+            // Two quads a piece, each piece's vertices marked with its number.
+            vertices: [
+                (0..4u32).flat_map(|id| quad(id).repeat(2)).collect(),
+                Vec::new(),
+            ],
+            batches: [
+                vec![
+                    piece(0, 2, 255, Compare::Always),
+                    // Writes the bit 0x20, which no test reads unless `middle_mask` has 2.
+                    piece(1, 32, middle_mask, Compare::Always),
+                    piece(2, 2, 255, Compare::NotEqual),
+                    piece(3, 2, 255, Compare::Always),
+                ],
+                Vec::new(),
+            ],
+        };
+        let marks = |f: &Lists| -> Vec<Vec<u32>> {
+            f.batches[0]
+                .iter()
+                .map(|b| {
+                    let at = b.first as usize;
+                    f.vertices[0][at..at + b.vertices as usize]
+                        .iter()
+                        .map(|v| v.layer)
+                        .collect()
+                })
+                .collect()
+        };
+        let mut dropped = frame(0x20);
+        Stencil::prune(&mut dropped, 0);
+        assert_eq!(
+            marks(&dropped),
+            [vec![0; 8], vec![2; 8], vec![3; 8]],
+            "the second piece dropped, the others on their own vertices"
+        );
+        assert_eq!(dropped.vertices[0].len(), 24);
+        let mut all = frame(0x22);
+        Stencil::prune(&mut all, 0);
+        assert_eq!(
+            marks(&all),
+            [vec![0; 8], vec![1; 8], vec![2; 8], vec![3; 8]]
+        );
+        assert_eq!(all.vertices[0].len(), 32);
     }
 
     #[test]
