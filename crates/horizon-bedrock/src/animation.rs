@@ -959,7 +959,7 @@ pub type StrMap<V> = HashMap<String, V, std::hash::BuildHasherDefault<rustc_hash
 
 /// `name` in lower case, made only when it has an upper-case letter: the entity's names are
 /// looked up in the library on every frame.
-fn lower(name: &str) -> std::borrow::Cow<'_, str> {
+pub fn lower(name: &str) -> std::borrow::Cow<'_, str> {
     if name.bytes().any(|b| b.is_ascii_uppercase()) {
         std::borrow::Cow::Owned(name.to_ascii_lowercase())
     } else {

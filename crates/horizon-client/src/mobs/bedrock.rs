@@ -1415,9 +1415,9 @@ impl Host for MobHost<'_> {
                 let item = item_at(m, args.first());
                 let rest = || {
                     args.iter().skip(1).filter_map(|v| match v {
-                        Value::Str(s) => {
-                            Some(s.trim_start_matches("minecraft:").to_ascii_lowercase())
-                        }
+                        Value::Str(s) => Some(horizon_bedrock::animation::lower(
+                            s.trim_start_matches("minecraft:"),
+                        )),
                         _ => None,
                     })
                 };
@@ -1804,9 +1804,9 @@ impl Host for MobHost<'_> {
 /// The name a Bedrock pack knows a Java item by, without the namespace: the blocks Bedrock
 /// names otherwise (`magma_block` is `magma`, `jack_o_lantern` is `lit_pumpkin`, the snow
 /// block is `snow` and the snow layer `snow_layer`), else the Java name.
-fn bedrock_item_name(java: &str) -> String {
-    let short = java.trim_start_matches("minecraft:").to_ascii_lowercase();
-    match short.as_str() {
+fn bedrock_item_name(java: &str) -> std::borrow::Cow<'_, str> {
+    let short = horizon_bedrock::animation::lower(java.trim_start_matches("minecraft:"));
+    match &*short {
         "magma_block" => "magma",
         "jack_o_lantern" => "lit_pumpkin",
         "snow_block" => "snow",
@@ -1829,7 +1829,7 @@ fn bedrock_item_name(java: &str) -> String {
         "spawner" => "mob_spawner",
         _ => return short,
     }
-    .to_owned()
+    .into()
 }
 
 /// The pack's attachables for a held Java item: by its own id, else by the id Bedrock gives it.
@@ -1848,8 +1848,8 @@ fn item_at(m: &Mob, slot: Option<&Value>) -> Option<Arc<str>> {
     let main = Value::Num(0.0);
     let slot = match slot.unwrap_or(&main) {
         Value::Str(s) => {
-            let s = s.to_ascii_lowercase();
-            slot_of(&s).or(match s.as_str() {
+            let s = horizon_bedrock::animation::lower(s);
+            slot_of(&s).or(match &*s {
                 "main_hand" => Some("main_hand"),
                 "off_hand" => Some("off_hand"),
                 "head" => Some("head"),

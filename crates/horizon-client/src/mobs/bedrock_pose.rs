@@ -202,7 +202,17 @@ mod tests {
         let bedrock = super::super::BedrockMobs::load(std::path::Path::new(&pack));
         let kind = std::env::var("HORIZON_POSE_KIND")
             .unwrap_or_else(|_| "minecraft:copper_golem".to_owned());
-        let kind = std::sync::Arc::new(types.types[&kind].clone());
+        // `first_person`: the player's first-person view model (posed every frame); the player
+        // has no mob type of its own here, so it borrows the zombie's under the player's id.
+        let first_person = kind == "first_person";
+        let kind = if first_person {
+            let mut player = types.types["minecraft:zombie"].clone();
+            player.id = "minecraft:player".into();
+            player
+        } else {
+            types.types[&kind].clone()
+        };
+        let kind = std::sync::Arc::new(kind);
         let rounds: u32 = std::env::var("HORIZON_POSE_ROUNDS")
             .ok()
             .and_then(|n| n.parse().ok())
@@ -210,6 +220,14 @@ mod tests {
         let at = horizon_core::geometry::Vec3::new(0.5, 64.0, 0.5);
         let mut m = super::Mob::new(7, kind, at, 30.0);
         m.limb_speed = 0.6;
+        m.extra.first_person = first_person;
+        m.extra.local_player = first_person;
+        // `HORIZON_POSE_HANDS=main,off`: what it holds (item ids).
+        if let Ok(hands) = std::env::var("HORIZON_POSE_HANDS") {
+            let mut hands = hands.split(',').map(str::trim).filter(|h| !h.is_empty());
+            m.extra.main_hand = hands.next().map(Into::into);
+            m.extra.off_hand = hands.next().map(Into::into);
+        }
         let started = std::time::Instant::now();
         let mut updates = 0u32;
         // What the poses were, to compare a change that only makes posing faster.
