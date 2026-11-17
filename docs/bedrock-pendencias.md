@@ -132,3 +132,14 @@ Junta as listas pedidas na conversa (lista de tarefas da sessão, notas "Anotado
   - O golem de cobre não pisca com shaders: o passe de stencil fica desligado sob shader packs, o que reforça a suspeita no stencil posado (item do golem em Mobs).
 - [ ] Texture Style Vanilla Experience com outro resource pack por cima: itens bugam.
 - [ ] Nametags: avaliar uma a uma; `Halloween` no slime não aplica a variante de caveira.
+
+## Relato de 2026-11-17 (analisado na madrugada, sem jogo do usuário aberto)
+
+- [ ] Arco encantado com borda vermelha, qualquer que seja a cor de brilho escolhida. Causa provável: o render controller do contorno encantado do arco (`controller.render.oreville_ans.zxhwjj`, em `render_controllers/hcy.json`) tem `overlay_color` vermelho fixo (`r=1, g=0, b=0, a=1`), e o Horizon mistura `overlay_color` em toda camada (`Layer::tint`, `crates/horizon-bedrock/src/entity.rs`). A cor escolhida vem da textura (`Array.ncyhyp[v.nwypnn]`). Os materiais da camada (`oreville_njlxva`, `oreville_vrwhkp`, `oreville_wcjlza`) herdam de `entity_emissive`. Falta confirmar em que materiais o Bedrock aplica `overlay_color` (o define `USE_OVERLAY` do shader) antes de mudar: aplicar só onde o shader lê, sem quebrar o flash de dano dos mobs.
+- [?] Mobs sem animação de morte. No mundo de teste (um jogador, servidor integrado) a morte do A&S roda inteira: o zumbi tomba em ~16 ticks (ragdoll em Molang: `v.eewgjn`, `q.bone_origin`), solta as partículas e some na fumaça; o motor offline faz o mesmo. O cliente trata o evento 3 (`EntityEvent.DEATH`) como o vanilla (vida 0). Se no servidor não aparece, a suspeita é o servidor: plugins que empilham mobs removem o mob na hora da morte. Falta ver num mob morto no servidor (sem mexer na fazenda).
+- [ ] Animação de pulo cortada no meio. No mundo de teste o controlador `ngeixo` (`controller.animation.oreville_ans.lfjeov`) entra em `jump` ao sair do chão e volta a `default` quando `q.vertical_speed < -7` (regra do pack), um tick antes do pouso; a animação (`mykcsi`) tem 1,17 s e é misturada para fora em 0,2 s. Com a física do Bedrock a regra corta no mesmo ponto, então falta ver no jogo do usuário se o corte é outro (velocidade vertical do jogador local, `q.is_jumping`, pulo correndo `ypqtmb`/`seridw`).
+- [ ] Faltam animações de idle (suspeita do usuário). Não investigado.
+- [ ] Elytra com textura de capa sem o brilho de encantamento. Não investigado.
+- [ ] Lança faz o som de ataque repetidamente só de estar na mão (já anotado em Motor). Os sons de golpe do A&S são de `sounds.json` (`item.*_spear.attack_miss` etc.); falta achar o que os dispara sem ataque.
+
+Ferramentas novas para essas investigações: `HORIZON_BEDROCK_PROFILE=1` (tempo de pose por entidade no log) e o teste ignorado `time_a_pack_mob_posed_with_the_game_host` (`HORIZON_POSE_KIND`, mede e confere a pose com o host do jogo).
