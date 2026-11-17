@@ -323,6 +323,7 @@ impl Stencil {
 
     /// Takes the pieces handed over since the last frame and uploads them.
     pub fn begin_frame(&mut self, queue: &wgpu::Queue) {
+        let _span = crate::spans::guard("r_stencil_begin");
         {
             let mut pending = PENDING
                 .lock()
@@ -484,6 +485,7 @@ impl Stencil {
         indices: &wgpu::Buffer,
         posed: Option<(&wgpu::Buffer, u32)>,
     ) {
+        let _span = crate::spans::guard("r_stencil_draw");
         let t = target as usize;
         let own = self.frame.batches[t].iter().any(|b| !b.posed);
         let any_posed = self.frame.batches[t].iter().any(|b| b.posed);
