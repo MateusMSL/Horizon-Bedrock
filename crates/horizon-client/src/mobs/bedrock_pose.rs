@@ -241,6 +241,10 @@ mod tests {
             m.extra.main_hand = hands.next().map(Into::into);
             m.extra.off_hand = hands.next().map(Into::into);
         }
+        // `HORIZON_MOLANG_TIMING=1`: how much of a pose is Molang, and of that the game's answers.
+        let timing = std::env::var_os("HORIZON_MOLANG_TIMING").is_some();
+        horizon_bedrock::molang::set_timing(timing);
+        horizon_bedrock::molang::take_run_stats();
         let started = std::time::Instant::now();
         let mut updates = 0u32;
         // What the poses were, to compare a change that only makes posing faster.
@@ -263,6 +267,17 @@ mod tests {
             }
         }
         let us = started.elapsed().as_secs_f64() * 1e6 / f64::from(updates.max(1));
+        if timing {
+            let runs = horizon_bedrock::molang::take_run_stats();
+            let per = |d: std::time::Duration| d.as_secs_f64() * 1e6 / f64::from(updates.max(1));
+            eprintln!(
+                "molang per update: {:.0} runs, {:.1} us in all, {:.1} us answering, {:.1} us the bytecode's own",
+                runs.runs as f64 / f64::from(updates.max(1)),
+                per(runs.total),
+                per(runs.host),
+                per(runs.exec())
+            );
+        }
         use std::hash::Hasher;
         eprintln!(
             "{}: {updates} updates, {us:.1} us each, poses {:016x}",
