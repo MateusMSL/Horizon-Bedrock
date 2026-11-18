@@ -1,7 +1,7 @@
 use super::*;
 use std::collections::HashMap;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct TestHost {
     queries: HashMap<String, f32>,
     arrays: HashMap<String, Vec<Value>>,
@@ -35,15 +35,191 @@ impl Host for TestHost {
     }
 }
 
+/// Runs `src` on its bytecode, and checks that the tree walker gives the same: the value, the
+/// variables it leaves and the queries it asks, in order.
 fn run_with(src: &str, host: &mut TestHost, vars: &mut Vars) -> Value {
     let program = parse(src).unwrap_or_else(|e| panic!("{src}: {e}"));
+    let (mut tree_host, mut tree_vars) = (host.clone(), vars.clone());
     let mut rng = Rng::new(1);
-    program.eval(&mut EvalCtx {
+    let got = program.eval(&mut EvalCtx {
         host,
         vars,
         rng: &mut rng,
         this: Value::Num(5.0),
-    })
+    });
+    let mut rng = Rng::new(1);
+    let tree = program.eval_tree(&mut EvalCtx {
+        host: &mut tree_host,
+        vars: &mut tree_vars,
+        rng: &mut rng,
+        this: Value::Num(5.0),
+    });
+    // Compared as text, so a NaN equals itself.
+    assert_eq!(
+        format!("{got:?}"),
+        format!("{tree:?}"),
+        "{src}: bytecode and tree walker give different values"
+    );
+    let sorted = |vars: &Vars| {
+        let mut v: Vec<_> = vars.iter().map(|(k, v)| (*k, format!("{v:?}"))).collect();
+        v.sort();
+        v
+    };
+    assert_eq!(sorted(vars), sorted(&tree_vars), "{src}: variables differ");
+    assert_eq!(
+        format!("{:?}", host.calls),
+        format!("{:?}", tree_host.calls),
+        "{src}: queries differ"
+    );
+    got
+}
+
+/// A random program of the statements and expressions packs write, nested up to a few levels:
+/// what the bytecode must give the same answers as the tree walker for, beyond the cases above.
+struct Gen(u64);
+
+impl Gen {
+    fn below(&mut self, n: u64) -> u64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (self.0 >> 33) % n
+    }
+
+    fn pick<'a>(&mut self, of: &[&'a str]) -> &'a str {
+        of[self.below(of.len() as u64) as usize]
+    }
+
+    fn expr(&mut self, depth: u32) -> String {
+        if depth == 0 {
+            return self.leaf();
+        }
+        let d = depth - 1;
+        match self.below(14) {
+            0 | 1 => self.leaf(),
+            2 => format!("-{}", self.expr(d)),
+            3 => format!("!{}", self.expr(d)),
+            4 | 5 => {
+                let op = self.pick(&[
+                    "+", "-", "*", "/", "<", "<=", ">", ">=", "==", "!=", "&&", "||",
+                ]);
+                format!("({} {op} {})", self.expr(d), self.expr(d))
+            }
+            6 => format!("({} ? {} : {})", self.expr(d), self.expr(d), self.expr(d)),
+            7 => format!("({} ? {})", self.expr(d), self.expr(d)),
+            8 => format!("({} ?? {})", self.expr(d), self.expr(d)),
+            9 => format!(
+                "math.{}({})",
+                self.pick(&["sin", "abs", "floor", "sqrt"]),
+                self.expr(d)
+            ),
+            10 => format!(
+                "math.clamp({}, {}, {})",
+                self.expr(d),
+                self.expr(d),
+                self.expr(d)
+            ),
+            11 => format!(
+                "q.{}({})",
+                self.pick(&["any", "all", "seen", "approx_eq"]),
+                self.args(d)
+            ),
+            12 => format!("({} = {})", self.var(), self.expr(d)),
+            _ => format!("array.xs[{}]", self.expr(d)),
+        }
+    }
+
+    fn args(&mut self, depth: u32) -> String {
+        let n = self.below(4);
+        (0..n)
+            .map(|_| self.expr(depth))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    fn var(&mut self) -> &'static str {
+        self.pick(&["v.a", "v.b", "t.a", "t.b", "t.i", "v.p"])
+    }
+
+    fn leaf(&mut self) -> String {
+        match self.below(9) {
+            0 | 1 => format!("{}", self.below(7) as f32 * 0.5 - 1.0),
+            2 | 3 => self.var().to_owned(),
+            4 => self
+                .pick(&["'x'", "'main_hand'", "c.item_slot", "this"])
+                .to_owned(),
+            5 => self
+                .pick(&["q.known", "q.unknown", "q.life_time"])
+                .to_owned(),
+            6 => self
+                .pick(&[
+                    "c.owning_entity -> v.a",
+                    "v.a -> v.b",
+                    "c.owning_entity -> q.known",
+                ])
+                .to_owned(),
+            7 => "geometry.default".to_owned(),
+            _ => "v.p.x".to_owned(),
+        }
+    }
+
+    fn stmts(&mut self, depth: u32, in_loop: bool) -> String {
+        let n = 1 + self.below(3);
+        (0..n).map(|_| self.stmt(depth, in_loop) + "; ").collect()
+    }
+
+    fn stmt(&mut self, depth: u32, in_loop: bool) -> String {
+        let d = depth.saturating_sub(1);
+        match self.below(if depth == 0 { 3 } else { 9 }) {
+            0 => format!("{} = {}", self.var(), self.expr(2)),
+            1 => self.expr(2),
+            2 => format!("return {}", self.expr(2)),
+            3 if in_loop => "break".to_owned(),
+            3 => format!("return {}", self.expr(1)),
+            4 if in_loop => "continue".to_owned(),
+            4 => format!("v.p = {}", self.expr(1)),
+            5 => format!("loop({}, {{ {}}})", self.expr(1), self.stmts(d, true)),
+            6 => format!("for_each(t.i, array.xs, {{ {}}})", self.stmts(d, true)),
+            7 => format!("{} ? {{ {}}}", self.expr(2), self.stmts(d, in_loop)),
+            _ => format!(
+                "{} ? {{ {}}} : {{ {}}}",
+                self.expr(2),
+                self.stmts(d, in_loop),
+                self.stmts(d, in_loop)
+            ),
+        }
+    }
+}
+
+#[test]
+fn bytecode_and_tree_walker_agree_on_random_programs() {
+    let mut g = Gen(0x5eed);
+    let mut ran = 0;
+    for i in 0..20000 {
+        let src = if i % 3 == 0 {
+            g.expr(4)
+        } else {
+            g.stmts(3, false)
+        };
+        if parse(&src).is_err() {
+            continue;
+        }
+        let mut host = TestHost::default();
+        host.queries.insert("known".into(), 2.0);
+        host.arrays.insert(
+            "xs".into(),
+            vec![Value::Num(1.0), "s".into(), Value::Num(-2.0)],
+        );
+        host.other.insert((7, "a".into()), 4.0);
+        let mut vars = Vars::default();
+        vars.insert(intern("b"), Value::Entity(7));
+        // Two runs: the second sees what the first left in the variables.
+        run_with(&src, &mut host, &mut vars);
+        run_with(&src, &mut host, &mut vars);
+        ran += 1;
+    }
+    assert!(ran > 15000, "only {ran} random programs parsed");
 }
 
 fn run(src: &str) -> f32 {

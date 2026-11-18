@@ -152,6 +152,9 @@ impl Host for Scoped<'_> {
     fn array(&self, name: &str) -> Option<Vec<Value>> {
         self.inner.array(name)
     }
+    fn array_at(&self, name: &str, index: f32) -> Option<Value> {
+        self.inner.array_at(name, index)
+    }
     fn entity_var(&mut self, entity: u64, var: molang::Sym) -> Value {
         self.inner.entity_var(entity, var)
     }

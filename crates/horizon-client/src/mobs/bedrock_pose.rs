@@ -17,8 +17,21 @@ const CROWD_AS_WRITTEN: f32 = 24.0;
 
 /// A frame's mobs are about to be drawn: the count of the last one's models becomes the crowd
 /// `pose_step` reads.
+///
+/// With spans or a trace on (or `HORIZON_BEDROCK_PROFILE`), the Molang runs are timed, and the last
+/// frame's are recorded: `molang`, all of Molang's time (the game's answers to the queries
+/// included), and `molang_vm`, the bytecode's own.
 pub fn begin_frame() {
     CROWD.store(DRAWN.swap(0, Relaxed), Relaxed);
+    use horizon_bedrock::molang;
+    use horizon_client_render::spans;
+    let timed = molang::timing();
+    molang::set_timing(spans::enabled() || spans::trace::on() || profiling());
+    if timed {
+        let runs = molang::take_run_stats();
+        spans::record("molang", runs.total);
+        spans::record("molang_vm", runs.exec());
+    }
 }
 
 /// One of the pack's models was drawn this frame.

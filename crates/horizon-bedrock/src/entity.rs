@@ -495,6 +495,12 @@ impl Host for WithArrays<'_> {
             .cloned()
             .or_else(|| self.inner.array(name))
     }
+    fn array_at(&self, name: &str, index: f32) -> Option<Value> {
+        match self.arrays.get(name) {
+            Some(items) => crate::molang::pick(items, index),
+            None => self.inner.array_at(name, index),
+        }
+    }
     fn entity_var(&mut self, entity: u64, var: crate::molang::Sym) -> Value {
         self.inner.entity_var(entity, var)
     }
@@ -598,6 +604,9 @@ impl Host for WithBones<'_> {
     }
     fn array(&self, name: &str) -> Option<Vec<Value>> {
         self.inner.array(name)
+    }
+    fn array_at(&self, name: &str, index: f32) -> Option<Value> {
+        self.inner.array_at(name, index)
     }
     fn entity_var(&mut self, entity: u64, var: crate::molang::Sym) -> Value {
         self.inner.entity_var(entity, var)

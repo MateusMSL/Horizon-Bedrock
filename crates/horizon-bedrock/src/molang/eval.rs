@@ -49,7 +49,7 @@ impl Value {
         Value::Num(if b { 1.0 } else { 0.0 })
     }
 
-    fn equals(&self, other: &Value) -> bool {
+    pub(super) fn equals(&self, other: &Value) -> bool {
         use Value::*;
         match (self, other) {
             (Num(a), Num(b)) => a == b,
@@ -105,6 +105,27 @@ fn member_syms(sym: Sym) -> ([Sym; 3], [Sym; 9]) {
     })
 }
 
+/// Sets `sym` to `v`, and a vector's or a transform's members to its numbers ([`member_syms`]).
+pub(super) fn store(vars: &mut Vars, temps: &mut Vars, scope: Scope, sym: Sym, v: Value) {
+    let vars = match scope {
+        Scope::Variable => vars,
+        Scope::Temp => temps,
+    };
+    let (numbers, transform): (&[f32], bool) = match &v {
+        Value::Vec3(xyz) => (xyz, false),
+        Value::Trs(trs) => (trs.as_flattened(), true),
+        _ => (&[], false),
+    };
+    if !numbers.is_empty() {
+        let (vector, trs) = member_syms(sym);
+        let members: &[Sym] = if transform { &trs } else { &vector };
+        for (member, n) in members.iter().zip(numbers) {
+            vars.insert(*member, Value::Num(*n));
+        }
+    }
+    vars.insert(sym, v);
+}
+
 /// What the game answers. Every method has a default that answers "unknown", so a host
 /// implements only what it has; unknown answers are [`Value::Null`], which reads as 0.
 pub trait Host {
@@ -131,6 +152,13 @@ pub trait Host {
         None
     }
 
+    /// `array.name[index]`: the element at `index` (below zero the first, past the end wrapped by
+    /// the array's size), or `None` for an array that is missing or empty. What [`Host::array`]
+    /// gives, picked from; a host that keeps its arrays answers without copying the whole array.
+    fn array_at(&self, name: &str, index: f32) -> Option<Value> {
+        pick(&self.array(name)?, index)
+    }
+
     /// `variable.x` of another entity, for `entity -> v.x`.
     fn entity_var(&mut self, _entity: u64, _var: Sym) -> Value {
         Value::Null
@@ -140,6 +168,16 @@ pub trait Host {
     fn entity_query(&mut self, _entity: u64, _name: &str, _args: &[Value]) -> Value {
         Value::Null
     }
+}
+
+/// `array[index]` as [`Host::array_at`] reads it.
+pub fn pick(items: &[Value], index: f32) -> Option<Value> {
+    if items.is_empty() {
+        return None;
+    }
+    // Negative indexes use 0; larger ones wrap by the array's size.
+    let i = if index > 0.0 { index as usize } else { 0 };
+    Some(items[i % items.len()].clone())
 }
 
 /// A host that knows nothing.
@@ -218,6 +256,36 @@ pub fn shared_temps<R>(f: impl FnOnce() -> R) -> R {
 impl Program {
     /// Runs the program. Errors, a missing variable and an abandoned run all give 0.
     pub fn eval(&self, ctx: &mut EvalCtx) -> Value {
+        if !super::stats::timing() {
+            return self.run(ctx, tree_walker());
+        }
+        let this = std::mem::take(&mut ctx.this);
+        let (vars, rng) = (&mut *ctx.vars, &mut *ctx.rng);
+        super::stats::timed(&mut *ctx.host, |host| {
+            self.run(
+                &mut EvalCtx {
+                    host,
+                    vars,
+                    rng,
+                    this,
+                },
+                tree_walker(),
+            )
+        })
+    }
+
+    /// [`Program::eval`] on the tree walker, whatever `HORIZON_MOLANG_INTERP` says: the
+    /// reference the bytecode is checked against.
+    pub fn eval_tree(&self, ctx: &mut EvalCtx) -> Value {
+        self.run(ctx, true)
+    }
+
+    /// Whether the program has bytecode: false for one only the tree walker runs.
+    pub fn compiled(&self) -> bool {
+        self.code.is_some()
+    }
+
+    fn run(&self, ctx: &mut EvalCtx, tree: bool) -> Value {
         let shared = SHARED_TEMPS.with(|s| s.borrow_mut().as_mut().map(std::mem::take));
         let is_shared = shared.is_some();
         let mut m = Machine {
@@ -226,7 +294,10 @@ impl Program {
             steps: 0,
             flow: None,
         };
-        let result = self.run_body(&mut m);
+        let result = match &self.code {
+            Some(code) if !tree => code.run(m.ctx, &mut m.temps),
+            _ => self.run_body(&mut m),
+        };
         if is_shared {
             let temps = std::mem::take(&mut m.temps);
             SHARED_TEMPS.with(|s| *s.borrow_mut() = Some(temps));
@@ -253,10 +324,16 @@ impl Program {
     }
 }
 
+/// `HORIZON_MOLANG_INTERP=1`: every program runs on the tree walker instead of its bytecode.
+fn tree_walker() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("HORIZON_MOLANG_INTERP").is_some_and(|v| v != "0"))
+}
+
 /// The queries that are plain functions of their arguments, whatever the host:
 /// `any(a, x, y...)` (a equals one of x, y), `all(a, x, y...)` (a equals each),
 /// `approx_eq(a, b...)` (all within a millionth of a).
-fn builtin_query(name: &str, args: &[Value]) -> Option<Value> {
+pub(super) fn builtin_query(name: &str, args: &[Value]) -> Option<Value> {
     let (first, rest) = args.split_first()?;
     match name {
         "any" => Some(Value::bool(rest.iter().any(|v| first.equals(v)))),
@@ -386,14 +463,7 @@ impl Machine<'_, '_> {
             }
             Expr::Array(name, index) => {
                 let i = num!(self, index);
-                match self.ctx.host.array(name) {
-                    Some(items) if !items.is_empty() => {
-                        // Negative indexes use 0; larger ones wrap by the array's size.
-                        let i = if i > 0.0 { i as usize } else { 0 };
-                        items[i % items.len()].clone()
-                    }
-                    _ => Value::Null,
-                }
+                self.ctx.host.array_at(name, i).unwrap_or_default()
             }
             Expr::Resource(kind, name) => Value::Res(*kind, name.clone()),
             Expr::This => self.ctx.this.clone(),
@@ -424,25 +494,7 @@ impl Machine<'_, '_> {
             }
             Expr::Assign(scope, sym, rhs) => {
                 let v = ev!(self, rhs);
-                match scope {
-                    Scope::Variable => self.ctx.vars.insert(*sym, v.clone()),
-                    Scope::Temp => self.temps.insert(*sym, v.clone()),
-                };
-                let (numbers, transform): (&[f32], bool) = match &v {
-                    Value::Vec3(xyz) => (xyz, false),
-                    Value::Trs(trs) => (trs.as_flattened(), true),
-                    _ => (&[], false),
-                };
-                if !numbers.is_empty() {
-                    let (vector, trs) = member_syms(*sym);
-                    let members: &[Sym] = if transform { &trs } else { &vector };
-                    for (member, n) in members.iter().zip(numbers) {
-                        match scope {
-                            Scope::Variable => self.ctx.vars.insert(*member, Value::Num(*n)),
-                            Scope::Temp => self.temps.insert(*member, Value::Num(*n)),
-                        };
-                    }
-                }
+                store(self.ctx.vars, &mut self.temps, *scope, *sym, v.clone());
                 v
             }
             Expr::Block(stmts) => {

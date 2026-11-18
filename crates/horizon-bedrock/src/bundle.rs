@@ -190,6 +190,8 @@ impl Bundle {
             }
         }
         let mut b = Bundle::default();
+        let molang = crate::molang::compile_stats();
+        let started = std::time::Instant::now();
         b.add_builtins();
         for (path, rel) in all {
             let rel = rel.to_string_lossy().replace('\\', "/");
@@ -290,6 +292,17 @@ impl Bundle {
             }
         }
         b.fit_sprites(root);
+        // The pack's compile: every expression read and compiled to bytecode, once, here.
+        let molang = molang.since(crate::molang::compile_stats());
+        log::info!(
+            "Horizon: Bedrock pack loaded in {:.0} ms; Molang: {} expressions ({} to bytecode), \
+             parsed in {:.1} ms, compiled in {:.1} ms",
+            started.elapsed().as_secs_f64() * 1e3,
+            molang.programs,
+            molang.compiled,
+            molang.parse.as_secs_f64() * 1e3,
+            molang.compile.as_secs_f64() * 1e3,
+        );
         b
     }
 

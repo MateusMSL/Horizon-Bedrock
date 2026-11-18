@@ -24,6 +24,17 @@ impl std::error::Error for ParseError {}
 
 /// Parses `src`.
 pub fn parse(src: &str) -> Result<Program, ParseError> {
+    let started = std::time::Instant::now();
+    let parsed = parse_tree(src);
+    super::stats::parsed(started.elapsed());
+    let mut program = parsed?;
+    let started = std::time::Instant::now();
+    program.code = super::code::Code::compile(&program).map(Arc::new);
+    super::stats::compiled(program.code.is_some(), started.elapsed());
+    Ok(program)
+}
+
+fn parse_tree(src: &str) -> Result<Program, ParseError> {
     let toks = lex(src)?;
     let mut p = Parser {
         toks,
@@ -35,7 +46,11 @@ pub fn parse(src: &str) -> Result<Program, ParseError> {
         return Err(p.error("unexpected token"));
     }
     let single = body.len() == 1 && !trailing_semi;
-    Ok(Program { body, single })
+    Ok(Program {
+        body,
+        single,
+        code: None,
+    })
 }
 
 struct Parser {

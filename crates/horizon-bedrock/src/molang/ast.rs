@@ -110,6 +110,9 @@ pub struct Program {
     /// One expression with no `;`: its value is the program's. Otherwise the value is what
     /// `return` gives, or 0.
     pub single: bool,
+    /// The program compiled ([`super::parse`] does it), or `None` for one only the tree walker
+    /// runs.
+    pub(super) code: Option<Arc<super::code::Code>>,
 }
 
 impl Program {

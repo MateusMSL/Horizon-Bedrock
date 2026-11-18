@@ -125,6 +125,21 @@ fn push(span: Span) {
         s.push(span);
     });
 }
+/// A span added up elsewhere (the Molang runs of a frame, `molang`), recorded as if it ended now.
+pub fn record(name: &'static str, took: Duration) {
+    if !recording_here() {
+        return;
+    }
+    let ms = took.as_secs_f32() * 1000.0;
+    let now = Instant::now();
+    trace::span(name, now.checked_sub(took).unwrap_or(now), ms);
+    push(Span {
+        name,
+        ms,
+        cpu_ms: ms,
+        depth: DEPTH.with(Cell::get),
+    });
+}
 /// Attach per-tick counts without interpreting them as durations.
 pub fn counters(counts: &[(&str, u64)]) {
     if !enabled() {
