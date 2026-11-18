@@ -49,6 +49,14 @@ fn main() {
         bundle.attachables.len(),
         loaded.elapsed().as_secs_f32()
     );
+    let molang = horizon_bedrock::molang::compile_stats();
+    eprintln!(
+        "molang: {} expressions ({} to bytecode), parsed in {:.1} ms, compiled in {:.1} ms",
+        molang.programs,
+        molang.compiled,
+        molang.parse.as_secs_f64() * 1e3,
+        molang.compile.as_secs_f64() * 1e3
+    );
     let assets = Assets {
         animations: &bundle.library,
         render_controllers: &bundle.render_controllers,
