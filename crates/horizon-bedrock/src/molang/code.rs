@@ -34,6 +34,10 @@ enum Op {
     OrSkip(u32),
     /// The top number as a boolean (1 or 0).
     Truthy,
+    /// `+ - * / < <= > >=` of the top number and this one (`x * 2`).
+    BinK(BinOp, f32),
+    /// `query.names[i]` of the top `n` values, as a number.
+    QueryNum(u32, u16),
     /// Drops the top number and jumps when it is zero.
     JumpIfZero(u32),
     Jump(u32),
@@ -60,6 +64,8 @@ enum Op {
     AssignPop(Scope, Sym),
     /// Stores the top number.
     AssignNum(Scope, Sym),
+    /// Stores this number.
+    SetNum(Scope, Sym, f32),
     Pop,
     /// `??`: a value on top that is not null is the answer and jumps; null is dropped.
     CoalesceSkip(u32),
@@ -79,6 +85,8 @@ enum Op {
     Leave(u16, u16, u32),
     /// `return` with the top value.
     Ret,
+    /// `return` with the top number.
+    RetNum,
     /// Leaves with 0 (a `break` or `continue` outside a loop).
     RetZero,
 
@@ -136,8 +144,7 @@ impl Code {
         };
         let body = &program.body;
         if program.single && body.len() == 1 {
-            c.val(&body[0]).ok()?;
-            c.emit(Op::Ret);
+            c.ret(&body[0]).ok()?;
         } else {
             for stmt in body {
                 c.effect(stmt).ok()?;
@@ -237,6 +244,20 @@ impl Compiler {
         self.vs += 1;
     }
 
+    /// Leaves the program with `e`'s value.
+    fn ret(&mut self, e: &Expr) -> Done {
+        if numeric(e) {
+            self.num(e)?;
+            self.emit(Op::RetNum);
+            self.ns -= 1;
+        } else {
+            self.val(e)?;
+            self.emit(Op::Ret);
+            self.vs -= 1;
+        }
+        Ok(())
+    }
+
     /// `e`, its number on the number stack.
     fn num(&mut self, e: &Expr) -> Done {
         match e {
@@ -277,9 +298,25 @@ impl Compiler {
             }
             Expr::Bin(op, l, r) => {
                 self.num(l)?;
-                self.num(r)?;
-                self.emit(Op::Bin(*op));
-                self.ns -= 1;
+                match **r {
+                    Expr::Num(k) => {
+                        self.emit(Op::BinK(*op, k));
+                    }
+                    _ => {
+                        self.num(r)?;
+                        self.emit(Op::Bin(*op));
+                        self.ns -= 1;
+                    }
+                }
+            }
+            Expr::Query(name, args) => {
+                for a in args.iter() {
+                    self.val(a)?;
+                }
+                let i = self.name(name);
+                self.emit(Op::QueryNum(i, args.len() as u16));
+                self.vs -= args.len() as u16;
+                self.ns += 1;
             }
             Expr::Math(f, args) => {
                 for a in args.iter() {
@@ -395,8 +432,9 @@ impl Compiler {
                 self.constant(Value::Num(0.0));
             }
             Expr::Return(inner) => {
-                self.val(inner)?;
-                self.emit(Op::Ret);
+                self.ret(inner)?;
+                // Never reached: counted as the value the expression stands for.
+                self.vs += 1;
             }
             Expr::Break | Expr::Continue => {
                 self.leave(matches!(e, Expr::Break));
@@ -439,6 +477,10 @@ impl Compiler {
     fn effect(&mut self, e: &Expr) -> Done {
         match e {
             Expr::Num(_) | Expr::Str(_) | Expr::Var(..) | Expr::Resource(..) | Expr::This => {}
+            Expr::Assign(scope, sym, rhs) if matches!(**rhs, Expr::Num(_)) => {
+                let Expr::Num(k) = **rhs else { unreachable!() };
+                self.emit(Op::SetNum(*scope, *sym, k));
+            }
             Expr::Assign(scope, sym, rhs) if numeric(rhs) => {
                 self.num(rhs)?;
                 self.emit(Op::AssignNum(*scope, *sym));
@@ -470,11 +512,7 @@ impl Compiler {
                 }
             }
             Expr::Loop(..) | Expr::ForEach(..) => self.looped(e)?,
-            Expr::Return(inner) => {
-                self.val(inner)?;
-                self.emit(Op::Ret);
-                self.vs -= 1;
-            }
+            Expr::Return(inner) => self.ret(inner)?,
             Expr::Break | Expr::Continue => self.leave(matches!(e, Expr::Break)),
             _ if numeric(e) => {
                 self.num(e)?;
@@ -568,6 +606,29 @@ fn bool(b: bool) -> f32 {
     if b { 1.0 } else { 0.0 }
 }
 
+/// `x op y` for the numeric binary operators.
+#[inline(always)]
+fn arith(op: BinOp, x: f32, y: f32) -> f32 {
+    match op {
+        BinOp::Add => x + y,
+        BinOp::Sub => x - y,
+        BinOp::Mul => x * y,
+        // Dividing by zero is an error in Molang, and errors are 0.
+        BinOp::Div => {
+            if y == 0.0 {
+                0.0
+            } else {
+                x / y
+            }
+        }
+        BinOp::Lt => bool(x < y),
+        BinOp::Le => bool(x <= y),
+        BinOp::Gt => bool(x > y),
+        BinOp::Ge => bool(x >= y),
+        BinOp::And | BinOp::Or | BinOp::Eq | BinOp::Ne => 0.0,
+    }
+}
+
 impl Code {
     /// Runs the program; `temps` are its `temp.*` variables.
     pub(super) fn run(&self, ctx: &mut EvalCtx, temps: &mut Vars) -> Value {
@@ -584,7 +645,8 @@ impl Code {
         let ops = &*self.ops;
         let (ns, vs, frames) = (&mut st.ns, &mut st.vs, &mut st.frames);
         let mut pc = 0usize;
-        let mut steps = 0u32;
+        // Rounds of loops run: only loops make a run long, and past the limit it is abandoned.
+        let mut rounds = 0u32;
         macro_rules! pop_num {
             () => {
                 ns.pop().unwrap_or_default()
@@ -603,10 +665,6 @@ impl Code {
                 return Value::Num(0.0);
             };
             pc += 1;
-            steps += 1;
-            if steps > STEP_LIMIT {
-                return Value::Num(0.0);
-            }
             match op {
                 Op::Num(n) => ns.push(n),
                 Op::VarNum(scope, sym) => {
@@ -627,25 +685,30 @@ impl Code {
                 Op::Bin(op) => {
                     let y = pop_num!();
                     let x = top_num!();
-                    *x = match op {
-                        BinOp::Add => *x + y,
-                        BinOp::Sub => *x - y,
-                        BinOp::Mul => *x * y,
-                        // Dividing by zero is an error in Molang, and errors are 0.
-                        BinOp::Div => {
-                            if y == 0.0 {
-                                0.0
-                            } else {
-                                *x / y
-                            }
-                        }
-                        BinOp::Lt => bool(*x < y),
-                        BinOp::Le => bool(*x <= y),
-                        BinOp::Gt => bool(*x > y),
-                        BinOp::Ge => bool(*x >= y),
-                        BinOp::And | BinOp::Or | BinOp::Eq | BinOp::Ne => 0.0,
+                    *x = arith(op, *x, y);
+                }
+                Op::BinK(op, y) => {
+                    let x = top_num!();
+                    *x = arith(op, *x, y);
+                }
+                Op::QueryNum(i, n) => {
+                    let name = &*self.names[i as usize];
+                    let at = vs.len().saturating_sub(n as usize);
+                    let args = &vs[at..];
+                    let v = match builtin_query(name, args) {
+                        Some(v) => v.num(),
+                        None => ctx.host.query(name, args).num(),
+                    };
+                    vs.truncate(at);
+                    ns.push(v);
+                }
+                Op::SetNum(scope, sym, n) => {
+                    match scope {
+                        Scope::Variable => ctx.vars.insert(sym, Value::Num(n)),
+                        Scope::Temp => temps.insert(sym, Value::Num(n)),
                     };
                 }
+                Op::RetNum => return Value::Num(pop_num!()),
                 Op::AndSkip(to) => {
                     if *top_num!() == 0.0 {
                         *top_num!() = 0.0;
@@ -752,10 +815,16 @@ impl Code {
                     let items = ctx.host.array(&self.names[i as usize]).unwrap_or_default();
                     frames.push(Frame::Items(items.into_iter().take(LOOP_LIMIT)));
                 }
-                Op::LoopNext(to) => match frames.last_mut() {
-                    Some(Frame::Count(left)) if *left > 0 => *left -= 1,
-                    _ => pc = to as usize,
-                },
+                Op::LoopNext(to) => {
+                    rounds += 1;
+                    if rounds > STEP_LIMIT {
+                        return Value::Num(0.0);
+                    }
+                    match frames.last_mut() {
+                        Some(Frame::Count(left)) if *left > 0 => *left -= 1,
+                        _ => pc = to as usize,
+                    }
+                }
                 Op::ForNext(scope, sym, to) => match frames.last_mut() {
                     Some(Frame::Items(items)) => match items.next() {
                         Some(item) => {
