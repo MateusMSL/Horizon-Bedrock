@@ -417,19 +417,26 @@ pub fn value(name: &str) -> Option<Choice> {
         .cloned()
 }
 
+/// `f` of the value now of the setting `name`, read in place: the queries below are asked many
+/// times a frame, and a copy of the value was an allocation each.
+fn with_value<R>(name: &str, f: impl FnOnce(Option<&Choice>) -> R) -> R {
+    let active = ACTIVE.read().unwrap_or_else(|e| e.into_inner());
+    f(active.as_ref().and_then(|a| a.values.get(name)))
+}
+
 /// `query.is_pack_setting_enabled('name')`: a toggle that is on.
 pub fn is_enabled(name: &str) -> bool {
-    matches!(value(name), Some(Choice::Flag(true)))
+    with_value(name, |v| matches!(v, Some(Choice::Flag(true))))
 }
 
 /// `query.is_pack_setting_selected('name', 'option')`: the dropdown shows `option`, or the
 /// multiselect has it on.
 pub fn is_selected(name: &str, option: &str) -> bool {
-    match value(name) {
+    with_value(name, |v| match v {
         Some(Choice::One(o)) => o == option,
         Some(Choice::Many(v)) => v.iter().any(|o| o == option),
         _ => false,
-    }
+    })
 }
 
 #[cfg(test)]

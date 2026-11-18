@@ -421,18 +421,14 @@ impl Host for MobHost<'_> {
                 let item = item_at(m, args.first());
                 let rest = || {
                     args.iter().skip(1).filter_map(|v| match v {
-                        Value::Str(s) => Some(horizon_bedrock::animation::lower(
-                            s.trim_start_matches("minecraft:"),
-                        )),
+                        Value::Str(s) => Some(horizon_bedrock::animation::lower(without_ns(s))),
                         _ => None,
                     })
                 };
                 match name {
-                    "get_equipped_item_name" => Value::Str(
-                        item.as_deref()
-                            .map_or("", |i| i.trim_start_matches("minecraft:"))
-                            .into(),
-                    ),
+                    "get_equipped_item_name" => {
+                        Value::Str(item.as_deref().map_or("", without_ns).into())
+                    }
                     "is_item_equipped" => Value::bool(item.is_some()),
                     "equipped_item_any_tag" => Value::bool(item.as_deref().is_some_and(|i| {
                         args.iter()
@@ -812,11 +808,21 @@ impl Host for MobHost<'_> {
 
 /// What `m` holds or wears in the slot a query names: `slot.weapon.mainhand`, `main_hand`, 0 (the
 /// main hand) or 1 (the off hand).
+/// `name` without its `minecraft:` namespaces (as `trim_start_matches` takes them), with no
+/// substring search set up: asked for each argument of the item queries, many times a frame.
+pub(super) fn without_ns(name: &str) -> &str {
+    let mut name = name;
+    while let Some(rest) = name.strip_prefix("minecraft:") {
+        name = rest;
+    }
+    name
+}
+
 /// The name a Bedrock pack knows a Java item by, without the namespace: the blocks Bedrock
 /// names otherwise (`magma_block` is `magma`, `jack_o_lantern` is `lit_pumpkin`, the snow
 /// block is `snow` and the snow layer `snow_layer`), else the Java name.
 pub(super) fn bedrock_item_name(java: &str) -> std::borrow::Cow<'_, str> {
-    let short = horizon_bedrock::animation::lower(java.trim_start_matches("minecraft:"));
+    let short = horizon_bedrock::animation::lower(without_ns(java));
     match &*short {
         "magma_block" => "magma",
         "jack_o_lantern" => "lit_pumpkin",
@@ -875,14 +881,14 @@ pub(super) fn item_at(m: &Mob, slot: Option<&Value>) -> Option<Arc<str>> {
         Value::Num(_) => "off_hand",
         _ => return None,
     };
-    slot_items(m, false)
+    slots(m, false)
         .into_iter()
-        .find_map(|(s, i)| (s == slot).then_some(i))
+        .find_map(|(s, i)| if s == slot { i.clone() } else { None })
 }
 
 /// The ticks an item can be used for at most (`query.main_hand_item_max_duration`).
 pub(super) fn max_use_ticks(item: Option<&str>) -> f32 {
-    let name = item.map_or("", |i| i.trim_start_matches("minecraft:"));
+    let name = item.map_or("", without_ns);
     match name {
         "crossbow" => 25.0,
         "potion" | "milk_bucket" | "honey_bottle" | "ominous_bottle" => 32.0,
@@ -1046,6 +1052,14 @@ pub(super) fn held_items(m: &Mob) -> Vec<(&'static str, Arc<str>)> {
 /// What each slot holds: as the pack's queries see it (`for_attachables` false: the sulfur
 /// cube's block in its main hand) or as attachables dress it.
 pub(super) fn slot_items(m: &Mob, for_attachables: bool) -> Vec<(&'static str, Arc<str>)> {
+    slots(m, for_attachables)
+        .into_iter()
+        .filter_map(|(slot, item)| Some((slot, item.clone()?)))
+        .collect()
+}
+
+/// Every slot [`slot_items`] reads, empty or not, without a copy of what they hold.
+fn slots(m: &Mob, for_attachables: bool) -> [(&'static str, &Option<Arc<str>>); 7] {
     let e = &m.extra;
     // A sulfur cube's block is the Java mob's body slot. Bedrock draws it as a block on the
     // cube's `rightitem` bone, never through an attachable (the generic held-block one would
@@ -1069,9 +1083,6 @@ pub(super) fn slot_items(m: &Mob, for_attachables: bool) -> Vec<(&'static str, A
         // What the body slot holds: a harness, a horse's armour, a llama's carpet.
         ("body", if cube { &None } else { &e.body }),
     ]
-    .into_iter()
-    .filter_map(|(slot, item)| Some((slot, item.clone()?)))
-    .collect()
 }
 
 /// `variable.historical_frame_<n>`'s members, as the game sets them on a dragon.
